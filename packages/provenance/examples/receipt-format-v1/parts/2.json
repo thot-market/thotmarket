@@ -1,0 +1,15 @@
+{
+  "sequence": 2,
+  "upstream": "https://api.anthropic.com",
+  "path": "/v1/messages",
+  "request_method": "POST",
+  "request_encoding": "identity",
+  "request_body_b64": "eyJtb2RlbCI6InN5bnRoZXRpYy1mb3JtYXQtZXhhbXBsZSIsIm1lc3NhZ2VzIjpbeyJyb2xlIjoidXNlciIsImNvbnRlbnQiOiJXaGF0IGlzIHRocmVlIHBsdXMgdGhyZWU/In1dLCJzdHJlYW0iOnRydWV9",
+  "response_body_b64": "ZXZlbnQ6IGNvbnRlbnRfYmxvY2tfZGVsdGEKZGF0YTogeyJ0eXBlIjoiY29udGVudF9ibG9ja19kZWx0YSIsImRlbHRhIjp7InR5cGUiOiJ0ZXh0X2RlbHRhIiwidGV4dCI6IlNpeC4ifX0KCmV2ZW50OiBtZXNzYWdlX3N0b3AKZGF0YTogeyJ0eXBlIjoibWVzc2FnZV9zdG9wIn0KCg==",
+  "status": 200,
+  "content_type": "text/event-stream",
+  "started_at": "2026-09-12T12:00:02.000Z",
+  "finished_at": "2026-09-12T12:00:03.000Z",
+  "complete": true,
+  "commitment": "a16d069866f083b19c6fd74538ea3aef7fcc88dad16475b2d87551159d9e178b"
+}

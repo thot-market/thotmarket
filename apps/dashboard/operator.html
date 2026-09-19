@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f1e7">
+    <title>THOT operations</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/operator.css">
+    <script type="module" src="/operator-app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to operations</a>
+    <div class="workspace operator-workspace">
+      <header class="topbar">
+        <div class="environment"><span class="status-dot"></span>Private operator console</div>
+        <div class="session-control">
+          <a href="/app" class="button secondary small">Marketplace</a>
+          <span id="operator-identity" class="mono">No verified session</span>
+          <button class="icon-button" data-action="refresh" aria-label="Refresh observations" disabled>↻</button>
+          <button class="button secondary small" data-action="sign-out" hidden>Sign out</button>
+        </div>
+      </header>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <main id="main" tabindex="-1"><div class="loading"><span class="spinner"></span><p>Checking operator session…</p></div></main>
+      <footer class="page-footer"><span>THOT operations · access is verified per wallet session.</span></footer>
+    </div>
+    <dialog id="detail-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <noscript><p class="notice">Enable JavaScript to access THOT operations.</p></noscript>
+  </body>
+</html>

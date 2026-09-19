@@ -1,0 +1,33 @@
+{
+  "name": "@thotmarket/cli",
+  "version": "0.1.0-staging.1",
+  "description": "Capture Claude Code and Codex sessions to your private Thot vault",
+  "type": "module",
+  "bin": {
+    "thot": "bin/thot.js"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "files": [
+    "bin/",
+    "runtime/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "prepack": "node build.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "staging"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thot-market/thotmarket.git",
+    "directory": "packages/thot-cli"
+  },
+  "author": "Thot Market"
+}

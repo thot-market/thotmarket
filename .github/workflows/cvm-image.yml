@@ -1,0 +1,170 @@
+name: Publish reviewed CVM image
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing reviewed annotated flattened RC or release tag
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: cvm-image-${{ inputs.tag }}
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: vars.CVM_IMAGE_RELEASE_ENABLED == 'true'
+    environment: cvm-image-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      IMAGE_NAME: ghcr.io/thot-market/thotmarket
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate dispatch target before checkout
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'thot-market/thotmarket'
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$ ]]
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Bind build source to annotated tag and dispatch revision
+        run: |
+          set -euo pipefail
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          node scripts/check-release-git-identity.mjs --tag "$RELEASE_TAG"
+          node scripts/check-public-branding.mjs
+      - name: Download pinned DCAP verifier
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools"
+          curl --fail --location --silent --show-error --retry 3 \
+            --output "$RUNNER_TEMP/tools/dcap-qvl-linux-x86_64-musl" \
+            https://github.com/Phala-Network/dcap-qvl/releases/download/v0.6.1/dcap-qvl-linux-x86_64-musl
+          echo '84bd935e37decbace7a902da2680d7486caca954438bb3196c8da8ed91f26d7b  '"$RUNNER_TEMP/tools/dcap-qvl-linux-x86_64-musl" | sha256sum --check --status
+      - name: Create and verify public image snapshot
+        id: snapshot
+        run: |
+          set -euo pipefail
+          node scripts/build-thot-image.mjs --source "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/thot-image-snapshot" \
+            --verifier "$RUNNER_TEMP/tools/dcap-qvl-linux-x86_64-musl" > "$RUNNER_TEMP/snapshot.json"
+          snapshot_hash=$(jq -r .manifest_sha256 "$RUNNER_TEMP/snapshot.json")
+          source_hash=$(jq -r .source_sha256 "$RUNNER_TEMP/snapshot.json")
+          node scripts/build-thot-image.mjs --snapshot "$RUNNER_TEMP/thot-image-snapshot" \
+            --expected-manifest-sha256 "$snapshot_hash" > /dev/null
+          echo "manifest_sha256=$snapshot_hash" >> "$GITHUB_OUTPUT"
+          echo "source_sha256=$source_hash" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Authenticate to GHCR
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Build and publish reviewed snapshot
+        id: publish
+        env:
+          SOURCE_SHA256: ${{ steps.snapshot.outputs.source_sha256 }}
+        run: |
+          set -euo pipefail
+          image_tag="git-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build --platform linux/amd64 --push --provenance=false \
+            --metadata-file "$RUNNER_TEMP/image-metadata.json" \
+            --file "$RUNNER_TEMP/thot-image-snapshot/Dockerfile.build" \
+            --build-context "verifier=$RUNNER_TEMP/thot-image-snapshot/verifier" \
+            --build-arg "THOT_SOURCE_REVISION=content-sha256:$SOURCE_SHA256" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.source.digest=sha256:$SOURCE_SHA256" \
+            --tag "$IMAGE_NAME:$image_tag" "$RUNNER_TEMP/thot-image-snapshot/source"
+          digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[a-f0-9]{64}$"))' "$RUNNER_TEMP/image-metadata.json")
+          image_id=$(jq -er '."containerimage.config.digest" | select(test("^sha256:[a-f0-9]{64}$"))' "$RUNNER_TEMP/image-metadata.json")
+          docker buildx imagetools inspect "$IMAGE_NAME@$digest" > /dev/null
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "image_id=$image_id" >> "$GITHUB_OUTPUT"
+      - name: Record exact source, build, and registry digest
+        env:
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE_ID: ${{ steps.publish.outputs.image_id }}
+          SNAPSHOT_SHA256: ${{ steps.snapshot.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" --arg tag "$RELEASE_TAG" \
+            --arg commit "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" \
+            --arg ref "$GITHUB_REF" --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" --arg image "$IMAGE_NAME" \
+            --arg digest "$IMAGE_DIGEST" --arg imageId "$IMAGE_ID" \
+            --arg snapshotManifestSha256 "$SNAPSHOT_SHA256" \
+            --slurpfile snapshot "$RUNNER_TEMP/thot-image-snapshot/manifest.json" \
+            '{repository:$repository,tag:$tag,commit:$commit,event:$event,ref:$ref,runId:$runId,runAttempt:$runAttempt,image:$image,digest:$digest,imageId:$imageId,snapshotManifestSha256:$snapshotManifestSha256,snapshot:$snapshot[0]}' \
+            > "$RUNNER_TEMP/image-release-input.json"
+          mkdir "$RUNNER_TEMP/image-release"
+          node scripts/image-release-record.mjs "$RUNNER_TEMP/image-release-input.json" "$RUNNER_TEMP/image-release/image-release.json"
+          cp "$RUNNER_TEMP/thot-image-snapshot/manifest.json" "$RUNNER_TEMP/image-release/build-snapshot-manifest.json"
+      - name: Check attestation availability
+        id: attestation-gate
+        run: |
+          set -euo pipefail
+          visibility=$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)
+          case "$visibility" in
+            public) echo 'public=true' >> "$GITHUB_OUTPUT" ;;
+            private|internal) echo 'public=false' >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unexpected repository visibility: $visibility" >&2; exit 1 ;;
+          esac
+      - name: Attest pushed OCI manifest digest
+        id: image-attestation
+        if: steps.attestation-gate.outputs.public == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ghcr.io/thot-market/thotmarket
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Attest release record
+        id: record-attestation
+        if: steps.attestation-gate.outputs.public == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/image-release/image-release.json
+      - name: Retain review evidence
+        env:
+          PUBLIC_REPOSITORY: ${{ steps.attestation-gate.outputs.public }}
+          IMAGE_BUNDLE: ${{ steps.image-attestation.outputs.bundle-path }}
+          RECORD_BUNDLE: ${{ steps.record-attestation.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          files=(build-snapshot-manifest.json image-release.json attestation-status.json)
+          if [ "$PUBLIC_REPOSITORY" = 'true' ]; then
+            test -s "$IMAGE_BUNDLE"
+            test -s "$RECORD_BUNDLE"
+            cp "$IMAGE_BUNDLE" "$RUNNER_TEMP/image-release/image.sigstore.json"
+            cp "$RECORD_BUNDLE" "$RUNNER_TEMP/image-release/image-release.sigstore.json"
+            jq -n '{status:"bundles-retained",verification:"not-performed"}' > "$RUNNER_TEMP/image-release/attestation-status.json"
+            files+=(image.sigstore.json image-release.sigstore.json)
+          else
+            test "$PUBLIC_REPOSITORY" = 'false'
+            jq -n '{status:"not-issued",reason:"private-repository"}' > "$RUNNER_TEMP/image-release/attestation-status.json"
+          fi
+          (cd "$RUNNER_TEMP/image-release" && sha256sum "${files[@]}" > SHA256SUMS)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cvm-image-${{ inputs.tag }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/image-release/
+          if-no-files-found: error
+          retention-days: 90

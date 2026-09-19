@@ -1,0 +1,8 @@
+{
+  "schema_version": "thot.clerk-auth/1",
+  "issuer": "https://REPLACE_WITH_CLERK_FRONTEND_HOST",
+  "publishable_key": "REPLACE_WITH_CLERK_PUBLISHABLE_KEY",
+  "authorized_parties": ["http://localhost:4318"],
+  "invited_emails": ["REPLACE_WITH_INVITED_EMAIL"],
+  "rate_limits": {"requests_per_minute": 180, "mutations_per_minute": 60}
+}

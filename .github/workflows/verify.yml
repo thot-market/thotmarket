@@ -1,0 +1,88 @@
+name: Public source checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+concurrency:
+  group: public-source-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  suites:
+    name: Public tests (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [unit, contracts, evidence, browser, packaging]
+    services:
+      storage-postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: storage-ci-fixture
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      THOT_STORAGE_TEST_DATABASE_URL: postgres://postgres:storage-ci-fixture@127.0.0.1:5432/postgres
+      THOT_MONEY_POOL: local-v2
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.34.5
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm --dir contracts install --frozen-lockfile --ignore-scripts
+      - run: node scripts/check-public-branding.mjs
+      - run: pnpm build
+      - uses: foundry-rs/foundry-toolchain@v1
+        if: matrix.suite == 'contracts' || matrix.suite == 'browser'
+        with:
+          version: v1.7.1
+          cache: false
+      - uses: actions/setup-python@v5
+        if: matrix.suite == 'evidence'
+        with:
+          python-version: '3.12'
+      - name: Install offline verifier dependencies
+        if: matrix.suite == 'evidence'
+        run: |
+          python -m venv work/dcap
+          python -m venv work/portable
+          python -m venv work/trade
+          work/dcap/bin/pip install --require-hashes --only-binary=:all: -r packages/provenance/requirements.txt
+          work/portable/bin/pip install --require-hashes --only-binary=:all: -r packages/provenance/portable/requirements.txt
+          work/trade/bin/pip install --require-hashes --only-binary=:all: -r packages/provenance/trade-test-requirements.txt
+          echo "THOT_DCAP_TEST_PYTHON=$GITHUB_WORKSPACE/work/dcap/bin/python" >> "$GITHUB_ENV"
+          echo "THOT_PORTABLE_DCAP_TEST_PYTHON=$GITHUB_WORKSPACE/work/portable/bin/python" >> "$GITHUB_ENV"
+          echo "THOT_TRADE_TEST_PYTHON=$GITHUB_WORKSPACE/work/trade/bin/python" >> "$GITHUB_ENV"
+      - name: Install browser recording dependencies
+        if: matrix.suite == 'browser'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb ffmpeg
+          echo 'THOT_E2E_BROWSER=/usr/bin/google-chrome' >> "$GITHUB_ENV"
+      - name: Run declared exported suite
+        env:
+          PUBLIC_SUITE: ${{ matrix.suite }}
+        run: node scripts/run-public-tests.mjs "$PUBLIC_SUITE"
+  verify:
+    name: Public source verification
+    needs: suites
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every public suite
+        env:
+          SUITE_RESULT: ${{ needs.suites.result }}
+        run: test "$SUITE_RESULT" = success

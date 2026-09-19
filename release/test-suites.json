@@ -1,0 +1,123 @@
+{
+  "format": "thot.public-test-suites/1",
+  "suites": {
+    "unit": {
+      "node": [
+        "tests/auth.test.ts",
+        "tests/wallet-auth.test.ts",
+        "tests/wallet-auth-api.test.ts",
+        "tests/wallet-auth-ui.test.ts",
+        "tests/privacy.test.ts",
+        "tests/integration-privacy.test.ts",
+        "tests/migrations.test.ts",
+        "tests/ciphertext-store.test.ts",
+        "tests/s3-store.test.ts",
+        "tests/remote-vault.test.ts",
+        "tests/vault-quotas.test.ts",
+        "tests/http-resource-guards.test.ts",
+        "tests/api-admission.test.ts",
+        "tests/recorder-authorization.test.ts",
+        "tests/recorder-assessment.test.ts",
+        "tests/capture-durability.test.ts",
+        "tests/staged-storage.test.ts",
+        "tests/staged-storage-postgres.test.ts",
+        "tests/capture-sync.test.ts",
+        "tests/capture-incremental.test.ts",
+        "tests/tee-capture.test.ts",
+        "tests/tee-incremental.test.ts",
+        "tests/receipt-format.test.ts",
+        "tests/delivery-links.test.ts",
+        "tests/worker-lifecycle.test.ts",
+        "tests/dashboard-session.test.ts",
+        "tests/thot-trade-evidence-ui.test.mjs",
+        "tests/thot-ui.test.mjs",
+        "tests/thot-valuations.test.ts",
+        "tests/staking-ui.test.mjs",
+        "tests/thot-campaign-ui.test.mjs",
+        "tests/near-privacy.test.ts",
+        "tests/security-boundaries.test.ts",
+        "tests/thot-host-runtime.test.ts",
+        "tests/thot-readonly-delivery.test.ts",
+        "tests/storage-operations.test.ts",
+        "tests/cvm-prestart.test.ts",
+        "tests/encrypted-backup.test.ts",
+        "tests/operator-storage-recovery.test.ts",
+        "tests/holder-fees-ui.test.mjs"
+      ]
+    },
+    "contracts": {
+      "requires": [
+        "anvil"
+      ],
+      "node": [
+        "contracts/test/contracts.test.mjs",
+        "contracts/test/thot-mechanism.test.mjs",
+        "contracts/test/thot-governor.test.mjs",
+        "contracts/test/thot-quoted-economics.test.mjs",
+        "contracts/test/thot-campaign-reserve.test.mjs",
+        "contracts/test/thot-fee-discounts.test.mjs",
+        "contracts/test/thot-exit-audit.test.mjs",
+        "contracts/test/thot-failure-isolation.test.mjs",
+        "tests/anvil-money.integration.mjs",
+        "tests/money-ui.test.mjs",
+        "tests/thot-chain-guard.integration.mjs",
+        "tests/thot-market.integration.mjs",
+        "tests/thot-preview.integration.mjs",
+        "tests/thot-automatic.integration.mjs",
+        "tests/thot-streams.integration.mjs",
+        "tests/thot-reserve-buyer.integration.mjs",
+        "tests/thot-governance.integration.mjs",
+        "contracts/test/thot-staking-pool.test.mjs",
+        "contracts/test/thot-treasury.test.mjs",
+        "contracts/test/thot-percentage-fees.test.mjs",
+        "contracts/test/thot-holder-rewards.test.mjs"
+      ]
+    },
+    "evidence": {
+      "requires": [
+        "dcap",
+        "portable-dcap",
+        "trade-python"
+      ],
+      "node": [
+        "tests/provenance-dcap.test.ts",
+        "tests/provenance-upstream.test.ts",
+        "tests/portable-dcap.test.mjs",
+        "tests/chunked-export.test.mjs",
+        "tests/capture-proof-oracle.test.mjs",
+        "tests/thot-trade-evidence.test.ts"
+      ],
+      "python": [
+        "trace-vault/tests/test_traded_outcome.py",
+        "trace-vault/tests/test_traded_verifier.py",
+        "trace-vault/tests/test_browser_capture.py",
+        "trace-vault/tests/test_browser_trade_capture.py",
+        "trace-vault/tests/test_trade_appraisal_transport.py",
+        "trace-vault/tests/test_appraisal_transport.py",
+        "trace-vault/tests/test_link_capture.py",
+        "trace-vault/tests/test_link_ticket.py",
+        "trace-vault/tests/test_robinhood_link.py"
+      ]
+    },
+    "browser": {
+      "requires": [
+        "anvil",
+        "browser"
+      ],
+      "node": [
+        "tests/e2e/anvil-money.browser.mjs"
+      ]
+    },
+    "packaging": {
+      "node": [
+        "tests/private-image-bootstrap.test.mjs",
+        "tests/private-image-package.test.mjs",
+        "tests/thot-build-snapshot.test.mjs",
+        "tests/cvm-image-provenance.test.mjs",
+        "tests/thot-cli-package.test.mjs",
+        "tests/public-runtime-scope.test.mjs",
+        "tests/public-site-inputs.test.ts"
+      ]
+    }
+  }
+}

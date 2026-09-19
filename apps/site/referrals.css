@@ -1,0 +1,91 @@
+.referral-overline{font-size:15px;color:var(--muted);margin-bottom:18px}
+.referral-small{font-size:13px;line-height:1.65;color:var(--muted);margin-top:16px;max-width:540px}
+.affiliate-hero{display:grid;grid-template-columns:1.2fr .85fr;gap:90px;align-items:center;padding-block:70px 110px}
+.affiliate-intro h1{font-size:clamp(58px,6.5vw,88px);line-height:1;letter-spacing:-.055em}
+.affiliate-lede{font-size:20px;line-height:1.6;max-width:540px;margin:27px 0 32px;color:#49513f}
+.affiliate-receipt{position:relative;background:var(--paper-light);border:1px solid var(--line);padding:25px 32px 32px;transform:rotate(2deg);box-shadow:8px 14px 0 #e9ead6}
+.affiliate-receipt::after{content:'';position:absolute;left:-1px;right:-1px;bottom:-13px;height:13px;background:var(--paper-light);clip-path:polygon(0 0,100% 0,100% 100%,95% 0,90% 100%,85% 0,80% 100%,75% 0,70% 100%,65% 0,60% 100%,55% 0,50% 100%,45% 0,40% 100%,35% 0,30% 100%,25% 0,20% 100%,15% 0,10% 100%,5% 0,0 100%)}
+.affiliate-receipt .receipt-heading img{width:64px;height:64px}
+.affiliate-receipt>p{font-size:14px;color:#536049}
+.referral-rate{font-family:var(--display);font-size:135px;line-height:1.1;letter-spacing:-.08em;font-weight:750;margin-top:20px;color:var(--moss)}
+.referral-rate span{font-size:75px;letter-spacing:-.04em}
+.affiliate-receipt h2{font-size:26px;line-height:1.25;margin:7px 0 26px;letter-spacing:-.035em}
+.receipt-divider{border-top:1px dashed #a3a88f;margin-bottom:18px}
+.affiliate-receipt .referral-receipt-foot{margin-top:19px;padding:12px;background:#e9efd4;color:var(--ink);font-size:13px}
+.referral-section-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:45px;margin-bottom:40px}
+.referral-section-heading>p,.referral-section-heading>div>p:not(.referral-overline){color:var(--muted);font-size:15px;max-width:390px;margin-top:12px}
+.referral-section-heading h2{font-size:clamp(34px,4vw,52px)}
+.referral-steps-section{padding-bottom:95px}
+.referral-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:45px}
+.referral-steps li{border-top:1px solid var(--line);padding-top:24px}
+.referral-steps h3{font-size:25px;margin:22px 0 14px}
+.referral-steps p{font-size:15px;color:#536049}
+.referral-calculator-section{background:#e9ecd8;padding-block:82px}
+.referral-calculator{display:grid;grid-template-columns:1fr 1fr;border:1px solid #b8c0a3;border-radius:18px;overflow:hidden;background:var(--paper-light)}
+.calculator-inputs{padding:36px 40px;border-right:1px solid var(--line)}
+.evidence-tag{display:inline-block;padding:5px 11px;border:1px solid #a7b88f;border-radius:5px;font-size:12px;font-weight:650;color:#3e552e;background:#f0f4df;line-height:1.5}
+.calculator-inputs label{display:block;font-size:16px;font-weight:600;margin:30px 0 12px}
+.sales-input-row{display:flex;align-items:baseline;gap:15px;border-bottom:1px solid #9aa58a;padding-bottom:14px}
+.sales-input-row input{font-family:var(--display);font-size:52px;line-height:1.2;font-weight:650;min-width:0;width:100%;border:0;background:transparent;color:var(--ink);border-radius:0;padding:0;appearance:textfield;-moz-appearance:textfield}
+.sales-input-row input::-webkit-inner-spin-button{appearance:none}
+.sales-input-row>span{font-size:16px;color:var(--muted)}
+.sales-presets{display:flex;gap:9px;margin-top:18px}
+.sales-presets button{cursor:pointer;border:1px solid #bec6af;background:transparent;color:var(--ink);border-radius:5px;padding:7px 15px;font-size:14px;min-height:40px}
+.sales-presets button[aria-pressed=true]{background:var(--moss);color:var(--paper-light);border-color:var(--moss)}
+.calculator-receipt{padding:31px 36px}
+.calculation-lines>div{display:flex;justify-content:space-between;gap:18px;font-size:14px;padding:10px 0}
+.calculation-lines dd{font-weight:650;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.calculation-lines>div:nth-child(3){border-top:1px dashed #b4baa3;margin-top:7px;padding-top:16px}
+.calculator-result{background:var(--acid);padding:19px 22px;margin-top:21px;border-radius:7px;color:var(--ink)}
+.calculator-result>span{font-size:13px;font-weight:600}
+.calculator-result strong{display:block;font-size:48px;font-family:var(--display);font-weight:700;line-height:1.3;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.calculator-result small{font-family:var(--body);font-size:15px;letter-spacing:0;font-weight:550}
+.calculator-result p{font-size:12px;margin-top:5px}
+.calculator-caption{font-size:12px;margin-top:20px;color:#536049;max-width:900px}
+.proof-section{padding-block:85px}
+.proof-board{border:1px solid var(--line);border-radius:14px;background:var(--paper-light);overflow:hidden}
+.proof-board-heading{display:flex;align-items:center;justify-content:space-between;padding:23px 28px;border-bottom:1px solid var(--line);gap:20px}
+.proof-board-heading h3{font-size:23px}
+.proof-board-heading>span{font-size:12px;color:var(--muted)}
+.proof-empty{padding:28px;color:#536049;font-size:15px}
+.proof-row{display:grid;grid-template-columns:1.1fr 1fr auto;align-items:center;gap:20px;padding:20px 28px;border-bottom:1px solid #e3e4d6;font-size:14px}
+.proof-row:last-child{border:0}
+.proof-row strong{font-size:16px;display:block;font-weight:600}
+.proof-row small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+.proof-row a{font-weight:600;white-space:nowrap;font-size:13px}
+.proof-amount{font-variant-numeric:tabular-nums}
+.proof-caption{font-size:12px;color:var(--muted);max-width:850px;margin:18px 0}
+.affiliate-faq{display:grid;grid-template-columns:.8fr 1.3fr;gap:90px;align-items:start;padding:25px 0 100px}
+.affiliate-faq .privacy-details{padding-top:0}
+.tool-demo-section{padding-block:65px 85px}
+.tool-demo{border:1px solid var(--line);background:var(--paper-light);border-radius:18px;display:grid;grid-template-columns:1.15fr 1fr;overflow:hidden}
+.tool-demo-work{padding:31px 38px;background:#edf0dc;border-right:1px solid var(--line)}
+.tool-choices{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:28px}
+.tool-choices button{padding:9px 14px;border:1px solid #adb99b;border-radius:6px;background:transparent;color:var(--moss);font-size:14px;font-weight:600;cursor:pointer}
+.tool-choices button[aria-pressed=true]{background:var(--moss);color:var(--paper-light);border-color:var(--moss)}
+.tool-demo-work h3{font-size:30px;line-height:1.2;max-width:390px;margin-bottom:17px}
+.tool-demo-work>p{font-size:15px;max-width:430px;color:#536049}
+.tool-connection{margin-top:26px;border-block:1px solid #cbd2ba;padding:16px 0;display:flex;justify-content:space-between;gap:15px;font-size:13px}
+.tool-connection strong{font-weight:650;text-align:right}
+.tool-demo-work ol{margin:22px 0 0;padding-left:20px;font-size:14px;color:#43523a}
+.tool-demo-work li+li{margin-top:8px}
+.tool-demo-sale{padding:30px 36px}
+.tool-demo-sale h3{font-size:23px;margin:16px 0 14px}
+.trace-price-field{display:flex;align-items:center;justify-content:space-between;gap:15px;padding-bottom:18px;border-bottom:1px dashed var(--line);margin-bottom:12px}
+.trace-price-field label{font-size:14px}
+.trace-price-field>div{display:flex;align-items:center;gap:9px}
+.trace-price-field input{width:110px;border:1px solid var(--line);border-radius:5px;background:var(--paper);padding:8px;font-size:19px;font-weight:600;color:var(--ink)}
+.trace-price-field span{font-size:12px;color:var(--muted)}
+.tool-demo-sale .calculator-result strong{font-size:43px}
+.tool-demo-sale .referral-small{font-size:12px}
+.referral-teaser{padding-block:65px}
+.referral-teaser-inner{display:grid;grid-template-columns:1.2fr .8fr;gap:70px;padding:45px 50px;background:#e9ecd8;border:1px solid #d0d5bd;border-radius:15px;align-items:center}
+.referral-teaser h2{font-size:clamp(32px,3.8vw,49px);margin-bottom:18px}
+.referral-teaser p{font-size:16px;max-width:540px;color:#4b5740;margin-bottom:22px}
+.referral-teaser-benefit{border-left:1px dashed #abb693;padding-left:50px}
+.referral-teaser-benefit strong{font-family:var(--display);font-size:94px;line-height:1;letter-spacing:-.07em;color:var(--moss)}
+.referral-teaser-benefit p{font-size:17px;max-width:250px;margin:14px 0 0}
+.referral-teaser-benefit small{display:block;font-size:12px;color:var(--muted);margin-top:13px}
+@media(max-width:1000px){.affiliate-hero{gap:40px;grid-template-columns:1.1fr 1fr}.affiliate-intro h1{font-size:65px}.affiliate-lede{font-size:18px}.affiliate-receipt{padding:22px}.calculator-inputs,.calculator-receipt{padding:27px}.affiliate-faq{gap:45px}.referral-teaser-inner{gap:35px;padding:35px}.referral-teaser-benefit{padding-left:30px}.tool-demo-work,.tool-demo-sale{padding:26px}.tool-demo-work h3{font-size:27px}.main-nav{gap:18px}}
+@media(max-width:720px){.affiliate-hero{grid-template-columns:1fr;gap:45px;padding-block:35px 75px}.affiliate-intro h1{font-size:61px}.affiliate-receipt{max-width:440px;width:100%;justify-self:center;transform:rotate(1deg)}.referral-rate{font-size:105px}.affiliate-lede{font-size:18px}.referral-section-heading{display:block;margin-bottom:29px}.referral-section-heading>p,.referral-section-heading>div+div{margin-top:20px}.referral-steps{grid-template-columns:1fr;gap:25px}.referral-steps li{display:grid;grid-template-columns:38px 1fr;column-gap:18px}.referral-steps h3{margin:3px 0 10px}.referral-steps p{grid-column:2}.referral-steps-section{padding-bottom:60px}.referral-calculator-section{padding-block:55px}.referral-calculator{grid-template-columns:1fr}.calculator-inputs{border-right:0;border-bottom:1px solid var(--line);padding:25px}.calculator-receipt{padding:25px}.sales-input-row input{font-size:44px}.proof-section{padding-block:55px}.proof-board-heading{padding:19px;align-items:flex-start;flex-direction:column;gap:6px}.proof-row{grid-template-columns:1fr auto;gap:12px;padding:20px}.proof-row a{grid-column:1/-1}.affiliate-faq{grid-template-columns:1fr;gap:28px;padding-bottom:60px}.tool-demo-section{padding-block:35px 55px}.tool-demo{grid-template-columns:1fr}.tool-demo-work{border-right:0;border-bottom:1px solid var(--line)}.tool-demo-work,.tool-demo-sale{padding:23px}.tool-demo-work h3{font-size:29px}.referral-teaser{padding-block:40px}.referral-teaser-inner{grid-template-columns:1fr;padding:25px;gap:27px}.referral-teaser-benefit{border-left:0;border-top:1px dashed #abb693;padding:22px 0 0;display:grid;grid-template-columns:auto 1fr;gap:5px 25px;align-items:center}.referral-teaser-benefit strong{font-size:70px}.referral-teaser-benefit p{margin:0;font-size:15px}.referral-teaser-benefit small{grid-column:1/-1}.calculator-result strong{font-size:40px}.affiliate-intro .button{white-space:normal;text-align:center}.referral-page .main-nav{display:flex;flex-wrap:wrap;justify-content:center;gap:15px}.referral-page .site-header{flex-wrap:wrap;padding-block:14px;gap:15px}.referral-page .main-nav{order:3;width:100%}}
+@media(prefers-reduced-motion:reduce){.affiliate-receipt{transform:none}}

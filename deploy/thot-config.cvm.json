@@ -1,0 +1,14 @@
+{
+  "verifierExecutable": "/usr/bin/python3",
+  "verifierArgs": [
+    "/app/trace-vault/robinhood_link.py",
+    "--verify-credential",
+    "--dcap-qvl",
+    "/usr/local/bin/dcap-qvl",
+    "--measurements",
+    "/app/trace-vault/deploy/robinhood-measurements.json"
+  ],
+  "witnessUrl": "https://witness.example.invalid",
+  "appraiserUrl": "https://appraiser.example.invalid",
+  "timeoutMs": 60000
+}

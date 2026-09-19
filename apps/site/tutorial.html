@@ -1,0 +1,168 @@
+<!doctype html>
+<!-- Generated from ROBINHOOD_TRADE_PROOF.md; sha256:bae780d9cf97ce649241ed7851b3b14769b8ef0b1e4156cb6e53cc6cab29f14e. Run node scripts/render-launch-docs.ts. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f4e5">
+  <title>How a research trace gets a Robinhood trade proof — thot market</title>
+  <meta name="description" content="How a private research trace gets a bounded, hardware-attested Robinhood trade property.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="How a research trace gets a Robinhood trade proof">
+  <meta property="og:description" content="How a private research trace gets a bounded, hardware-attested Robinhood trade property.">
+  <meta property="og:image" content="https://thot.market/assets/thot-feast.jpg">
+  <meta property="og:url" content="https://thot.market/tutorial">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://thot.market/tutorial">
+  <link rel="icon" type="image/png" href="/assets/thot-logo.png">
+  <link rel="preload" href="/assets/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/site.css">
+  <link rel="stylesheet" href="/reading.css">
+  <script src="/site.js" defer></script>
+</head>
+<body class="reading-page tutorial-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="/" aria-label="thot market home"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="/read">The idea</a><a href="/tutorial" aria-current="page">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/whitepaper">Whitepaper</a></nav>
+    <div class="header-actions"><a class="trade-link" data-token-link href="/#token" hidden>Trade THOT <span aria-hidden="true">↗</span></a><a class="button button-small" href="/app">Open app</a></div>
+  </header>
+  <main class="reading-main wrap" id="main">
+    <div class="reading-topline"><a href="/">Back to thot market</a><span>Trade-proof tutorial</span></div>
+    <div class="reading-layout">
+      <aside class="reading-aside" aria-label="Tutorial contents">
+        <h2>In this tutorial</h2>
+        <ol>
+          <li><a href="#before-you-upload-or-start-recording">Before you upload or start recording</a></li>
+          <li><a href="#what-the-proof-says">What the proof says</a></li>
+          <li><a href="#add-a-trade-proof-in-a-configured-test-workspace">Add a trade proof in a configured test workspace</a></li>
+          <li><a href="#what-happens-inside-the-private-path">What happens inside the private path</a></li>
+          <li><a href="#what-remains-private">What remains private</a></li>
+          <li><a href="#how-a-buyer-uses-it">How a buyer uses it</a></li>
+          <li><a href="#current-limits">Current limits</a></li>
+          <li><a href="#what-has-been-demonstrated">What has been demonstrated</a></li>
+        </ol>
+        <a class="reading-aside-bottom" href="/app">Open the test app</a>
+      </aside>
+      <div>
+        <article class="reading-prose" aria-labelledby="article-title" id="trade-proof-tutorial">
+<h1 id="article-title">How a research trace gets a Robinhood trade proof</h1>
+<p><strong>A trade is the conclusion. The trace is the work behind it.</strong></p>
+<p>The candidate integration can attach a narrow, marketplace-verified Robinhood property to one scrubbed, licensed research release without publishing the contributor’s order history. A buyer can review the bounded claim, pay in THOT, and receive the committed research. Before payment, an ordinary buyer sees no excerpt from the research. This joined path has passed local acceptance with signed synthetic brokerage fixtures and Anvil; a fresh hosted Robinhood-to-purchase run is still required.</p>
+<p><img src="/assets/robinhood-trade-proof-flow.svg" alt="A private trace moves through a witnessed Robinhood session and an attested appraiser before a buyer filters and pays." /></p>
+<h2 id="before-you-upload-or-start-recording">Before you upload or start recording</h2>
+<p>We recommend removing personal information you do not want to share: names, email addresses, phone numbers, home addresses and account identifiers. Check pasted tool output and conversation history for passwords, API keys and other secrets too. Keep the reasoning, code and research context that make the trace useful.</p>
+<p>This is a suggestion, not an extra upload requirement or approval step. For an ordinary conversation-file import, review a copy before uploading. For continuous Codex, Claude Code or OpenRouter capture, choose a suitable project and conversation history before starting: material sent to the model, including tool results, can become part of the recording. Keep sensitive work outside that recorded session. Do not edit a signed recording or its proof package; that would break its provenance.</p>
+<p>Our current release checks mask common emails, phone numbers and known credential patterns. They can miss sensitive information; storing a trace privately does not remove that information. A completed sale delivers the licensed trace to its buyer.</p>
+<p><a href="https://openai.com/index/introducing-openai-privacy-filter/" rel="noopener noreferrer">OpenAI Privacy Filter</a> is an optional tool for contextual detection of personal information in text and can run locally. It is not yet running in thot market's hosted processing pipeline. It does not cover every identifier or information contained in images and attachments.</p>
+<h2 id="what-the-proof-says">What the proof says</h2>
+<p>One current proof looks like this:</p>
+<pre class="json"><code>{
+  &quot;claim&quot;: &quot;traded:F:within_30d&quot;,
+  &quot;symbol&quot;: &quot;F&quot;,
+  &quot;window_days&quot;: 30,
+  &quot;value&quot;: true,
+  &quot;scope&quot;: &quot;observed_records&quot;,
+  &quot;reference_time_basis&quot;: &quot;trace-observed-start&quot;,
+  &quot;account_continuity&quot;: &quot;not-established&quot;,
+  &quot;research_causality&quot;: &quot;not-established&quot;
+}</code></pre>
+<p>Its precise meaning is:</p>
+<blockquote>
+<p>Witnessed Robinhood records contained a filled buy or sell of F within an absolute ±30-day window around the trace timestamp.</p>
+</blockquote>
+<p>The proof does <strong>not</strong> say that the research caused the trade, that the research came first, or that the trade was profitable. It does not establish a balance, return, Sharpe ratio, complete account history, or continuing control of the same account.</p>
+<p>That narrowness is useful. A buyer can ask for an observable property without receiving an account statement or trusting a profile claim.</p>
+<h2 id="add-a-trade-proof-in-a-configured-test-workspace">Add a trade proof in a configured test workspace</h2>
+<ol type="1">
+<li><p>Open <strong>Market</strong>, choose one of your traces, and select <strong>Add trade proof</strong>.</p></li>
+<li><p>Enter a ticker and a window from 1 to 365 days.</p></li>
+<li><p>Open the <a href="/app">test workspace</a> for its one-time helper setup, then run the scoped command shown by thot market on the computer where you already use Robinhood. Use the native app origin shown in your workspace, not the public landing-page domain. It follows this form:</p>
+<pre class="sh"><code>thot-link robinhood \
+  --thot-url https://YOUR-NATIVE-PHALA-APP-ORIGIN \
+  --trade-trace TRACE_ID \
+  --symbol F \
+  --window-days 30</code></pre></li>
+<li><p>Open the helper’s one-use link in the Chrome profile where Robinhood is already signed in.</p></li>
+<li><p>Return to thot market and choose <strong>Check trade proof</strong>.</p></li>
+<li><p>The app accepts the result only after checking the signed credential, its hardware evidence, the owner-bound ticket, and the ticker and time window you requested.</p></li>
+<li><p>Choose the saved proof when you authorize that exact scrubbed release for sale.</p></li>
+</ol>
+<p>The contributor authorizes sale terms once. A later matching purchase can release the licensed trace automatically; the contributor does not return to accept each sale.</p>
+<h2 id="what-happens-inside-the-private-path">What happens inside the private path</h2>
+<p>The capture job receives a short-lived ticket tied to one contributor, trace, ticker, and time window.</p>
+<p>The local helper uses the contributor’s existing Robinhood session to request the relevant order and instrument records. Login material remains on the contributor’s computer. It is not sent to thot market and is never included in the buyer-facing proof.</p>
+<p>A <strong>Witness</strong> records the authenticated provider sessions. The captured records are sealed to an <strong>Appraiser</strong> running inside a TDX enclave. The Appraiser:</p>
+<ol type="1">
+<li>verifies the witnessed sessions;</li>
+<li>resolves Robinhood instrument identifiers to tickers;</li>
+<li>looks for a filled buy or sell of the requested symbol;</li>
+<li>compares its transaction time with the trace timestamp; and</li>
+<li>emits only the bounded result.</li>
+</ol>
+<p>The marketplace verifier checks the Appraiser’s Ed25519 signature and hardware evidence, including the DCAP quote, RTMR replay, <code>report_data</code>, application composition, and operating-system image identity.</p>
+<p>The marketplace binds the accepted property to the committed content hash and licensed release. It checks the full release against the onchain commitment before delivery. The ordinary buyer receives the research content without the private proof package, so the current buyer response does not itself allow independent recomputation of the full release hash or verification of the Appraiser signature.</p>
+<h2 id="what-remains-private">What remains private</h2>
+<p>The marketplace credential does not disclose:</p>
+<ul>
+<li>account number;</li>
+<li>access token or browser cookie;</li>
+<li>position size;</li>
+<li>execution price or average cost;</li>
+<li>unrelated orders or tickers;</li>
+<li>portfolio holdings or balance; or</li>
+<li>the research trace itself.</li>
+</ul>
+<p>The private Appraiser inspects the scoped order response and referenced instrument records used to compute the result. Ordinary buyers receive the bounded statement and the marketplace's release commitment, not those source records or the signed proof package. The private package also carries stable thot market owner and job identifiers, expired ticket/session commitments, and attestation metadata so the marketplace verifier can bind the result to its request. Those are thot market identifiers, not a Robinhood account number.</p>
+<p>This is an attested property credential. It is not a general zero-knowledge portfolio proof.</p>
+<h2 id="how-a-buyer-uses-it">How a buyer uses it</h2>
+<p>An ordinary buyer reviews a listing’s public metadata and supported properties. For example:</p>
+<pre class="text"><code>workflow = investment research
+requested model = recorded
+verified property = traded:F:within_30d
+property value = true
+maximum price = 20,000 THOT</code></pre>
+<p>The result can show a title, asking price, licence, model and provenance metadata, and the verified property. It reveals no random excerpt or other conversation content.</p>
+<p>The buyer can then:</p>
+<ol type="1">
+<li>inspect the bounded claim and the marketplace's release commitment;</li>
+<li>pay the asking price in THOT into escrow;</li>
+<li>receive the full licensed research text; and</li>
+<li>see the onchain delivery commitment that the marketplace checked against the full release.</li>
+</ol>
+<p>The current ordinary-buyer flow does not deliver the raw signed brokerage proof or a portable verification package. The buyer relies on the marketplace's verification of the credential and release binding; independent verification of that package is a separate capability to build and test.</p>
+<p>Governance-reserve sampling is a separate, contributor-controlled program. Its permissions do not give ordinary buyers access to trace content.</p>
+<h2 id="current-limits">Current limits</h2>
+<p>The first predicate is intentionally narrow.</p>
+<ul>
+<li>It proves a positive observed fill only.</li>
+<li>It uses an absolute before-or-after window around the trace timestamp.</li>
+<li>It does not prove trade direction relative to the research.</li>
+<li>It does not prove P&amp;L, investment skill, causality, balances, Sharpe ratio, or complete account history.</li>
+<li>The helper rejects paginated order histories rather than presenting partial coverage as complete.</li>
+<li>One capture currently supports at most 32 distinct instrument identifiers.</li>
+<li>A trace permits at most three capture attempts.</li>
+<li>The local capture has a 120-second timeout.</li>
+<li>The owner-bound job ticket expires after ten minutes.</li>
+<li>An accepted proof remains fresh for new listings for 24 hours.</li>
+</ul>
+<p>Unsupported or incomplete captures fail closed. They do not produce a positive property.</p>
+<h2 id="what-has-been-demonstrated">What has been demonstrated</h2>
+<p>The integrated local acceptance path has produced and verified an Appraiser-signed:</p>
+<pre class="text"><code>traded:F:within_30d = true</code></pre>
+<p>The test exercises the production credential verifier, ticket binding, exact-release commitment, bounded disclosure, THOT escrow purchase and licensed delivery. Its brokerage records and approved Appraiser/Witness identities are synthetic fixtures, and settlement runs on local Anvil. No order quantity, execution price, brokerage account number or identifier, or unrelated ticker enters the buyer-facing claim. The private signed package carries stable thot market owner/job identifiers and verification metadata, but the ordinary buyer does not receive that package.</p>
+<p>The remaining acceptance milestone is one joined hosted run using fresh Robinhood evidence, approved deployed enclave identities, a THOT purchase, exact delivery, restart recovery, and settlement in the same release environment. Until then, the demonstrated contribution is the integrated evidence primitive and market binding: witnessed account records can be reduced to a marketplace-verified, buyer-visible claim attached to one exact scrubbed, licensed release, and that research can travel through the purchase path without exposing the source records.</p>
+<p>Read the <a href="/read">launch story</a> for why the research behind a trade should become a market, or the <a href="/whitepaper">whitepaper</a> for the settlement and reserve design.</p>
+        </article>
+        <div class="reading-next"><div><h2>From proof to protocol.</h2><p>Read the selected payment, lock and reserve mechanics.</p></div><a class="button" href="/whitepaper">Read the whitepaper <span aria-hidden="true">↗</span></a></div>
+      </div>
+    </div>
+  </main>
+  <footer class="site-footer wrap">
+    <a class="footer-brand" href="/">thot market</a>
+    <nav aria-label="Footer navigation"><a href="/read">The idea</a><a href="/tutorial" aria-current="page">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/whitepaper">Whitepaper</a><a href="/app">App</a></nav>
+    <p>Independent of Robinhood. No endorsement or account access is implied.</p>
+    <span class="footer-motto">Don’t get distilled for free.</span>
+  </footer>
+</body>
+</html>

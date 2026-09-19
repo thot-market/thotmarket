@@ -1,0 +1,66 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm,mkdir,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join,resolve} from 'node:path';
+import {chromium} from 'playwright-core';
+import {createApplication} from '../../packages/market/src/bootstrap.ts';
+import {createHttpServer} from '../../apps/api/server.ts';
+import {canonicalHash} from '../../packages/protocol/src/index.ts';
+
+test('browser: deposit Claude and Codex history, read and organize it, and see an active checkpoint before finalization',{timeout:120000},async t=>{
+  const dir=await mkdtemp(join(tmpdir(),'thot-library-browser-')),evidence=resolve(process.env.THOT_E2E_ARTIFACTS??'work/capture-library/browser');await mkdir(evidence,{recursive:true});
+  const app=await createApplication({dataDir:dir,config:{traceExplorerViewers:['demo-user']}}),server=createHttpServer(app);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+  const browser=await chromium.launch({headless:true,executablePath:process.env.THOT_E2E_BROWSER??'/usr/bin/google-chrome',args:['--disable-gpu','--disable-dev-shm-usage']});
+  const context=await browser.newContext({viewport:{width:1280,height:900},...(process.env.THOT_E2E_VIDEO==='1'?{recordVideo:{dir:join(evidence,'video'),size:{width:1280,height:900}}}:{})}),page=await context.newPage();page.setDefaultTimeout(15000);
+  t.after(async()=>{await writeFile(join(evidence,'browser-errors.json'),JSON.stringify(errors));await page.screenshot({path:join(evidence,'last-state.png')}).catch(()=>{});await writeFile(join(evidence,'last-state.html'),await page.content().catch(()=>''));await context.close();await browser.close();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));await app.close();await rm(dir,{recursive:true,force:true});});
+  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+  const origin='http://127.0.0.1:'+(server.address() as any).port;
+  const shot=async(name:string)=>{await page.waitForTimeout(2800);await page.screenshot({path:join(evidence,name+'.png')});};
+  await page.goto(origin+'/app');await page.locator('#conversation-library h1').waitFor();await shot('01-empty-library');
+  const claude=[{type:'user',sessionId:'synthetic-library-claude',cwd:'/synthetic/paper-notes',message:{role:'user',content:'What should I remember from the experiment?'}},{type:'assistant',sessionId:'synthetic-library-claude',message:{role:'assistant',content:'Keep the control condition separate. ORCHARD-CONTROL-27 is the reusable insight.'}}].map(v=>JSON.stringify(v)).join('\n');
+  const codex=[{type:'session_meta',payload:{id:'synthetic-library-codex',cwd:'/synthetic/queue-fix'}},{type:'response_item',payload:{type:'message',role:'user',content:[{type:'input_text',text:'Explain the retry fix.'}]}},{type:'response_item',payload:{type:'message',role:'assistant',content:[{type:'output_text',text:'An idempotency key keeps retries from creating duplicate deposits. ORCHARD-RETRY-42.'}]}}].map(v=>JSON.stringify(v)).join('\n');
+  async function upload(name:string,text:string){
+    await page.locator('#conversation-library [data-action="import-research"]').click();
+    await page.locator('#research-file').setInputFiles({name,mimeType:'application/x-ndjson',buffer:Buffer.from(text)});await page.locator('#research-preview-form button[type=submit]').click();
+    assert.equal(await page.locator('#confirm-research').innerText(),'Save privately');assert.equal(await page.locator('#detail-dialog input[type=checkbox]:visible').count(),0);await shot('review-'+name.replace('.jsonl',''));
+    await page.locator('#confirm-research').click();await page.locator('#confirm-research').waitFor({state:'hidden'});
+  }
+  await upload('claude.jsonl',claude);await page.locator('[data-testid="conversation-row"]').first().waitFor();
+  await page.locator('[data-action="library-open"]').first().click();await page.locator('.library-conversation').waitFor();assert.match(await page.locator('.library-conversation').innerText(),/ORCHARD-CONTROL-27/);await shot('02-readable-claude');
+  await page.locator('#library-title').fill('Experiment: keep the control separate');await page.locator('#library-note').fill('Use this control-condition explanation in the next experiment.');await page.locator('#library-edit button[type=submit]').click();
+  await page.locator('#library-edit [data-action="library-bookmark"]').click();await page.locator('#library-edit [data-value="false"]').waitFor();await page.getByRole('button',{name:'Close dialog',exact:true}).first().click();
+  await upload('codex.jsonl',codex);await page.waitForFunction(()=>document.querySelectorAll('[data-testid="conversation-row"]').length===2);await shot('03-two-deposits');
+  await page.locator('[data-testid="conversation-row"]').filter({hasText:'Codex'}).locator('[data-action="library-open"]').click();assert.match(await page.locator('.library-conversation').innerText(),/ORCHARD-RETRY-42/);await shot('03b-readable-codex');await page.getByRole('button',{name:'Close dialog',exact:true}).first().click();
+  await page.locator('#library-query').fill('control-condition');await page.locator('#library-search button[type=submit]').click();await page.waitForFunction(()=>document.querySelectorAll('[data-testid="conversation-row"]').length===1);assert.match(await page.locator('[data-testid="conversation-row"]').innerText(),/Experiment: keep the control separate/);await shot('04-find-bookmarked-work');
+  await page.reload();await page.locator('#conversation-library h1').waitFor();await page.waitForFunction(()=>document.querySelectorAll('[data-testid="conversation-row"]').length===2);assert.match(await page.locator('#conversation-library').innerText(),/Experiment: keep the control separate/);
+  const actor={id:'demo-user',role:'user' as const},capture=await app.agentCapture.begin(actor,{client:'codex',save_privately:true}),now=new Date().toISOString();
+  const record={sequence:1,upstream:'https://chatgpt.com',path:'/backend-api/codex/responses',request_body_b64:Buffer.from(JSON.stringify({model:'synthetic-model',client_metadata:{thread_id:'98464535-5678-4000-8000-123456789abc'},input:'A live checkpoint should appear before exit.'})).toString('base64'),response_body_b64:Buffer.from(JSON.stringify({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'This checkpoint is already retrievable. ORCHARD-CHECKPOINT-61.'}]}]})).toString('base64'),status:200,content_type:'application/json',started_at:now,finished_at:now,complete:true};
+  const part={...record,commitment:canonicalHash(record)};await app.agentCapture.part(capture.capture_id,capture.upload_token,'browser-library-part',{part});
+  const manifest={format:'thot.proxy-capture/2',capture_id:capture.capture_id,client:'codex',started_at:now,finished_at:now,parts:[{sequence:1,commitment:part.commitment}]};const bundle={...manifest,root:canonicalHash(manifest)};
+  const checkpoint=await app.agentCapture.checkpoint(capture.capture_id,capture.upload_token,'browser-library-checkpoint',{bundle});
+  const liveRow=page.locator(`[data-trace-id="${checkpoint.trace_id}"]`);await liveRow.waitFor();assert.match(await liveRow.innerText(),/Recording/);assert.match(await liveRow.innerText(),/Saved through/);await shot('05-checkpoint-before-exit');
+  await liveRow.locator('[data-action="library-open"]').click();assert.match(await page.locator('.library-conversation').innerText(),/ORCHARD-CHECKPOINT-61/);await shot('06-checkpoint-reader');
+  await page.getByRole('button',{name:'Close dialog',exact:true}).first().click();await app.agentCapture.complete(capture.capture_id,capture.upload_token,'browser-library-final',{bundle});
+  // The same native thread returns through a second capture. Each original proof remains addressable.
+  const continuation=await app.agentCapture.begin(actor,{client:'codex',save_privately:true});
+  const prior=await app.library.item(actor,checkpoint.trace_id),later=new Date().toISOString();
+  const resumedRequest={model:'synthetic-next-model',client_metadata:{thread_id:'98464535-5678-4000-8000-123456789abc'},input:[...prior.content.turns,{role:'user',content:'Continue where I left off.'}].map((t:any)=>({type:'message',role:t.role,content:[{type:t.role==='assistant'?'output_text':'input_text',text:t.content}]}))};
+  const resumed={...record,started_at:later,finished_at:later,request_body_b64:Buffer.from(JSON.stringify(resumedRequest)).toString('base64'),response_body_b64:Buffer.from(JSON.stringify({status:'completed',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'The follow-up belongs with the original work. ORCHARD-RESUME-82.'}]}]})).toString('base64')};
+  const resumedPart={...resumed,commitment:canonicalHash(resumed)};
+  await app.agentCapture.part(continuation.capture_id,continuation.upload_token,'browser-resumed-part',{part:resumedPart});
+  const resumedManifest={format:'thot.proxy-capture/2',capture_id:continuation.capture_id,client:'codex',started_at:later,finished_at:later,parts:[{sequence:1,commitment:resumedPart.commitment}]};
+  await app.agentCapture.complete(continuation.capture_id,continuation.upload_token,'browser-resumed-final',{bundle:{...resumedManifest,root:canonicalHash(resumedManifest)}});
+  await page.reload();await page.locator('#conversation-library h1').waitFor();
+  assert.equal(await page.locator('[data-testid="conversation-row"]').count(),3);await liveRow.locator('[data-action="library-open"]').click();
+  assert.match(await page.locator('.library-conversation').innerText(),/ORCHARD-CHECKPOINT-61/);assert.match(await page.locator('.library-conversation').innerText(),/ORCHARD-RESUME-82/);
+  await shot('07-resumed-conversation');await page.getByText('Source and verification',{exact:true}).click();
+  assert.equal(await page.locator('[data-action="verify-agent-capture"]').count(),2);
+  assert.equal(await page.getByRole('button',{name:'Verify capture 2',exact:true}).getAttribute('data-id'),continuation.capture_id);
+  await shot('08-separate-capture-proofs');await page.getByRole('button',{name:'Close dialog',exact:true}).first().click();
+  await page.setViewportSize({width:390,height:844});await shot('09-mobile-library');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+  await page.setViewportSize({width:1280,height:900});await page.locator('#trace-explorer-nav').click();await page.locator('#trace-explorer h1').waitFor();
+  assert.match(await page.locator('#trace-explorer').innerText(),/What is arriving in thot market/);assert.equal(await page.locator('#main [data-action="worker"]').count(),0);
+  assert.doesNotMatch(await page.locator('#trace-explorer').innerText(),/ORCHARD-CONTROL-27|ORCHARD-RETRY-42|Experiment: keep the control separate/);await shot('10-readonly-explorer');
+  assert.deepEqual(errors,[]);await writeFile(join(evidence,'result.json'),JSON.stringify({status:'PASS',scope:'Real browser and backend; synthetic Claude/Codex imports and P0 checkpoint fixture. No provider call or real TEE quote in this run.',checks:['Upload both histories','Read actual saved answers','Private title/note/bookmark persisted','Find prior work by note','Checkpoint retrievable before finalization','Native resume grouped with separate proof controls','Read-only explorer excludes private content and operational controls','Mobile no horizontal overflow'],errors},null,2));
+});

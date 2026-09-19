@@ -1,0 +1,16 @@
+{
+  "format": "thot.runtime-python-files/1",
+  "files": [
+    "trace-vault/appraisal_transport.py",
+    "trace-vault/attest.py",
+    "trace-vault/attestation_verify.py",
+    "trace-vault/browser_capture.py",
+    "trace-vault/credential_robinhood.py",
+    "trace-vault/link_capture.py",
+    "trace-vault/link_ticket.py",
+    "trace-vault/reveal.py",
+    "trace-vault/robinhood_appraiser.py",
+    "trace-vault/robinhood_link.py",
+    "trace-vault/witness.py"
+  ]
+}

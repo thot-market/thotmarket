@@ -1,0 +1,271 @@
+<!doctype html>
+<!-- Generated from WHITEPAPER.md; sha256:10589dd3052e86311e5d9b708ece2dd7664e97c5c413b0c151ca0716778e9157. Run node scripts/render-launch-docs.ts. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f4e5">
+  <title>thot market — thot market</title>
+  <meta name="description" content="The selected thot market protocol: private traces, buyer payments, contributor rewards and THOT.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="thot market">
+  <meta property="og:description" content="The selected thot market protocol: private traces, buyer payments, contributor rewards and THOT.">
+  <meta property="og:image" content="https://thot.market/assets/thot-feast.jpg">
+  <meta property="og:url" content="https://thot.market/whitepaper">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://thot.market/whitepaper">
+  <link rel="icon" type="image/png" href="/assets/thot-logo.png">
+  <link rel="preload" href="/assets/fonts/bricolage-grotesque-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/site.css">
+  <link rel="stylesheet" href="/reading.css">
+  <script src="/site.js" defer></script>
+</head>
+<body class="reading-page whitepaper-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="/" aria-label="thot market home"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="/read">The idea</a><a href="/tutorial">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/whitepaper" aria-current="page">Whitepaper</a></nav>
+    <div class="header-actions"><a class="trade-link" data-token-link href="/#token" hidden>Trade THOT <span aria-hidden="true">↗</span></a><a class="button button-small" href="/app">Open app</a></div>
+  </header>
+  <main class="reading-main wrap" id="main">
+    <div class="reading-topline"><a href="/">Back to thot market</a><span>Whitepaper</span></div>
+    <div class="reading-layout">
+      <aside class="reading-aside" aria-label="Whitepaper contents">
+        <h2>In this paper</h2>
+        <ol>
+          <li><a href="#a-market-for-research-flow">A market for research flow</a></li>
+          <li><a href="#1-from-expertise-to-an-asset-someone-can-buy">1. From expertise to an asset someone can buy</a></li>
+          <li><a href="#2-a-purchase-from-offer-to-payment">2. A purchase, from offer to payment</a></li>
+          <li><a href="#3-thot-pays-for-research-useful-participation-earns-revenue">3. THOT pays for research; useful participation earns revenue</a></li>
+          <li><a href="#4-bootstrapping-a-market-before-buyers-are-plentiful">4. Bootstrapping a market before buyers are plentiful</a></li>
+          <li><a href="#5-what-funds-the-business">5. What funds the business</a></li>
+          <li><a href="#6-the-economic-loop-and-its-limits">6. The economic loop and its limits</a></li>
+          <li><a href="#7-custody-consent-and-trust">7. Custody, consent and trust</a></li>
+          <li><a href="#appendix-accounting-rules">Appendix: accounting rules</a></li>
+          <li><a href="#holding-thot-lowers-marketplace-fees">Holding THOT lowers marketplace fees</a></li>
+        </ol>
+        <a class="reading-aside-bottom" href="/mechanism">Mechanism at a glance</a>
+      </aside>
+      <div>
+        <article class="reading-prose" aria-labelledby="article-title" id="protocol-paper">
+<h1 id="article-title">thot market</h1>
+<h2 id="a-market-for-research-flow">A market for research flow</h2>
+<p><strong>Don’t get distilled for free.</strong></p>
+<p><strong>Whitepaper · Research, payment and participation · 18 September 2026</strong></p>
+<p><em>This paper describes the proposed research market and launch terms. See the <a href="/app">workspace page</a> for current access.</em></p>
+<p>AI makes expertise more productive. It may also shorten the time for which that expertise remains scarce. A person can use a model to do better work today while producing the examples that help a future model do that work without them.</p>
+<p>The resulting record can be valuable: the context an expert supplies, the mistakes they catch, the alternatives they reject, and the evidence that finally changes their mind. We call this <strong>research flow</strong>, or <strong>thot flow</strong>. Its value comes from the judgment it contains and the uses a buyer can find for it.</p>
+<p>thot market gives people a way to offer that research for sale. Contributors choose which traces to release. Buyers pay for specified access and rights. A finite acquisition reserve helps establish the market before independent demand is reliable. THOT is the payment currency. A disclosed service tariff pays for delivery and acquisition; the contributor receives the remainder.</p>
+<p>The proposition is simple: <strong>your research can earn twice—once through what it helps you do, and again when someone pays to learn from it.</strong></p>
+<h2 id="1-from-expertise-to-an-asset-someone-can-buy">1. From expertise to an asset someone can buy</h2>
+<p>A useful trace might document a programmer diagnosing a difficult bug, a researcher testing a hypothesis, or a trader investigating a company. A trade expresses a conclusion; the research trace records how that conclusion was reached. This is the connection between a market for research and the trading activity around Robinhood Chain, the selected launch network.</p>
+<p>Potential buyers include model developers seeking training or evaluation material, researchers studying a workflow, and agents looking for examples of a task solved well. Different buyers want different evidence. A conversation’s length, token count or apparent sophistication is not enough to determine its price.</p>
+<p>An <strong>assay</strong> evaluates a trace against a stated purpose. The initial buyer-facing property check has two inputs: a workflow category and a minimum turn count. It compares them with a simple keyword/category routing label and the recorded turn count, and returns those values and whether they match. It does not read the conversation to judge quality, recommend a purchase or calculate a fair price. The label is a fallible routing hint, not evidence that the trace contains useful coding work. Content evaluation, provenance and outcome evidence can support richer assays later; comparable-sale estimates are a separate calculation.</p>
+<p>A trace need not have sold to receive an estimate. The comparison uses completed purchases of research with similar workflow, provenance and conversation length to show a range of observed prices. It uses the past 90 days and requires at least three distinct contributors. Each contributor’s median price has equal weight, so one prolific seller cannot dominate the estimate. The displayed gross price is before the applicable service tariff; similar properties do not establish identical quality or licence rights. It reports how many different contributors support the comparison and when those transactions occurred. Sparse cohorts show “not enough comparable sales,” rather than an invented value or zero. Aggregate comparisons must meet a minimum cohort size and avoid exposing another contributor’s private work.</p>
+<p>Treasury sampling prices and independent buyer prices are kept separate. A reserve-funded purchase at a contributor's asking price is evidence of that acquisition, not evidence that an outside buyer values every similar trace at that price. Estimated income also depends on whether a trace sells: a sale-price comparison alone cannot establish a daily earnings forecast.</p>
+<p>A separate market-activity view reports observed sell-through and mean seller proceeds during a trace’s first 30 days on sale, including unsold traces at zero. It uses completed independent purchases and deduplicates relistings. It requires a complete confirmed index and a mature cohort with at least 20 traces, three contributors and three buyers. A new market has no such history. This market-wide observation is not a personalized forecast and does not replace the comparable-sale estimate above.</p>
+<p>The market distinguishes three amounts:</p>
+<div class="table-scroll"><table>
+<thead>
+<tr class="header">
+<th>Amount</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Estimated trace value</td>
+<td>An appraisal of possible future licensing value. It is not money owed or available to withdraw.</td>
+</tr>
+<tr class="even">
+<td>Protocol-sponsored proceeds</td>
+<td>Payment for research acquired with the finite bootstrap reserve. This is subsidized demand.</td>
+</tr>
+<tr class="odd">
+<td>Independent sale proceeds</td>
+<td>Payment from an external buyer licensing the research. This is evidence of customer demand.</td>
+</tr>
+</tbody>
+</table></div>
+<p>A funded offer is stronger evidence than an estimate, but its payment remains pending until settlement. Protocol purchases and external purchases produce real token proceeds under the same settlement rules; they are reported separately so that subsidy is visible. A protocol purchase is counted once, not again as an additional reward.</p>
+<p>The private portfolio separates independent sale proceeds, treasury purchases, pending allocations and current claimable funds. Referral earnings are grounded in finalized receipts; when a withdrawal combines several credit types, the interface shows pooled payment and bounds on its referral component instead of inventing an exact attribution. Public highest-earner and largest-buyer tables require an explicit pseudonym opt-in and exclude treasury purchases, pending sales and refunds. Opting out keeps the dashboard identity private, but cannot hide transactions already public onchain.</p>
+<p>The vault also separates actual encrypted storage usage, including source recordings and release copies, from preview metadata sizes. The latter are not a measurement of all provider traffic. Source/model and private/listed/sold status are visible to the contributor without publishing the underlying conversation.</p>
+<p>The aim is to make the value of ordinary research visible and realizable. Uploading a trace, passing an assay or holding THOT does not by itself earn a payment.</p>
+<h2 id="2-a-purchase-from-offer-to-payment">2. A purchase, from offer to payment</h2>
+<p>A contributor connects a provider key and authorizes a connection-level sale policy once: the licence, THOT asking-price floor, minimum seller share, eligible public metadata, and expiry. Subsequent completed, eligible recordings from that connection are automatically listed. The contributor does not sign each listing. An enclave-held delegate signs each specific release under the standing policy; the market contract checks the seller’s policy signature and the delegate’s release signature. The delegation cannot spend the contributor’s wallet assets. The initial connection policy lasts 30 days and permits at most 10,000 distinct single-use sale authorizations. A contributor may instead import and explicitly list a historical conversation.</p>
+<p>The contributor sets the asking price. A manual listing starts with an empty price field and requires an explicit THOT amount. Codex / Claude Code and OpenRouter connection forms start at an editable <strong>100 THOT per completed trace</strong>; the signed policy supplies that price to subsequent automatic listings. This default is neither an appraisal nor a promised payment. Property checks and comparable-sale estimates do not change the asking price. A reserve buyer can buy an eligible selected release at its authorized price or skip it.</p>
+<p>A buyer reviews the available description and evaluation evidence, then funds a purchase in THOT. The purchase must match the contributor’s authorized material, licence and price. It records the service tariff, direct-cost allocation, referral terms and exact net proceeds at funding. The signed connection policy protects the seller’s quoted retention floor; a higher tariff cannot silently lower it. An ordinary purchase’s enclave-signed review also binds the current tariff, so changing that tariff requires a fresh purchase quote. <strong>There is no second approval or per-purchase seller veto.</strong> Contributors can stop future unfunded sales, but cannot withdraw rights already purchased under their authorization.</p>
+<h3 id="filtering-before-paying">Filtering before paying</h3>
+<p>An ordinary buyer receives <strong>no trace text before purchase</strong>. They can inspect public listing metadata and supported bounded properties attached to the exact release. Initial properties include capture source, requested and returned model identifiers when recorded, a simple workflow label, turn count, and explicitly attached credentials.</p>
+<p>One implemented credential binds a trace to a narrow Robinhood fact: witnessed records contained a filled buy or sell of a named symbol within an absolute time window around the trace timestamp. The marketplace verifier checks the Appraiser signature and hardware evidence, and the marketplace binds the result to the trace content hash and licensed release. The ordinary buyer sees the bounded claim and release commitment, not the private signed package; this response does not enable independent signature verification or recomputation of the full release hash. The claim does not expose raw orders and does not establish P&amp;L, Sharpe ratio, causality, account continuity, balance or complete history. The complete boundary and guided flow are in the <a href="/tutorial">trade-proof tutorial</a>.</p>
+<p>These properties answer typed questions; they do not allow an evaluator to summarize or reconstruct the hidden conversation. General buyer-supplied assayer agents require a sandbox, restricted output schema, query limits and a disclosed policy, and remain roadmap work. The complete licensed release becomes available only after payment.</p>
+<p>The settlement sequence is:</p>
+<ol type="1">
+<li><strong>Authorize once.</strong> The contributor enrolls the specific release, licence and price for automatic qualifying sales.</li>
+<li><strong>Fund and deliver.</strong> The full price enters escrow. The service matches it to the standing authorization and makes the licensed material available without asking the seller to return. If delivery has not been recorded within <strong>48 hours of the automatic sale</strong>, the buyer can recover the full payment while the order remains in its accepted, undelivered state.</li>
+<li><strong>Allow a dispute.</strong> The proposed launch terms give buyers <strong>12 hours after recorded delivery to raise an eligible dispute</strong>. An open dispute prevents finalization.</li>
+<li><strong>Receive the proceeds.</strong> After that window, the service finalizes an undisputed sale and sends the seller’s allocation to their registered wallet. Eligible referral and protocol allocations remain claimable by their recipients. Anyone may trigger payment to the rightful recipient; they cannot redirect it. Manual claiming remains available if the service is delayed. No additional vesting applies to sale proceeds.</li>
+</ol>
+<p>The normal target is delivery when the purchase is funded and automatic payment to the seller’s wallet after the proposed 12-hour filing window. The clock starts when delivery of the committed release is recorded, not at upload or payment. Delayed delivery, an open dispute or delayed finalization can extend the wait. Existing principal locks follow their own expiry and remain separate from sale proceeds.</p>
+<p>The quoted token price and payout split stay fixed for that offer. A dollar reference is informational: it does not promise a dollar redemption value. Buyers may use THOT they already hold or acquire it from the market. The acquisition program uses its prefunded reserve. Neither route mints tokens, and automatic conversion from stablecoins is outside this design.</p>
+<p>A buyer or the designated delivery operator can acknowledge delivery. That acknowledgment establishes that the committed material is available; it does not prove that the buyer read it, found it useful or verified its origin. The filing clock does not wait for the buyer to open or download the release. Once delivery is acknowledged, the undelivered-order timeout refund is unavailable; there is no separate objective non-delivery challenge after that acknowledgment. This relies on the designated operator recording availability correctly. The subjective complaint route below has separate eligibility terms.</p>
+<p>Subjective complaints require the buyer to meet the reviewed independent-purchase eligibility terms disclosed before funding. Treasury purchases cannot use this route; refunded, unreviewed and other unsettled purchases do not count toward eligibility. Under the proposed launch terms, an eligible buyer files within <strong>12 hours of recorded delivery</strong>, freezing all quoted allocations. The seller has <strong>24 hours</strong> to submit an encrypted response and may separately sign a transaction to finish that period early after responding. Otherwise the full 24 hours remains. Non-conflicted DAO reviewers then have <strong>up to seven days</strong> to decide under the published reviewer threshold. A buyer win returns 50% of the total escrowed payment to the buyer and permanently sends the other 50% to the canonical dead address; the seller, referrer and protocol receive zero. An uphold vote releases the original split. If no outcome reaches the configured threshold by the deadline, the original sale is upheld. There is no v1 appeal.</p>
+<p>For new sale authorizations, the contributor’s signed licence permits a non-conflicted governance reviewer to inspect the exact purchased release during an opened onchain dispute, before its review deadline. The application verifies current reviewer membership, the case and its commitments, then audits the read. It does not disclose other traces, original source captures, provider credentials or private brokerage proof packages. Full text and private reasons are encrypted at rest and visible only to authorized case participants; commitments, votes, outcome and amounts are recorded onchain. Existing signed licences are not broadened retroactively: cases without this permission use their submitted complaint and response. This adjudication permission is separate from optional treasury sampling.</p>
+<p>The initial access term is <strong>30 days from the automatic sale</strong>. Committed copies remain available for that term even if the original private source is deleted; they are then purged. This access period is separate from the payment dispute period. Deleting a source or ending access cannot recall a copy the buyer already downloaded.</p>
+<h3 id="starting-with-paid-samples">Starting with paid samples</h3>
+<p>Early price discovery begins with separately authorized treasury inspection. A contributor may opt eligible traces into the acquisition program or sell normally without joining it. For every 20 new unique eligible traces from one opted-in contributor, the service forms a stable group, selects one complete approved release uniformly, and persists that selection. Nineteen traces produce no selection; 20 produce one; 40 produce two. Refreshing, reconnecting, reenrolling or using another reserve-reviewer wallet cannot redraw the sample.</p>
+<p>All three configured reserve buyers see the same selected release. The contributor’s standing treasury consent identifies the covered sources, complete release, recipients, duration and revocation boundary. Inspection does not guarantee a purchase and grants no training or redistribution right. If a reserve buyer purchases it, the wallet signs one transaction and pays gas. THOT moves directly from the reserve vault into purchase escrow; the buyer never receives an unrestricted campaign balance in their own wallet.</p>
+<p>A campaign is an onchain spending permission with its own budget, start, end and release schedule. The selected concurrent-campaign design lets each authorized buyer choose a campaign and make purchases within its available allowance. It does not appraise traces, interpret natural language or require anyone to spend the allowance. Governance controls campaign and buyer permissions; those controls do not bypass spending ceilings or purchase settlement clocks. The offchain worker handles listing, delivery and settlement, while the human buyers choose acquisitions. A quality assessment after inspection can guide the next purchase. Arbitrary uploaded assayer agents remain a later capability.</p>
+<h2 id="3-thot-pays-for-research-useful-participation-earns-revenue">3. THOT pays for research; useful participation earns revenue</h2>
+<p>Buyers pay the posted THOT price less their applicable fee reduction. A low balance beyond the payment itself does not exclude a buyer or add a membership surcharge. Contributors receive the price less a disclosed service tariff. Introducing a contributor can earn a direct referral payment when independent purchases actually settle.</p>
+<h3 id="the-v0-choice-lock-thot">The v0 choice: lock THOT</h3>
+<p><strong>Lock THOT and receive a fixed THOT reward at maturity. No trace sale or referral is required.</strong> The 90-day term pays 30%; the shorter-term menu pays 5% over 30 days and 12% over 60 days. Each deposit starts its own clock. Principal and reward become claimable together at maturity; this pool has no early exit or transferable position.</p>
+<p>The finalized launch budget is <strong>30 million THOT of prefunded rewards</strong>, with at most <strong>100 million THOT of admitted principal</strong> at the highest offered rate. Every deposit reserves its entire reward before acceptance. Participant principal cannot fund rewards or purchases. The pool stops accepting commitments when its funded budget or principal capacity is exhausted; no new tokens are minted.</p>
+<p>Governance can open separately funded campaigns with different future terms. Accepted positions keep their original payout and maturity. Trace-sale payments and referral earnings remain separate. Holder and qualifying locker fee reductions take effect at purchase funding and reduce protocol revenue, without a cashback budget. Additional referral boosts require their own prospective rules and sufficient revenue or funding.</p>
+<p>At 30% over 90 days the simple annualized rate is approximately 121.7%. A hypothetical 189.8% compounded annual rate assumes repeated availability and reinvestment, which this finite offer does not promise. The actual entitlement is the fixed term reward in THOT, not a dollar return or share of future marketplace revenue.</p>
+<h3 id="a-service-tariff-quoted-before-funding">A service tariff quoted before funding</h3>
+<p>Each purchase quote discloses the THOT price, service fee, direct-cost allowance, any eligible referral and exact contributor proceeds. The fee supports delivery and marketplace operations. The launch service fee is <strong>1% of the posted trace price</strong>, rounded up to the nearest token base unit. Holder and locker discounts reduce that fee independently for each side; they require no separate cashback pool.</p>
+<pre class="text"><code>base fee = 1% of posted THOT price (rounded up)
+buyer payment = posted THOT price − buyer fee reduction
+contributor proceeds = posted THOT price − base fee + seller fee reduction
+eligible direct referral = 20% of base fee (rounded down)
+protocol receipt = base fee − both fee reductions − referral</code></pre>
+<p>Integer calculations use token base units, with referral amounts rounded down. A quote below its service fee is rejected. Each automatic-sale authorization also has a minimum seller-retention floor, so the contributor can reject uneconomic future terms without returning for every sale.</p>
+<p>The quote and funded receipt commit the exact tariff. Governance can publish prospective changes, but previously funded proceeds cannot be repriced; later operating overruns remain the operator's cost. No discretionary cost is inserted after settlement. Ordinary executable reviews become invalid when their tariff changes. Standing seller authorizations preserve at least their signed retention floor, even for reserve purchases.</p>
+<h3 id="referral-attribution-and-payment">Referral attribution and payment</h3>
+<p>A contributor registers one direct referrer before any accepted sale. Attribution is immutable, one-level and cannot be attached to earlier offers. It does not require the referrer to buy or lock THOT.</p>
+<p>The first reviewed external order must be funded within <strong>90 days</strong> after registration. The referrer’s own purchase neither activates this clock nor earns a referral payment. Its funding timestamp starts a <strong>365-day</strong> referral window. Later orders funded within that window freeze the applicable terms; payment follows successful settlement, not forecast lifetime value. An order that is canceled or refunded pays no commission. Its funding may start the activity clock, but cannot create earnings.</p>
+<p>A qualifying direct introducer receives <strong>20% of net service contribution</strong>, after the quote's fixed direct-cost allowance. There is only one acquisition pool per purchase. Treasury buying, unreviewed purchases, self-dealing, related-party activity, reimbursements and duplicate subsidies do not create eligible referral income. The contract enforces its address-level exclusions and reviewed-purchase requirement; independence review remains necessary because separate wallets do not prove separate economic actors.</p>
+<p>The referral is paid from one finite service-fee allocation. It does not add another charge to the buyer or reduce the contributor’s quoted proceeds.</p>
+<h3 id="what-an-eventual-financing-product-would-need">What an eventual financing product would need</h3>
+<p>A buyer prepayment could fund delivery earlier and earn a discount based on the timing and risk of that capital. Such an arrangement would need explicit delivery, repayment and risk terms. Purchase escrow reserves the price for its settlement obligations; it does not lend that money to the operator.</p>
+<p>If the participation benefit includes a share of network surplus, its rights, eligible denominator and funded distribution policy must be defined before activation. Distributions can use only realized surplus after contributor payments, referrals, delivery costs and other obligations. Withdrawing an earned distribution need not surrender future participation. Selling or transferring that future participation is deferred; it is not a v0 feature or a promised automatic upgrade.</p>
+<h2 id="4-bootstrapping-a-market-before-buyers-are-plentiful">4. Bootstrapping a market before buyers are plentiful</h2>
+<p>The cold-start problem is straightforward: contributors have little reason to supply research before buyers exist, and buyers have little reason to arrive before useful research is available.</p>
+<p>The protocol therefore acts as an early buyer with a finite budget. It buys specified rights to research, pays contributors and gathers evidence about what buyers value. Governance allocates separate campaign budgets and release schedules. Independent purchases remain evidence of customer demand; the selected campaign design does not require them before releasing acquisition allowance.</p>
+<p>The intended transition is from <strong>protocol-assisted price discovery</strong>, through a mixture of protocol and customer demand, to a market supported by buyers.</p>
+<h3 id="supply-and-acquisition-reserve">Supply and acquisition reserve</h3>
+<p>The selected token supply is <strong>1 billion THOT</strong>. The project purchases <strong>500 million, or 50%</strong>, through the Pons creation flow and sends them to <strong>one treasury funding address</strong>, initially budgeting <strong>470 million for acquisitions and 30 million for prefunded staking rewards</strong>. The rest follows the launchpad’s curve and liquidity allocations. There is no investor or partner allocation in this plan. <strong>THOT/ETH</strong> is the selected primary trading pair.</p>
+<p>The project supplies the ETH for its purchase. That ETH pays for token inventory; it is not still available as a second cash budget. The acquired THOT funds early research purchases and the separate staking reward pool. This is a disclosed project allocation, not independent retail demand.</p>
+<p>A fixed-supply <a href="https://eips.ethereum.org/EIPS/eip-20" rel="noopener noreferrer">ERC-20</a> can support this mechanism. Separate contracts custody the reserve, lock participant principal and settle purchases by transferring existing tokens. The mechanism does not require token minting or a tax on ordinary wallet transfers.</p>
+<h3 id="selected-concurrent-campaigns-and-first-campaign-limits">Selected concurrent campaigns and first-campaign limits</h3>
+<p><strong>One shared treasury, separately accounted acquisition and staking campaigns.</strong> The initial acquisition allocation is 470m; governance may reallocate unused funds. Existing deployments and funded obligations keep their original contracts and terms.</p>
+<div class="table-scroll"><table>
+<thead>
+<tr class="header">
+<th>Parameter</th>
+<th style="text-align: right;">Amount or rule</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Total acquisition reserve</td>
+<td style="text-align: right;"><strong>470m THOT</strong></td>
+</tr>
+<tr class="even">
+<td>First-campaign authority</td>
+<td style="text-align: right;"><strong>50m THOT of gross purchase commitments</strong></td>
+</tr>
+<tr class="odd">
+<td>Initially unallocated to that campaign</td>
+<td style="text-align: right;"><strong>420m THOT</strong>, available for separately authorized contribution campaigns</td>
+</tr>
+<tr class="even">
+<td>First-campaign duration</td>
+<td style="text-align: right;"><strong>90 days</strong></td>
+</tr>
+<tr class="odd">
+<td>Available immediately at its start</td>
+<td style="text-align: right;"><strong>555,555.555555555555555555 THOT</strong>, one ninetieth of the budget rounded down to token atoms</td>
+</tr>
+<tr class="even">
+<td>Remaining budget release</td>
+<td style="text-align: right;"><strong>Linear over the 90-day term</strong></td>
+</tr>
+<tr class="odd">
+<td>Independent-demand prerequisite</td>
+<td style="text-align: right;"><strong>None</strong></td>
+</tr>
+<tr class="even">
+<td>Concurrent campaigns</td>
+<td style="text-align: right;"><strong>Allowed</strong>, each with its own reserved budget and published terms</td>
+</tr>
+<tr class="odd">
+<td>Governance</td>
+<td style="text-align: right;"><strong>Any one of three owners</strong>, with no notice delay</td>
+</tr>
+</tbody>
+</table></div>
+<p>The initial 470m acquisition budget incentivizes useful traces. Governance can reallocate uncommitted treasury inventory to staking or back to acquisitions. Accepted staking principal and promised rewards are isolated in the bound pool and cannot be spent on acquisitions. Creating a campaign reserves its budget; it does not pay an organizer or contributor. Additional campaigns may overlap, with independently selected budgets, start times, terms of up to 365 days and upfront amounts no larger than their budgets. An existing campaign's budget and schedule do not change; governance can pause or close it and authorize another campaign from the remaining unallocated authority.</p>
+<p>For budget <code>B</code>, upfront allowance <code>U</code>, duration <code>T</code> and elapsed time <code>t</code> while the campaign is open, cumulative released authority is <code>U + floor((B − U) × t / T)</code> in token atoms. The first campaign uses <code>B = 50m</code>, <code>T = 90 days</code> and the upfront amount above. This is a cumulative allowance: unused released authority carries forward within the campaign. The upfront amount is available at the start, and further authority accrues immediately afterward; it is not a fixed daily spending ceiling. Spending stops at the campaign's end. A budget is a maximum, not a promise that all of it will be spent.</p>
+<p>Every purchase must fit the selected campaign's released but uncommitted allowance and the actual reserve balance. Across all acquisition campaigns, outstanding allocations cannot exceed actual treasury inventory. The initial 470m is a budget, not a lifetime contract ceiling. Funding a staking campaign consumes only unallocated treasury inventory. Closing or expiring a campaign releases only its unspent allocation for another governance decision. No qualifying offer means no spending.</p>
+<p>Canceled or refunded purchases and returned treasury fees do not restore consumed gross authority. A treasury purchase has no referral payment; its retained fee returns to reserve inventory without renewing permission to spend it. Returns or new deposits can fund a separately approved new campaign; they never refill an existing campaign’s consumed gross authority. Independent demand remains separately reported evidence of market traction, rather than a condition for these campaign purchases. Campaign budgets are denominated in THOT and establish no dollar redemption value.</p>
+<h2 id="5-what-funds-the-business">5. What funds the business</h2>
+<p>The marketplace receives the quoted service tariff on an independent sale and pays a qualifying direct referral from its net contribution. The retained fee must cover direct service and operating expenses before it becomes profit.</p>
+<p>The project also intends to collect creator fees from applicable Pons trading activity. The selected Pons configuration is a <strong>1% additional creator-tax field</strong>, a <strong>1% base fee</strong>, and native Buyback &amp; Lock <strong>off</strong>, producing a <strong>2% ordinary trading fee</strong>. Under the inspected <a href="https://github.com/ponsdotdev/ponsfamily#v2--bonding-curve--graduated-uniswap-v4-pool" rel="noopener noreferrer">Pons contract configuration</a>, the allocation is <strong>1.7% directly to the creator and 0.3% to Pons</strong>: the creator receives the additional 1% plus 0.7% of the base fee. These are selected settings, not evidence of an executed launch; the public deployment must identify its actual recipients and configuration.</p>
+<p>Trading fees and research fees are separate. Trading fees may fund operations or a subsequently authorized acquisition budget; they do not automatically expand the first campaign, count as independent research demand or become dividends for holders. They apply through the relevant trading contracts, not to every THOT transfer or every trading venue.</p>
+<p>The retained portion of a treasury purchase is an internal return of subsidy inventory. It is not customer revenue. Receipts become profit only after costs, and receiving THOT is not the same as realizing dollars.</p>
+<h2 id="6-the-economic-loop-and-its-limits">6. The economic loop and its limits</h2>
+<p>Early purchases give contributors a reason to supply useful research. Useful research attracts independent buyers paying THOT. Contributors receive payment for useful work, and referrers have a reason to introduce productive suppliers.</p>
+<p>That loop can create transactional token demand. It can also work in reverse. Contributors may sell their proceeds. Expiring locks return tokens to circulation. Buyers can spend existing holdings instead of making a new market purchase. Rising token prices make fixed-THOT offers and tariffs more expensive in dollar terms; falling prices reduce the dollar value of receipts.</p>
+<p>The reserve transfers existing inventory. It does not create outside capital. The durable source of value is research that independent buyers continue purchasing after finite campaign support ends. Neither locking nor a budget formula guarantees a rising price.</p>
+<p>A history of research sales could eventually help someone finance future work. A lender might advance money against expected trace income, but that requires lending capital, underwriting and repayment terms. An appraisal alone provides none of these. Borrowing against future research income is a possible extension, not part of this mechanism.</p>
+<h2 id="7-custody-consent-and-trust">7. Custody, consent and trust</h2>
+<p>Three forms of custody remain separate: <strong>the acquisition reserve, buyer payment escrow, and participants’ locked principal</strong>. Seller principal cannot be spent on acquisitions, lent out or confiscated by the operator. Earned claims and funded offers are not reserve spending discretion.</p>
+<p>The planned reserve has three disclosed authorized buyers. Each buyer can independently commit reserve funds only through permitted market purchases. The selected V0 financial controller is a Safe on the financial contracts’ chain, initially using <strong>one-of-three approval for ordinary administration with no governance notice delay</strong>: any one owner can create a separately funded campaign, change authorized buyers, replace the operator, revise future tariffs or pause acquisitions. Campaign creation still requires available reserve inventory and unallocated lifetime authority. This authority does not shorten a seller’s dispute or custody deadlines, reprice a funded purchase, or allow spending outside campaign limits. Contract addresses and the owner set will be published with the launch deployment.</p>
+<p>The selected Safe policy supports a later change to <strong>two-of-three approval on the same Safe</strong>. At launch, any one owner can authorize actions, including a threshold change; after raising it, ordinary Safe transactions require two owners. This does not change immutable contract code or automatically add a notice delay. Existing test deployments using the older fixed-threshold controller do not gain this capability retroactively. The production integration and threshold-change checks must complete before launch.</p>
+<p>Contract upgradeability and any upgrade timelock are separate design choices whose final scope must be disclosed before launch. Application workload updates use a separate Safe on Base; changing the financial Safe does not change the CVM Safe. Neither Safe’s approval threshold is threshold encryption of trace data.</p>
+<p>Governance permissions do not remove a contributor’s principal lock, the delivery deadline, the dispute filing period or the seller’s response rights.</p>
+<p>The controller governs contract actions; it does <strong>not</strong> hold shares of the trace decryption key. The vault encrypts objects with AES-256-GCM using application-derived keys inside the hosted environment, alongside the confidential VM’s encrypted disk. Chain permissions and application policy authorize a reviewer’s read. Approval of a contract action is separate from decryption.</p>
+<p>Application upgrades carry a separate trust responsibility. The hosted vault uses Phala cloud KMS. A party able to authorize replacement application code remains trusted with vault data; application-level sampling caps cannot constrain malicious replacement code. Moving to a new KMS identity requires explicit data migration. See <a href="https://docs.phala.com/phala-cloud/key-management/multisig-governance" rel="noopener noreferrer">Phala’s governance workflow</a>.</p>
+<p>The new concurrent-campaign reserve has no unrestricted administrator withdrawal, arbitrary-call facility or successor-transfer function. Closing a campaign only releases its unspent allocation inside the same reserve. The older hosted reserve retains its separate 360-day sunset and successor rules; those rules do not migrate inventory into the new contract. Existing purchase escrow and principal locks remain separate liabilities.</p>
+<p>Operators exercise judgment in acquisition selection, buyer independence review and delivery acknowledgment. Subjective disputes use the published reviewer threshold and remedy described above. Non-conflicted reviewers decide after the response period ends or the seller voluntarily waives its remainder. These authorities are operational trust assumptions even when budgets and payment conservation are enforced onchain.</p>
+<p>Exact duplicate imports reuse the contributor’s existing record despite changed file wrappers or timestamps. Identical content from another account does not establish the same rights owner. The application separately reserves each acquisition against a <strong>private keyed fingerprint of normalized source content</strong>, before PII masking, and a commitment to the released content. The same source cannot receive a second funded treasury purchase through the application, even under another wallet, title, licence or trace-specific PII alias, or after a refund. Matching released content is also blocked, so editing excluded material does not reopen eligibility. The source fingerprint stays private; it does not replace the signed hash of the actual licensed release delivered to the buyer. The durable reservations and duplicate checks belong to the application; contracts enforce acquisition authority, signed release commitments and budgets. This is exact-content matching, not semantic fraud detection. Paraphrases, overlapping conversations and multiple identities still require review. Transferable buyer holdings also do not prevent wallet rotation; ordinary buyers still receive no trace excerpt before purchase.</p>
+<p>Privacy and provenance answer different questions. Keeping material private does not prove its source. A captured provider interaction, an imported archive and an account-control proof support different claims. An enclave attestation can identify aspects of a deployed execution environment; it does not by itself establish authorship, account performance, research quality or a fair price.</p>
+<h3 id="capture-and-authentication">Capture and authentication</h3>
+<p>Wallet sign-in proves control of an EVM account through a short-lived, single-use signed message bound to the application origin and chain. It creates a contributor session and links the payout wallet; it does not approve a transfer, authorize a trace sale or grant buyer or operator privileges. Operator wallets are configured explicitly. Privy supplies external-wallet connection and embedded EVM wallet onboarding. The application still verifies Sign-In with Ethereum and identifies the participant by their Robinhood EVM wallet, not by a second Privy-user identity. Privy login does not itself grant sale permission; the connection-level policy is a separate, explicit signature.</p>
+<p>The OpenRouter connection stores the contributor’s provider key encrypted and issues a separate revocable proxy credential. Chat Completions requests and received response content sent through that endpoint are recorded privately, including submitted history and tool calls. The contributor accepts this recording policy at connection time, without a prompt for every exchange. Inference remains billed to their OpenRouter account. With an active connection-level sale policy, completed eligible recordings are automatically offered at the connection’s selected THOT price. The contributor chooses the asking price; it is not an appraisal or promised reward. Existing private-only connections remain private until re-enrolled. Disconnecting stops new recordings; revoking the stream nonce onchain additionally invalidates already-prepared, unfunded delegated sales.</p>
+<p>The listing and committed release identify the <strong>requested model</strong> and the <strong>model returned in OpenRouter’s response</strong>, with “not reported by provider” when that response omits it. These are captured routing and response metadata, not an independent verification of a provider’s model internals. Only activity routed through this endpoint is captured. Connecting a key does not retrieve its previous usage or conversations sent directly to OpenRouter elsewhere; previous messages included in a new request are recorded as submitted history. Provenance identifies operator-observed capture and does not by itself prove human authorship or an attested provider transcript.</p>
+<p>The application records request identities durably and does not automatically resend uncertain inference calls. Reusing a completed request’s idempotency key returns the saved response. An interrupted request requires reconciliation rather than a silent paid retry. Revoking a connection stops new requests and removes the saved provider key; deleting a private trace removes its recorded source material subject to existing licensed-release obligations.</p>
+<p><strong>Account-linked research.</strong> Witnessed orders-and-instruments records can produce an Appraiser-signed positive-fill property for one symbol and bounded window, attached to one exact trace release. The verifier checks the signature, hardware evidence and release binding. The helper rejects paginated histories rather than presenting partial coverage as complete and currently supports at most 32 distinct instrument identifiers. This bounded property does not establish account performance or complete history.</p>
+<p>Balance, P&amp;L, Sharpe ratio, causal ordering, account continuity and complete-history coverage remain future predicates. Ordinary ChatGPT and Claude website history synchronization and unrestricted buyer-uploaded assayer agents are also roadmap work. CLI capture supports selected coding-client workflows; open the <a href="/app">workspace</a> for connection instructions. Connection-level sale authorization allows eligible completed recordings to auto-list after one setup signature. Existing private captures remain private.</p>
+<p>Exact imported content and already-subsidized release hashes are checked for duplication. A private keyed fingerprint binds an exact OpenRouter credential to one wallet, even after disconnect. This does not establish that two different provider keys belong to different people, and ChatGPT/Claude account uniqueness is not yet verified. Wallet addresses alone are not Sybil resistance.</p>
+<p>The worker is an offchain service. Its encrypted transaction journal commits the signed transaction before broadcast, resumes the same transaction after restart and checks canonical chain receipts before recording payment. Contract limits remain authoritative when the worker is offline. Hosting that service inside a TEE additionally requires verified application deployment and evidence binding; it is not established merely by this specification.</p>
+<h3 id="roadmap-private-appraisal-for-disputes-and-reserve-purchases">Roadmap: private appraisal for disputes and reserve purchases</h3>
+<p>The launch design keeps governance review of disputes and the separately authorized, stable one-in-twenty treasury sample described above. A future enclave appraiser could evaluate disputed releases and guide reserve purchases without exposing their text to human reviewers. This could eventually replace the DAO’s sampling access; it does not expand that access today.</p>
+<p>The proposed appraiser runs an LLM inside the enclave under a committed model, prompt and workflow version. Its prompt can remain private while an attested receipt binds the policy version, purchased-release commitment, permitted inputs and result. Participants should be able to check that the same committed policy governed comparable cases. Model nondeterminism and policy updates must be disclosed; a matching commitment does not promise identical outcomes, a fair price or a correct judgment.</p>
+<p>Before using such results to settle money, the protocol must define the appraiser’s authority, bounded outputs, failure and timeout handling, and the route for challenging an erroneous decision. Sensitive trace content and credentials must not escape through receipts or model outputs. This is post-launch work: there is no automatic appraiser verdict in the current dispute path, no deadline promised for replacing reviewers, and no retroactive change to funded purchases or their evidence permissions.</p>
+<h2 id="appendix-accounting-rules">Appendix: accounting rules</h2>
+<h3 id="sale-settlement">Sale settlement</h3>
+<p>For gross funded price <code>P</code>, frozen service fee <code>F</code> and quoted direct cost <code>C</code>, use token atomic units:</p>
+<pre class="text"><code>N = F − C
+seller = P − F
+referrer = eligible ? floor(N × 2,000 / 10,000) : 0
+protocol = F − referrer</code></pre>
+<p>The allocations sum exactly to <code>P</code>. Every treasury purchase sets <code>eligible = false</code> and its retained fee returns to the reserve without renewing spending authority. Refunds cancel all pending allocations. A subjective buyer win follows the 50% refund / 50% dead-address rule. Finalized claims are protected from later tariff, lock or licence changes and can be paid only once.</p>
+<h3 id="concurrent-campaign-authorization">Concurrent campaign authorization</h3>
+<p>Use token atoms and seconds. For a campaign's budget <code>B</code>, upfront amount <code>U</code>, duration <code>T</code>, elapsed time <code>t</code> and gross commitments <code>G</code>:</p>
+<pre class="text"><code>released(t) = U + floor((B − U) × t / T)    for 0 ≤ t &lt; T
+available(t) = min(max(0, released(t) − G), reserve balance)</code></pre>
+<p>Available authority is zero before the start, at or after expiry, while the reserve or campaign is paused, or after the campaign closes. For the selected first campaign, <code>B = 50,000,000 × 10^18</code>, <code>U = floor(B / 90)</code> and <code>T = 90 × 86,400</code>. No independent-demand variable enters this calculation.</p>
+<p>Let <code>A</code> be the sum of all open campaigns' unspent allocations and <code>L</code> be lifetime gross commitments across the reserve. A newly created campaign must fit:</p>
+<pre class="text"><code>new acquisition or staking budget ≤ max(0, treasury balance − A)</code></pre>
+<p>A funded purchase of gross amount <code>g</code> increases its campaign's <code>G</code> and reserve lifetime <code>L</code> by <code>g</code>, and decreases <code>A</code> by <code>g</code>. The charged commitment remains consumed even if that purchase later expires, is canceled or refunds. Closing or expiring a campaign decreases <code>A</code> only by its remaining <code>B − G</code>; it does not reduce <code>L</code> or transfer inventory to a wallet. Returned payments and unused staking rewards may support a new campaign after governance approval; existing acquisition commitments are never reset.</p>
+<p>After expiry, no new purchases use that campaign. Already funded purchases retain their authorized terms, and all existing delivery, dispute, refund and claim obligations continue. Unallocated inventory needs another campaign authorization. Neither token price nor an appraised trace value independently authorizes spending. These formulas describe the new selected reserve; older hosted campaigns keep their original implementation.</p>
+<p>Captured text retains available system/developer context, tool definitions, calls and outputs, alongside requested and returned model identifiers when recorded. Imported model labels are user-supplied, rather than provider proof; missing identifiers remain unknown. Release preparation masks credential-like secrets and selected personal identifiers. It does not deliberately remove all technical context. The original received bytes stay in the private vault; unsupported binary or multimodal payloads are not automatically included in the text licence. <a href="https://openai.com/index/introducing-openai-privacy-filter/" rel="noopener noreferrer">OpenAI Privacy Filter</a> is a possible local detector; it is not the filter currently deployed by this application.</p>
+<h2 id="holding-thot-lowers-marketplace-fees">Holding THOT lowers marketplace fees</h2>
+<p>Holding at least 10,000 THOT gives a 20% reduction of the base service fee; at 100,000 THOT the reduction is 30%. At least 100,000 THOT in unmatured staking positions originally committed for 90 days or more gives a 35% reduction until maturity. Only the best tier applies. A seller qualifies independently for the same reduction, which increases their proceeds. When both qualify, both benefit. Unclaimed staking principal counts toward holdings, but staking is not required. These percentages apply to the service fee, not the entire trace price.</p>
+<p>The protocol funds both benefits by retaining less fee revenue. Each reduction is capped to preserve the direct-cost allowance and referral allocation. No extra token issuance or separately funded cashback pool is required. Holdings are checked before funding, and the contract fixes both parties' amounts at that point. Treasury-funded acquisitions do not receive these discounts. Governance may change future terms without changing funded purchases.</p>
+        </article>
+        <div class="reading-next"><div><h2>Start with the idea.</h2><p>The story behind a market for useful AI research.</p></div><a class="button" href="/read">Read the launch post <span aria-hidden="true">↗</span></a></div>
+      </div>
+    </div>
+  </main>
+  <footer class="site-footer wrap">
+    <a class="footer-brand" href="/">thot market</a>
+    <nav aria-label="Footer navigation"><a href="/read">The idea</a><a href="/tutorial">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/whitepaper" aria-current="page">Whitepaper</a><a href="/app">App</a></nav>
+    <p>Independent of Robinhood. No endorsement or account access is implied.</p>
+    <span class="footer-motto">Don’t get distilled for free.</span>
+  </footer>
+</body>
+</html>

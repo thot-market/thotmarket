@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f1e7">
+    <title>Your traces · thot market</title>
+    <link rel="icon" href="/assets/thot-logo.png" type="image/png">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/staking.css">
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="thot market home"><img class="thot-app-logo" src="/assets/thot-logo.png" alt=""><span>thot<small>market</small></span></a>
+      <p class="nav-label">Your workspace</p>
+      <nav aria-label="Main navigation">
+        <button class="nav-item active" data-view="vault"><span aria-hidden="true">▤</span>Your traces</button>
+        <button class="nav-item" data-view="market"><span aria-hidden="true">↗</span>Offers</button>
+        <button class="nav-item" data-view="earnings"><span aria-hidden="true">◒</span>Earnings</button>
+        <button class="nav-item" data-view="referrals" hidden><span aria-hidden="true">↪</span>Referrals</button>
+        <button class="nav-item" data-view="leaderboard" hidden><span aria-hidden="true">▥</span>Market activity</button>
+        <button class="nav-item" data-view="receipts"><span aria-hidden="true">✓</span>Receipts</button>
+        <button class="nav-item" data-view="thot"><span aria-hidden="true">✳</span>THOT</button>
+        <button class="nav-item" data-view="operator" hidden><span aria-hidden="true">▣</span>Treasury</button>
+        <a class="nav-item" id="operations-console-link" href="/ops" hidden><span aria-hidden="true">⚙</span>Operations</a>
+        <button class="nav-item" id="trace-explorer-nav" data-action="open-trace-explorer" hidden><span aria-hidden="true">▦</span>Trace explorer</button>
+      </nav>
+      <div class="sidebar-note"><p>Your thoughts.<br>Your terms.</p><small>Connect your tools.<br>Earn when your research sells.</small><div class="app-public-links"><a href="/read">Read the story</a><a href="/mechanism">The mechanism</a></div></div>
+      <details class="local-tools"><summary>Developer tools</summary><button data-action="worker">Run pending jobs <span>↻</span></button><button data-action="burn">Simulate burn completion <span>↗</span></button><small>Simulated funding and chain execution.<br>No real tokens or payments.</small></details>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><div class="environment"><span class="status-dot"></span>Demo workspace</div><div class="session-control"><label for="role">View as</label><select id="role"><option value="user">Contributor</option><option value="buyer_admin">Buyer</option><option value="operator_security">Operator</option></select><button class="icon-button" data-action="refresh" aria-label="Refresh current view">↻</button></div></header>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <main id="main" tabindex="-1"><div class="loading"><span class="spinner"></span><p>Opening your workspace…</p></div></main>
+      <footer class="page-footer"><span>thot market · Private traces, deliberate releases.</span><span><a href="/">Home</a> <a href="/read">Read</a> <a href="/mechanism">Mechanism</a></span></footer>
+    </div>
+    <dialog id="detail-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <noscript><p class="notice">Enable JavaScript to open your thot market workspace.</p></noscript>
+  </body>
+</html>

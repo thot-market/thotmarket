@@ -1,0 +1,6 @@
+import {createCipheriv,createDecipheriv,createPublicKey,diffieHellman,hkdfSync,randomBytes,type KeyObject} from 'node:crypto';
+export const publicDer=(key:KeyObject)=>key.export({format:'der',type:'spki'}).toString('base64');
+export const publicKey=(value:string)=>createPublicKey({key:Buffer.from(value,'base64'),format:'der',type:'spki'});
+export function channelKey(secret:KeyObject,peer:string){return Buffer.from(hkdfSync('sha256',diffieHellman({privateKey:secret,publicKey:publicKey(peer)}),Buffer.alloc(0),'thot.tee-channel/1',32));}
+export function encrypt(key:Buffer,value:unknown,aad:string){const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv);c.setAAD(Buffer.from(aad));const bytes=Buffer.concat([c.update(JSON.stringify(value)),c.final()]);return Buffer.concat([iv,c.getAuthTag(),bytes]).toString('base64');}
+export function decrypt(key:Buffer,value:string,aad:string,maxEncodedBytes=20_000_000){if(typeof value!=='string'||value.length>maxEncodedBytes)throw Error('INVALID_CHANNEL_MESSAGE');const bytes=Buffer.from(value,'base64');if(bytes.length<28)throw Error('INVALID_CHANNEL_MESSAGE');const c=createDecipheriv('aes-256-gcm',key,bytes.subarray(0,12));c.setAAD(Buffer.from(aad));c.setAuthTag(bytes.subarray(12,28));return JSON.parse(Buffer.concat([c.update(bytes.subarray(28)),c.final()]).toString());}

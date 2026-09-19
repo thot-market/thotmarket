@@ -1,0 +1,85 @@
+{
+  "example_format": "thot.receipt-format-example/1",
+  "warning": "SYNTHETIC FORMAT EXAMPLE. NO HARDWARE ASSURANCE. UNSIGNED VAULT SUMMARY.",
+  "consent": {
+    "save_privately": true,
+    "rights_confirmed": false,
+    "model_output_licensed": false
+  },
+  "bundle": {
+    "format": "thot.proxy-capture/2",
+    "capture_id": "00000000-0000-4000-8000-000000000001",
+    "client": "claude",
+    "started_at": "2026-09-12T12:00:00.000Z",
+    "finished_at": "2026-09-12T12:00:03.000Z",
+    "parts": [
+      {
+        "sequence": 1,
+        "commitment": "6383174e7c0a851a55e52d57ef6347d99f525fe6d82c9ed3a21eae29be11d887"
+      },
+      {
+        "sequence": 2,
+        "commitment": "a16d069866f083b19c6fd74538ea3aef7fcc88dad16475b2d87551159d9e178b"
+      }
+    ],
+    "root": "b48a788e44c058eecb0b8132937f7107e7b0d8ec4e58a129eb57a76487564013"
+  },
+  "evidence": {
+    "statement": {
+      "purpose": "thot.tee-capture-seal/1",
+      "capture_id": "00000000-0000-4000-8000-000000000001",
+      "client": "claude",
+      "consent_hash": "34bbe5835eedd48963bdc7d10beac926b3ba359924cc1a278379bc89e8e8a5bf",
+      "bundle_hash": "82c4cadb3b7ed4ca0784558aa7168f754029ae92106649ddc7b7bbd8a2a9b653",
+      "session_root": "b48a788e44c058eecb0b8132937f7107e7b0d8ec4e58a129eb57a76487564013"
+    },
+    "signature": "7x0TMrVGcshb60unxENmiHWFENAiTAiERGPk8hbDs8Mdk7JNMYGUNxmgvmYsFK0LeowZaUPie2P6gtY7pN4qBQ==",
+    "attestation": {
+      "statement": {
+        "purpose": "thot.tee-recorder-key/1",
+        "signing_key": "MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+        "channel_key": "MCowBQYDK2VuAyEAMdSras7slhE3kXA3k25gcW+sVzr+lNnahKgCBEjfwRI="
+      }
+    }
+  },
+  "capture_receipt": {
+    "schema_version": "trace.provenance/1",
+    "receipt_id": "00000000-0000-4000-8000-000000000002",
+    "trace_id": "00000000-0000-4000-8000-000000000003",
+    "path": "operator_capture",
+    "confidence_tier": "P0_OPERATOR",
+    "temporal": {
+      "observed_start": "2026-09-12T12:00:00.000Z",
+      "observed_end": "2026-09-12T12:00:03.000Z"
+    },
+    "commitments": {
+      "raw_trace_hash": "4e5720de9f8fd841a5cd467c4e2df60385673a86d566990797fa696143c977be",
+      "source_bundle_hash": "4e5720de9f8fd841a5cd467c4e2df60385673a86d566990797fa696143c977be",
+      "session_root": "b48a788e44c058eecb0b8132937f7107e7b0d8ec4e58a129eb57a76487564013"
+    },
+    "claims": [
+      "Synthetic format example: the referenced bytes match their commitments."
+    ],
+    "limitations": [
+      "Unsigned example summary; not an actual vault acknowledgement.",
+      "No TEE quote, hardware assurance, real provider call, authenticated recorder identity, or market authorization is present.",
+      "The public test-only seed can reproduce the signature."
+    ],
+    "verifier": {
+      "implementation": "thot-receipt-format-example",
+      "version": "1",
+      "verified_at": "2026-09-12T12:00:03.000Z"
+    }
+  },
+  "capture_summary": {
+    "exchanges": 2,
+    "completed": 2,
+    "interrupted": 0,
+    "normalized": 0,
+    "model_exchanges": 2,
+    "incremental": true,
+    "request_bytes": 230,
+    "response_bytes": 321,
+    "largest_request_bytes": 117
+  }
+}

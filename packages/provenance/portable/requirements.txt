@@ -1,0 +1,10 @@
+# Exact maintained verifier release. Wheel SHA256 values from official PyPI 0.6.1 JSON.
+# Install with --require-hashes --only-binary=:all:; macOS/Linux/Windows x64/arm64 wheels.
+dcap-qvl==0.6.1 \
+    --hash=sha256:fc64c271a41413b44dd9185c8ceff7d48033b8708047cc89e9899f0442003d4a \
+    --hash=sha256:b09b5c20f17bcb44b3ed65d873b0d055f241aff5549d0d098637608892261c6e \
+    --hash=sha256:5c3bfcd6e3c962ce5dc6f3481b309268e7b6581ebb80798280f2ad84f06aa147 \
+    --hash=sha256:08aacb2dc4393f4745dbd712b241b150fe35f5244e374abe8e32725a0f647018 \
+    --hash=sha256:dcba212c881f19b7f93c61807e96747794a7b986492f1834acc70a685659450a \
+    --hash=sha256:4471b9ddb1a77488013fee774af6d469d96b8bd72d94c094dd48a2bb9e04fd00 \
+    --hash=sha256:2a2039ea72de1c3f6fa8938c809a77d17934c56e7d6175f20524e5dc0c846c6f

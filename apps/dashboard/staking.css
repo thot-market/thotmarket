@@ -1,0 +1,58 @@
+.staking-preview{margin:0 0 2rem;border:1px solid var(--line,#d9ddcc);border-radius:16px;background:var(--surface,#fffcf5);overflow:hidden;color:var(--ink,#182016)}
+.staking-intro{padding:1.75rem 1.75rem 0}
+.staking-intro h2{font:600 clamp(1.6rem,3vw,2.25rem)/1.1 "Bricolage Grotesque",sans-serif;letter-spacing:-.04em;margin:0 0 .65rem}
+.staking-intro p{font-size:.9375rem;line-height:1.6;color:var(--muted,#64705b);margin:0;max-width:60ch}
+.staking-calculator{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:1.75rem;padding:1.75rem}
+.staking-controls{min-width:0}
+.staking-duration{border:0;padding:0;margin:0 0 1.5rem;min-width:0}
+.staking-duration legend,.staking-amount-label{font-size:.875rem;font-weight:650;margin:0 0 .75rem;display:block;color:var(--ink,#182016)}
+.staking-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem}
+.staking-option{position:relative;display:block;cursor:pointer;min-width:0}
+.staking-option input{position:absolute;inset:0;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}
+.staking-option-content{display:flex;flex-direction:column;gap:.45rem;min-height:150px;padding:.9rem .65rem;border:1px solid #bdc7b2;border-radius:10px;background:var(--surface,#fffcf5);transition:background .15s,border-color .15s}
+.staking-days{font-size:.875rem;font-weight:650}
+.staking-option strong{font:600 clamp(1.75rem,3vw,2.4rem)/1.2 "Bricolage Grotesque",sans-serif;letter-spacing:-.055em}
+.staking-option-content>span:not(.staking-days){font-size:.75rem;color:#506145}
+.staking-option small{font-size:.75rem;font-weight:650;margin-top:auto;padding-top:.25rem;color:var(--navy,#24391f)}
+.staking-option input:checked+.staking-option-content{background:#eaf0d1;border-color:var(--navy,#24391f);box-shadow:inset 0 0 0 1px var(--navy,#24391f)}
+.staking-option input:focus-visible+.staking-option-content{outline:3px solid #526d26;outline-offset:3px}
+.staking-option:hover .staking-option-content{border-color:var(--navy,#24391f)}
+.staking-amount-field{display:flex;align-items:center;gap:.75rem;border:1px solid #acb69f;border-radius:9px;background:var(--surface,#fffcf5);padding:0 .875rem}
+.staking-amount-field:focus-within{outline:3px solid #8ba84e;outline-offset:3px}
+.staking-amount-field input{min-width:0;width:100%;border:0;background:transparent;padding:.8rem 0;font:500 1.4rem "DM Sans",sans-serif;color:var(--ink,#182016)}
+.staking-amount-field input:focus-visible{outline:none}
+.staking-amount-field>span{font-size:.8rem;font-weight:650;color:var(--muted,#64705b)}
+.staking-input-help,.staking-input-error{font-size:.8125rem;line-height:1.6;margin:.65rem 0 0;max-width:55ch}
+.staking-input-help{color:var(--muted,#64705b)}
+.staking-input-error{color:#943521}
+.staking-receipt{min-width:0;background:#eef0e2;border-radius:12px;padding:1.4rem;align-self:stretch}
+.staking-receipt h3{font-size:.9375rem;font-weight:650;margin:0 0 1.5rem}
+.staking-receipt-lines{margin:0}
+.staking-receipt-lines>div{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;padding:0 0 1rem}
+.staking-receipt-lines dt{font-size:.8125rem;color:#506145;flex-shrink:0}
+.staking-receipt-lines dt>span{display:block;padding-top:.25rem;color:var(--navy,#24391f);font-weight:650}
+.staking-receipt-lines dd{margin:0;font-size:.9375rem;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;min-width:0}
+.staking-receipt-lines dd>span{font-size:.75rem;font-weight:400;color:#506145}
+.staking-receipt-lines>.staking-total{display:block;border-top:1px dashed #9eaa90;padding:1rem 0 0}
+.staking-total dt{margin-bottom:.4rem;color:var(--ink,#182016)}
+.staking-total dd{text-align:left;font:600 clamp(1.65rem,3vw,2.5rem)/1.1 "Bricolage Grotesque",sans-serif;letter-spacing:-.045em}
+.staking-total dd>span{font-size:.875rem;letter-spacing:0}
+.staking-maturity,.staking-empty{font-size:.8125rem;line-height:1.6;margin:.75rem 0 0;color:#506145;max-width:40ch}
+.staking-apr{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin:1rem 0 0;padding-top:1rem;border-top:1px solid #ccd4bf}
+.staking-apr strong{font:600 1.25rem "Bricolage Grotesque",sans-serif;color:var(--navy,#24391f)}
+.staking-apr>span{font-size:.75rem;color:#506145}
+.staking-enrollment{margin:0 1.75rem;padding:1rem 0;border-top:1px solid var(--line,#d9ddcc);font-size:.875rem;font-weight:600;line-height:1.5;color:var(--navy,#24391f)}
+.staking-rate-details{margin:0 1.75rem;padding:1rem 0;border-top:1px solid var(--line,#d9ddcc)}
+.staking-rate-details summary{font-size:.875rem;font-weight:600;cursor:pointer;line-height:1.5}
+.staking-rate-details p{font-size:.8125rem;line-height:1.7;max-width:75ch;color:#506145}
+.staking-rate-table-wrap{overflow-x:auto}
+.staking-rate-details table{width:100%;border-collapse:collapse;text-align:left;font-size:.8125rem;line-height:1.5;margin:.75rem 0}
+.staking-rate-details caption{text-align:left;color:#506145;margin-bottom:.6rem;font-size:.75rem}
+.staking-rate-details th,.staking-rate-details td{border-bottom:1px solid var(--line,#d9ddcc);padding:.75rem .6rem .75rem 0;font-variant-numeric:tabular-nums}
+.staking-rate-details thead th{font-weight:500;color:#506145}
+.staking-future{margin:0;padding:1.5rem 1.75rem;background:#f3f4e9;border-top:1px solid var(--line,#d9ddcc)}
+.staking-future h3{margin:0 0 .6rem;font:600 1.2rem "Bricolage Grotesque",sans-serif}
+.staking-future p{margin:0;font-size:.8125rem;line-height:1.7;max-width:75ch;color:#506145}
+@media(max-width:1050px){.staking-calculator{grid-template-columns:1fr}.staking-receipt{max-width:none}.staking-receipt-lines>div:not(.staking-total){max-width:38rem}.staking-receipt-lines>.staking-total{display:flex;align-items:baseline;gap:1rem;justify-content:space-between}.staking-total dd{text-align:right}.staking-option-content{min-height:143px}}
+@media(max-width:480px){.staking-intro{padding:1.25rem 1rem 0}.staking-calculator{padding:1.25rem 1rem;gap:1rem}.staking-options{gap:.375rem}.staking-option-content{padding:.75rem .5rem;min-height:139px}.staking-option strong{font-size:1.8rem}.staking-days{font-size:.8rem}.staking-option small,.staking-option-content>span:not(.staking-days){font-size:.6875rem}.staking-receipt{padding:1rem}.staking-enrollment,.staking-rate-details{margin:0 1rem}.staking-future{padding:1.25rem 1rem}.staking-receipt-lines>.staking-total{display:block}.staking-total dd{text-align:left}.staking-rate-details table{font-size:.75rem}.staking-receipt-lines>div{gap:.5rem}.staking-receipt-lines dt{font-size:.75rem}.staking-receipt-lines dd{font-size:.8125rem}}
+@media(prefers-reduced-motion:reduce){.staking-option-content{transition:none}}

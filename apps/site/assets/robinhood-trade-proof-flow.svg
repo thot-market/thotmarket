@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 620" role="img" aria-labelledby="title desc">
+  <title id="title">The thot market Robinhood trade-proof path</title>
+  <desc id="desc">Five connected stages: private research trace, witnessed Robinhood records, attested appraiser, bounded trade property, and buyer filter followed by THOT payment.</desc>
+  <rect width="1600" height="620" rx="44" fill="#e9ecd8"/>
+  <path d="M145 312 C315 258 402 362 560 306 S817 256 972 314 S1220 364 1454 294" fill="none" stroke="#778561" stroke-width="7" stroke-linecap="round" stroke-dasharray="3 22"/>
+  <g font-family="DM Sans, Arial, sans-serif" fill="#192219">
+    <g transform="translate(54 124)">
+      <path d="M31 12h220l35 35v326H31z" fill="#fffdf3" stroke="#192219" stroke-width="7"/>
+      <path d="M251 12v46h46" fill="none" stroke="#192219" stroke-width="7"/>
+      <path d="M70 115h178M70 160h135M70 205h161M70 250h112" stroke="#778561" stroke-width="12" stroke-linecap="round"/>
+      <text x="31" y="424" font-size="34" font-weight="700">Private trace</text>
+      <text x="31" y="464" font-size="22" fill="#626854">one exact content hash</text>
+    </g>
+    <g transform="translate(388 123)">
+      <rect x="0" y="20" width="265" height="342" rx="20" fill="#324632"/>
+      <circle cx="132" cy="95" r="39" fill="#d7ff00"/>
+      <path d="M70 165h125M70 210h125M70 255h91" stroke="#f7f4e5" stroke-width="12" stroke-linecap="round"/>
+      <path d="M94 319c19-37 57-37 76 0" fill="none" stroke="#d7ff00" stroke-width="11" stroke-linecap="round"/>
+      <text x="0" y="424" font-size="34" font-weight="700">Witness</text>
+      <text x="0" y="464" font-size="22" fill="#626854">orders + instruments</text>
+    </g>
+    <g transform="translate(724 123)">
+      <path d="M132 12l118 62v139c0 84-45 133-118 162C59 346 14 297 14 213V74z" fill="#fffdf3" stroke="#192219" stroke-width="7"/>
+      <path d="M73 190l39 39 83-96" fill="none" stroke="#324632" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="13" y="424" font-size="34" font-weight="700">Appraiser</text>
+      <text x="13" y="464" font-size="22" fill="#626854">measured private code</text>
+    </g>
+    <g transform="translate(1050 123)">
+      <rect x="0" y="20" width="280" height="342" rx="20" fill="#d7ff00" stroke="#192219" stroke-width="7"/>
+      <text x="31" y="89" font-size="23" font-weight="700">VERIFIED PROPERTY</text>
+      <text x="31" y="161" font-size="37" font-weight="750">traded:F</text>
+      <text x="31" y="208" font-size="37" font-weight="750">within_30d</text>
+      <text x="31" y="282" font-size="24">value = true</text>
+      <text x="31" y="326" font-size="20" fill="#324632">no orders disclosed</text>
+      <text x="0" y="424" font-size="34" font-weight="700">Bounded proof</text>
+      <text x="0" y="464" font-size="22" fill="#626854">bound to the release</text>
+    </g>
+    <g transform="translate(1391 151)">
+      <circle cx="70" cy="92" r="67" fill="#fffdf3" stroke="#192219" stroke-width="7"/>
+      <circle cx="70" cy="92" r="25" fill="none" stroke="#324632" stroke-width="11"/>
+      <path d="M117 139l54 54" stroke="#324632" stroke-width="17" stroke-linecap="round"/>
+      <rect x="6" y="257" width="174" height="78" rx="12" fill="#324632"/>
+      <text x="93" y="309" text-anchor="middle" font-size="27" font-weight="700" fill="#fffdf3">PAY THOT</text>
+      <text x="-3" y="396" font-size="34" font-weight="700">Buyer</text>
+      <text x="-3" y="436" font-size="22" fill="#626854">filter, pay, receive</text>
+    </g>
+  </g>
+</svg>

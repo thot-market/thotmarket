@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f4e5">
+  <title>Referrals — thot market</title>
+  <meta name="description" content="Bring useful contributors to thot market. Earn a share of the service margin when their traces sell to qualifying buyers.">
+  <link rel="icon" type="image/png" href="/assets/thot-logo.png">
+  <link rel="stylesheet" href="/site.css">
+  <link rel="stylesheet" href="/referrals.css">
+  <script src="/referrals.js" type="module"></script>
+</head>
+<body class="referral-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="/" aria-label="thot market home"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="/#how-it-works">How it works</a><a href="/affiliates" aria-current="page">Referrals</a><a href="/mechanism">Mechanism</a></nav>
+    <a class="button button-small" href="/app" data-workspace-link>Sign in</a>
+  </header>
+  <main id="main">
+    <section class="affiliate-hero wrap">
+      <div class="affiliate-intro">
+        <p class="referral-overline">The thot market referral program</p>
+        <h1>Good minds<br>know good minds.</h1>
+        <p class="affiliate-lede">Know someone whose AI conversations are worth learning from? Bring them here. When their useful traces sell, you can earn too.</p>
+        <a class="button" href="/app" data-workspace-link>Open your referral dashboard</a>
+        <p class="referral-small">Sign in, then choose <strong>Referrals</strong> in your workspace.</p>
+      </div>
+      <div class="affiliate-receipt" aria-label="Referral benefit">
+        <div class="receipt-heading"><span>thot market</span><img src="/assets/thot-logo.png" alt="" width="64" height="64"></div>
+        <p>Your introduction. Their useful work.</p>
+        <div class="referral-rate">20<span>%</span></div>
+        <h2>of our service margin.<br>On qualifying trace sales.</h2>
+        <div class="receipt-divider"></div>
+        <p>Service fee − direct costs = service margin.<br>You receive 20% of that margin.</p>
+        <p class="referral-receipt-foot">Paid from our fee. No extra deduction from their quoted proceeds.</p>
+      </div>
+    </section>
+
+    <section class="wrap referral-steps-section" aria-labelledby="referral-steps-title">
+      <div class="referral-section-heading"><h2 id="referral-steps-title">An introduction that<br>keeps earning its keep.</h2><p>One direct referral. Repeat qualifying sales.<br>A 365-day reward window.</p></div>
+      <ol class="referral-steps">
+        <li><span class="step-number" aria-hidden="true">1</span><h3>Share your wallet.</h3><p>Sign in and share your linked Robinhood EVM wallet address with a contributor.</p></li>
+        <li><span class="step-number" aria-hidden="true">2</span><h3>They make it official.</h3><p>Before their first sale, they register your address as their referrer in the THOT tab and confirm it with their wallet.</p></li>
+        <li><span class="step-number" aria-hidden="true">3</span><h3>Their work sells. You earn.</h3><p>Their first qualifying purchase must be funded within 90 days. It opens a 365-day window for qualifying purchases that can earn you a referral payment.</p></li>
+      </ol>
+    </section>
+
+    <section class="referral-calculator-section" id="calculator" aria-labelledby="referral-calculator-title">
+      <div class="wrap">
+        <div class="referral-section-heading"><div><p class="referral-overline">Put a number on it</p><h2 id="referral-calculator-title">See exactly<br>where your cut comes from.</h2></div><p>Change the number of qualifying sales.<br>The receipt does the maths.</p></div>
+        <div class="referral-calculator" data-referral-calculator>
+          <div class="calculator-inputs">
+            <span class="evidence-tag">Worked example · testnet tariff</span>
+            <label for="referral-sales">Qualifying sales from your referrals</label>
+            <div class="sales-input-row"><input id="referral-sales" data-sales-count type="number" inputmode="numeric" min="0" max="1000000" step="1" value="1000" aria-describedby="referral-calculation-basis"><span>sales</span></div>
+            <div class="sales-presets" aria-label="Try a sales count"><button type="button" data-sales-preset="100">100</button><button type="button" data-sales-preset="1000" aria-pressed="true">1,000</button><button type="button" data-sales-preset="10000">10,000</button></div>
+            <p id="referral-calculation-basis" class="referral-small">Only finalized, eligible independent purchases count. Treasury purchases, self-referrals and refunded orders do not.</p>
+          </div>
+          <div class="calculator-receipt">
+            <dl class="calculation-lines">
+              <div><dt>Service fee per sale</dt><dd><span data-service-fee>—</span> THOT</dd></div>
+              <div><dt>Direct costs per sale</dt><dd>− <span data-direct-cost>—</span> THOT</dd></div>
+              <div><dt>Service margin per sale</dt><dd><span data-net-margin>—</span> THOT</dd></div>
+              <div><dt>Your share of that margin</dt><dd>20%</dd></div>
+            </dl>
+            <div class="calculator-result" aria-live="polite" aria-atomic="true"><span>Your illustrative referral earnings</span><strong><output data-referral-total>—</output> <small>test THOT</small></strong><p data-referral-formula>Loading the verified tariff…</p></div>
+          </div>
+        </div>
+        <p class="calculator-caption" data-tariff-note>A worked example, not your account balance. The production tariff will be published before launch.</p>
+      </div>
+    </section>
+
+    <section class="wrap proof-section" aria-labelledby="proof-title" data-market-proof>
+      <div class="referral-section-heading"><div><p class="referral-overline">Follow the receipts</p><h2 id="proof-title">Every sale<br>leaves a receipt.</h2></div><div><span class="evidence-tag">Robinhood testnet</span><p data-proof-time>Checking public purchase receipts…</p></div></div>
+      <div class="proof-board"><div class="proof-board-heading"><h3>Recent test purchases</h3><span>Public transaction evidence</span></div><div data-proof-rows><p class="proof-empty">Loading the latest published snapshot…</p></div></div>
+      <p class="proof-caption">These are testnet verification purchases, not customer adoption or real-money earnings. Amounts show the purchase price; delivered purchases may still be under review. The private workspace has opt-in earner and buyer leaderboards.</p>
+      <a class="text-link" href="/app" data-workspace-link>Explore market activity in the app</a>
+    </section>
+
+    <section class="wrap affiliate-faq" aria-labelledby="faq-title">
+      <h2 id="faq-title">The useful details.</h2>
+      <div class="privacy-details">
+        <details open><summary>Is this 20% of everything my referral sells?</summary><p>No. It is 20% of the service fee left after quoted direct costs. The contributor still receives their quoted sale proceeds. The calculator shows each part separately.</p></details>
+        <details><summary>Do I get a shareable referral link?</summary><p>At present, you share your linked wallet address. The contributor registers it in their THOT tab before their first sale. Opening a link alone does not register a referral. You can check accepted contributors and earnings in your Referrals dashboard.</p></details>
+        <details><summary>When can I claim a referral payment?</summary><p>After an eligible purchase finalizes. In the current test deployment, buyers have 12 hours after recorded delivery to raise a dispute. A dispute can delay settlement; refunded purchases earn no referral payment. Pending earnings and claimable tokens are shown separately.</p></details>
+        <details><summary>Does the treasury buying their traces count?</summary><p>No. Referral rewards come from eligible independent purchases. Reserve-funded purchases, self-purchases, purchases by the referrer, refunded orders and unreviewed orders do not qualify.</p></details>
+        <details><summary>Do I need to buy or lock THOT to refer someone?</summary><p>The current referral rule has no token purchase or lock requirement. Lock rewards and trace-sale proceeds are separate from this referral program.</p></details>
+        <details><summary>What happens after the first qualifying sale?</summary><p>The first qualifying purchase must be funded within 90 days of registration. It starts a 365-day window: later qualifying purchases funded during that window can earn rewards once finalized. There are no multi-level commissions.</p></details>
+      </div>
+    </section>
+    <section class="closing-section"><div class="wrap closing-inner"><div><h2>Know a good mind?</h2><p>Give their useful work somewhere to go.</p></div><a class="button button-acid" href="/app" data-workspace-link>Open your workspace</a></div></section>
+  </main>
+  <footer class="site-footer wrap"><a class="footer-brand" href="/">thot market</a><nav aria-label="Footer navigation"><a href="/read">The idea</a><a href="/affiliates">Referrals</a><a href="/mechanism">Mechanism</a><a href="/app" data-workspace-link>App</a></nav><span class="footer-motto">Don’t get distilled for free.</span></footer>
+</body>
+</html>

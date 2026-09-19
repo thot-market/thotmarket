@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "THOT Robinhood Connector",
+  "version": "0.1.0",
+  "description": "Connects an existing signed-in Robinhood browser session to the local THOT companion.",
+  "permissions": [],
+  "host_permissions": [
+    "https://robinhood.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "content_scripts": [
+    {"matches":["https://robinhood.com/*"],"js":["isolated-bridge.js"],"run_at":"document_start","world":"ISOLATED"},
+    {"matches":["https://robinhood.com/*"],"js":["main-hook.js"],"run_at":"document_start","world":"MAIN"}
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  }
+}

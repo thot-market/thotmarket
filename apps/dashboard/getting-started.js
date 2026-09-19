@@ -1,0 +1,2 @@
+document.querySelector('#install-command').textContent=`node scripts/install-capture-helper.ts --thot-url ${location.origin}`;
+document.addEventListener('click',async event=>{const button=event.target.closest('[data-copy]');if(!button)return;try{await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent);button.textContent='Copied';}catch{button.textContent='Select and copy the command';}});
