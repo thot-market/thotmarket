@@ -22,6 +22,6 @@ export function selectPrivyWallet(user, wallets, address = null) {
 
 export function validatePrivyConfig(config) {
   let rpc; try {rpc = new URL(config?.rpc_url);} catch {}
-  if (!config || !/^[a-z0-9]{20,64}$/.test(config.app_id ?? '') || config.client_id && !/^[a-z0-9_-]{10,100}$/i.test(config.client_id) || ![31337, 46630].includes(config.chain_id) || rpc?.protocol !== 'https:') throw new Error('Privy login is not configured for this application.');
+  if (!config || !/^[a-z0-9]{20,64}$/.test(config.app_id ?? '') || config.client_id && !/^[a-z0-9_-]{10,100}$/i.test(config.client_id) || ![31337, 46630, 4663].includes(config.chain_id) || rpc?.protocol !== 'https:' || config.chain_id === 4663 && rpc.href !== 'https://rpc.mainnet.chain.robinhood.com/') throw new Error('Privy login is not configured for this application.');
   return {appId: config.app_id, ...(config.client_id ? {clientId: config.client_id} : {}), chainId: config.chain_id, rpcUrl: rpc.href};
 }

@@ -93,7 +93,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
   const walletChainId=externalAuth?.capabilities.wallet?.chain_id;
   const walletRpcUrl=externalAuth?.capabilities.wallet?.rpc_url;
   const privy=options.privy?{app_id:options.privy.app_id,...(options.privy.client_id?{client_id:options.privy.client_id}:{}),chain_id:walletChainId,rpc_url:walletRpcUrl}:undefined;
-  if(privy)ensure(authMode==='wallet_siwe'&&[31337,46630].includes(privy.chain_id!)&&/^[a-z0-9]{20,64}$/.test(privy.app_id)&&(!privy.client_id||/^[a-z0-9_-]{10,100}$/i.test(privy.client_id)),'INVALID_PRIVY_PUBLIC_CONFIG');
+  if(privy)ensure(externalAuth instanceof WalletAuth&&[31337,46630,4663].includes(privy.chain_id!)&&/^[a-z0-9]{20,64}$/.test(privy.app_id)&&(!privy.client_id||/^[a-z0-9_-]{10,100}$/i.test(privy.client_id)),'INVALID_PRIVY_PUBLIC_CONFIG');
   const demoOffers=app.service.config.development&&(options.enableDemoOffers??!externalAuth);
   const access=externalAuth?.access??new AuthAccessStore(app.db,'thot:development',sessionNow);
   const admission=options.admission??new ApiAdmission({clock:sessionNow});
@@ -114,7 +114,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
     res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
     const clerkOrigin=externalAuth?.capabilities.clerk?.frontend_api_url,plaidCdn=app.plaid.capabilities().plaid_linking?' https://cdn.plaid.com':'';
     res.setHeader('Content-Security-Policy',privy
-      ? `default-src 'self'; script-src 'self' https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://auth.privy.io https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org https://rpc.testnet.chain.robinhood.com; img-src 'self' data: blob:; font-src 'self'; frame-src 'self' https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com${plaidCdn}; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
+      ? `default-src 'self'; script-src 'self' https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://auth.privy.io https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org ${walletRpcUrl}; img-src 'self' data: blob:; font-src 'self'; frame-src 'self' https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com${plaidCdn}; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
       : clerkOrigin
       ? `default-src 'self'; script-src 'self' ${clerkOrigin} https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' ${clerkOrigin} http://127.0.0.1:*; img-src 'self' data: https://img.clerk.com; frame-src ${clerkOrigin} https://challenges.cloudflare.com${plaidCdn}; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
       : `default-src 'self'; script-src 'self'${plaidCdn}; style-src 'self'; connect-src 'self' http://127.0.0.1:*; img-src 'self' data:; frame-src 'self'${plaidCdn}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);

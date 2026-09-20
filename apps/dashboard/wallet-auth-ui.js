@@ -1,13 +1,14 @@
 const NETWORKS = {
   31337: {chainId: '0x7a69', chainName: 'Private Anvil', nativeCurrency: {name: 'Test Ether', symbol: 'ETH', decimals: 18}},
-  46630: {chainId: '0xb626', chainName: 'Robinhood Chain Testnet', nativeCurrency: {name: 'Test Ether', symbol: 'ETH', decimals: 18}, rpcUrls: ['https://rpc.testnet.chain.robinhood.com'], blockExplorerUrls: ['https://explorer.testnet.chain.robinhood.com']}
+  46630: {chainId: '0xb626', chainName: 'Robinhood Chain Testnet', nativeCurrency: {name: 'Test Ether', symbol: 'ETH', decimals: 18}, rpcUrls: ['https://rpc.testnet.chain.robinhood.com'], blockExplorerUrls: ['https://explorer.testnet.chain.robinhood.com']},
+  4663: {chainId: '0x1237', chainName: 'Robinhood Chain', nativeCurrency: {name: 'Ether', symbol: 'ETH', decimals: 18}, rpcUrls: ['https://rpc.mainnet.chain.robinhood.com'], blockExplorerUrls: ['https://robinhoodchain.blockscout.com']}
 };
 
 /** Cookie-based EVM sign-in: never persists a bearer token in browser storage. */
 export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'https://rpc.testnet.chain.robinhood.com', onSession, onSignedIn, onSignedOut = () => {}, onIdentityChanging, onSessionChanging, onError = () => {}, additionalProviders = async () => [], requestTimeoutMs = 15000, providerTimeoutMs = 5000, additionalProvidersTimeoutMs = 30000 }) {
   let rpc; try {rpc=new URL(rpcUrl);} catch {}
   const definition = NETWORKS[chainId];
-  if (!definition || rpc?.protocol !== 'https:') throw new Error('Wallet login is not configured for this network.');
+  if (!definition || rpc?.protocol !== 'https:' || chainId === 4663 && rpc.href !== 'https://rpc.mainnet.chain.robinhood.com/') throw new Error('Wallet login is not configured for this network.');
   const network={...definition,rpcUrls:[rpc.href]};
   const sessionReady = onSession ?? onSignedIn ?? (() => {}), changing = onIdentityChanging ?? onSessionChanging ?? (() => {});
   let provider = null, listeners = [], epoch = 0, busy = false, destroyed = false, busyEpoch = null, busyKind = null;

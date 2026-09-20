@@ -49,6 +49,15 @@ test('reviewed private Anvil configuration pins auth and exposes only its same-o
   await assert.rejects(auth.challenge({address:a.wallet.address,chain_id:46630},origin),/AUTH_CHAIN_MISMATCH/);
 });
 
+test('mainnet wallet auth pins chain 4663 and never accepts a testnet challenge', async t => {
+  const {auth}=await setup(t,{chain_id:4663,allowed_origins:['https://app.thot.market']}),a=await login(auth);
+  assert.equal(auth.capabilities.wallet?.rpc_url,'https://rpc.mainnet.chain.robinhood.com');
+  assert.equal(a.session.chain_id,4663);
+  assert.match(a.challenge.body.message,/\nChain ID: 4663\n/);
+  assert.match(a.session.identity.subject,/^eip155:4663:/);
+  await assert.rejects(auth.challenge({address:a.wallet.address,chain_id:46630},origin),/AUTH_CHAIN_MISMATCH/);
+});
+
 test('adding a stable alias preserves existing membership, wallet binding and native sessions', async t => {
   const alias='https://app.test.thot.market', {db,auth,clock}=await setup(t), existing=await login(auth);
   const updated=await WalletAuth.create(db,{...config,allowed_origins:[alias]},()=>clock.now);
@@ -187,7 +196,7 @@ test('wallet challenge quotas persist across instances and reset after their tim
 
 test('wallet config fails closed for HTTP, unreviewed chains, accidental privilege flags and insecure explicit files', async t => {
   const { db } = await setup(t);
-  for (const bad of [{ origin: 'http://localhost:4325' }, { origin: origin + '/' }, { chain_id: 1 }, { chain_id: 31338 }, {chain_id:31337},{chain_id:31337,rpc_url:'https://rpc.example.test/'},{chain_id:31337,rpc_url:origin+'/rpc/short'},{rpc_url:origin+'/rpc/'+'r'.repeat(43)}, { auto_admin: true }, { operator_addresses: ['not-an-address'] }, { session_ttl_seconds: 86400 }, { allow_public_signup: undefined }]) await assert.rejects(WalletAuth.create(db, { ...config, ...bad } as any), /INVALID_AUTH_CONFIGURATION/);
+  for (const bad of [{ origin: 'http://localhost:4325' }, { origin: origin + '/' }, { chain_id: 1 }, { chain_id: 31338 }, {chain_id:31337},{chain_id:31337,rpc_url:'https://rpc.example.test/'},{chain_id:31337,rpc_url:origin+'/rpc/short'},{chain_id:4663,rpc_url:'https://rpc.testnet.chain.robinhood.com'},{rpc_url:origin+'/rpc/'+'r'.repeat(43)}, { auto_admin: true }, { operator_addresses: ['not-an-address'] }, { session_ttl_seconds: 86400 }, { allow_public_signup: undefined }]) await assert.rejects(WalletAuth.create(db, { ...config, ...bad } as any), /INVALID_AUTH_CONFIGURATION/);
   const dir = await mkdtemp(join(tmpdir(), 'thot-wallet-config-')); t.after(() => rm(dir, { recursive: true, force: true }));
   const file = join(dir, 'auth.json'), link = join(dir, 'auth-link.json'); await writeFile(file, JSON.stringify(config), { mode: 0o600 });
   assert.deepEqual(await loadWalletAuthConfig(file), config); await symlink(file, link);

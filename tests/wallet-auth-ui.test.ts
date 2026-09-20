@@ -95,6 +95,22 @@ test('provider chain change without an event after signing is rechecked before v
   assert.equal(await a.ui.signIn(), false); assert.equal(a.sessions.length, 0); assert.ok(!a.calls.some(call => call.path.endsWith('/verify'))); a.ui.destroy();
 });
 
+test('mainnet wallet sign-in adds the exact Robinhood chain and rejects a testnet challenge', async () => {
+  const a=fixture({chainId:4663,rpcUrl:'https://rpc.mainnet.chain.robinhood.com'});
+  a.state.switch='missing';
+  assert.equal(await a.ui.signIn(),true);
+  assert.equal(a.state.added.chainId,'0x1237');
+  assert.deepEqual(a.state.added.rpcUrls,['https://rpc.mainnet.chain.robinhood.com/']);
+  assert.equal(a.sessions[0].chain_id,4663);
+  a.ui.destroy();
+  const b=fixture({chainId:4663,rpcUrl:'https://rpc.mainnet.chain.robinhood.com',fetch:(path:string)=>path.endsWith('/challenge')?response(challenge(alice,46630)):null});
+  b.state.chain='0x1237';
+  assert.equal(await b.ui.signIn(),false);
+  assert.equal(b.sessions.length,0);
+  b.ui.destroy();
+  assert.throws(()=>fixture({chainId:4663,rpcUrl:'https://rpc.testnet.chain.robinhood.com'}),/not configured/);
+});
+
 test('a verification arriving after wallet change is discarded and its late session cookie revoked', async () => {
   let release!: (value: any) => void;
   const a = fixture({ fetch: (path: string) => path.endsWith('/verify') ? new Promise(resolve => { release = resolve; }) : null });

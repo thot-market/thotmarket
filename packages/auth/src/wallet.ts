@@ -11,7 +11,8 @@ import type { VerifiedIdentity } from './jwt.ts';
 import { strictJson } from './json.ts';
 
 export const WALLET_CHAIN_ID = 46630;
-export const WALLET_CHAIN_IDS = [31337, WALLET_CHAIN_ID] as const;
+export const WALLET_MAINNET_CHAIN_ID = 4663;
+export const WALLET_CHAIN_IDS = [31337, WALLET_CHAIN_ID, WALLET_MAINNET_CHAIN_ID] as const;
 export type WalletChainId = typeof WALLET_CHAIN_IDS[number];
 export const WALLET_CHALLENGE_SECONDS = 300;
 export const WALLET_SESSION_COOKIE = '__Host-thot_session';
@@ -70,8 +71,8 @@ export class WalletAuth implements AuthProvider {
     let url: URL; try { url = new URL(config.origin); } catch { ensure(false, 'INVALID_AUTH_CONFIGURATION'); }
     ensure(url.protocol === 'https:' && url.origin === config.origin && !url.username && !url.password && WALLET_CHAIN_IDS.includes(config.chain_id) && typeof config.allow_public_signup === 'boolean', 'INVALID_AUTH_CONFIGURATION');
     this.allowedOrigins = walletAuthOrigins(config.origin, config.allowed_origins);
-    ensure(this.allowedOrigins.length === 1 || config.chain_id === WALLET_CHAIN_ID, 'INVALID_AUTH_CONFIGURATION');
-    let rpcUrl = 'https://rpc.testnet.chain.robinhood.com';
+    ensure(this.allowedOrigins.length === 1 || config.chain_id !== 31337, 'INVALID_AUTH_CONFIGURATION');
+    let rpcUrl = config.chain_id === WALLET_MAINNET_CHAIN_ID ? 'https://rpc.mainnet.chain.robinhood.com' : 'https://rpc.testnet.chain.robinhood.com';
     if (config.chain_id === 31337) {
       let rpc: URL; try { rpc = new URL(config.rpc_url!); } catch { ensure(false, 'INVALID_AUTH_CONFIGURATION'); }
       ensure(rpc.protocol === 'https:' && rpc.origin === config.origin && /^\/rpc\/[A-Za-z0-9_-]{32,128}$/.test(rpc.pathname) && !rpc.search && !rpc.hash && !rpc.username && !rpc.password, 'INVALID_AUTH_CONFIGURATION');

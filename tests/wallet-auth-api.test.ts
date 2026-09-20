@@ -13,10 +13,10 @@ import { importDemo } from '../packages/market/src/fixtures.ts';
 
 const origin = 'https://thot.example.test', host = 'thot.example.test';
 const config: WalletAuthConfig = { schema_version: 'thot.wallet-auth/1', origin, chain_id: 46630, allow_public_signup: true, session_ttl_seconds: 300 };
-async function setup(t: any, privy?: {app_id:string;client_id?:string}, aliases: string[] = [], readOnly=false) {
+async function setup(t: any, privy?: {app_id:string;client_id?:string}, aliases: string[] = [], readOnly=false, chainId:46630|4663=46630) {
   const dir = await mkdtemp(join(tmpdir(), 'thot-wallet-http-')), clock = { now: Date.parse('2026-09-15T02:00:00Z') };
   const app = await createApplication({ memory: true, dataDir: dir, readOnly, config: { clock: () => new Date(clock.now) } });
-  const auth = await WalletAuth.create(app.db, {...config,allowed_origins:aliases}, () => clock.now), logs: any[] = [];
+  const auth = await WalletAuth.create(app.db, {...config,chain_id:chainId,allowed_origins:aliases}, () => clock.now), logs: any[] = [];
   // Loopback transport, explicit HTTPS logical origin: these tests do not weaken production cookie policy.
   const server = createHttpServer(app, { externalAuth: auth, publicOrigin: origin, privy, readOnly, clock: () => clock.now, log: entry => logs.push(entry) });
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -30,7 +30,7 @@ async function setup(t: any, privy?: {app_id:string;client_id?:string}, aliases:
   });
   const login = async (wallet = Wallet.createRandom(), requestOrigin = origin) => {
     const originHeaders={origin:requestOrigin,host:new URL(requestOrigin).host};
-    const challenge = await call('/v1/auth/wallet/challenge', { ...originHeaders, body: { address: wallet.address, chain_id: 46630 } }); assert.equal(challenge.status, 200);
+    const challenge = await call('/v1/auth/wallet/challenge', { ...originHeaders, body: { address: wallet.address, chain_id: chainId } }); assert.equal(challenge.status, 200);
     const challengeCookie = challenge.headers['set-cookie'][0].split(';')[0];
     const input = { id: challenge.body.id, message: challenge.body.message, signature: await wallet.signMessage(challenge.body.message) };
     const result = await call('/v1/auth/wallet/verify', { ...originHeaders, body: input, cookies: challengeCookie }); assert.equal(result.status, 200);
@@ -63,6 +63,23 @@ test('Privy public onboarding config preserves SIWE ownership and enables only t
   const wallet = Wallet.createRandom(), first = await login(wallet), again = await login(wallet);
   assert.equal(first.result.body.actor.id, again.result.body.actor.id);
   assert.equal((await call('/v1/contributor/portfolio',{headers:{Authorization:'Bearer did:privy:someone'}})).status,401);
+});
+
+test('mainnet HTTP wallet and Privy capabilities use chain 4663 without testnet RPC access', async t => {
+  const {call,login}=await setup(t,{app_id:'cmu2kc1sv03370dla944rfnb7'},[],false,4663);
+  const capabilities=await call('/v1/auth/capabilities');
+  assert.equal(capabilities.status,200);
+  assert.equal(capabilities.body.wallet.chain_id,4663);
+  assert.equal(capabilities.body.wallet.rpc_url,'https://rpc.mainnet.chain.robinhood.com');
+  assert.equal(capabilities.body.privy.chain_id,4663);
+  const policy=capabilities.headers['content-security-policy'];
+  assert.match(policy,/connect-src[^;]+https:\/\/rpc\.mainnet\.chain\.robinhood\.com/);
+  assert.ok(!policy.includes('rpc.testnet.chain.robinhood.com'));
+  const wallet=Wallet.createRandom();
+  const wrong=await call('/v1/auth/wallet/challenge',{body:{address:wallet.address,chain_id:46630}});
+  assert.equal(wrong.status,400);assert.equal(wrong.body.error,'AUTH_CHAIN_MISMATCH');
+  const accepted=await login(wallet);
+  assert.equal(accepted.result.body.chain_id,4663);
 });
 
 test('stable-host sign-in opens the existing vault while native callbacks keep the same capture owner', async t => {

@@ -229,6 +229,24 @@ test('Robinhood testnet renders each real THOT journey with test-asset labelling
  assert.match(ui.samplingHTML(),/Queue|Review sampling budget/);
 });
 
+test('Robinhood mainnet renders THOT payments without test-asset labels',()=>{
+ const {state,ui}=viewFixture();state.thot.capabilities={mode:'thot-production',chain_name:'Robinhood Chain',chain_id:4663,market:other,explorer_url:'https://robinhoodchain.blockscout.com'};
+ for(const html of [ui.offersHTML(),ui.earningsHTML(),ui.tokenHTML()]){
+  assert.match(html,/Robinhood Chain · THOT payments/);
+  assert.doesNotMatch(html,/test THOT|test assets only|not dollars or mainnet earnings/i);
+ }
+});
+
+test('mainnet signing review and missing-wallet notice identify real THOT',async t=>{
+ let available=true;
+ const f=fixture(t,async()=>{},async()=>({transactions:[{to:owner,data:'0xaaaa',value:'0x0',chainId:'0x1237'}]}),{getProvider:()=>available?globalThis.window.ethereum:null});
+ f.state.thot.capabilities={mode:'thot-production',chain_id:4663};
+ await f.prepare();
+ assert.equal(f.dialogs.at(-1)[1],'Robinhood Chain · THOT · review before signing');
+ available=false;
+ await assert.rejects(f.ui.action('thot-link',button()),/Robinhood Chain uses real THOT/);
+});
+
 test('delivered purchases expose only time-valid dispute or finalize actions and overdue refunds',()=>{
  const {state,ui}=viewFixture();state.thot.orders=[{id:'delivered',title:'Research',seller:other,buyer:owner,gross:atoms(100),receipt:{status:3,seller_amount:atoms(30),referral_amount:'0',delivered_at:100000,independent:true,treasury:false,block:{timestamp:100001}}}];
  let html=ui.offersHTML();assert.match(html,/Undisputed proceeds become payable/);assert.match(html,/thot-dispute/);assert.doesNotMatch(html,/thot-finalize/);
@@ -336,6 +354,15 @@ test('wallet network action can add the explicit Robinhood testnet then switch w
  const f=fixture(t,async()=>{});f.state.thot.capabilities={mode:'thot-testnet',chain_id:46630,rpc_url:'https://rpc.testnet.chain.robinhood.com'};let added=false;const calls=[];
  window.ethereum.request=async p=>{calls.push(p);if(p.method==='wallet_switchEthereumChain'&&!added)throw Object.assign(Error('Unknown chain'),{code:4902});if(p.method==='wallet_addEthereumChain')added=true;if(p.method==='eth_chainId')return '0xb626';};
  await f.ui.action('thot-network',button());assert.deepEqual(calls.map(c=>c.method),['wallet_switchEthereumChain','wallet_addEthereumChain','wallet_switchEthereumChain','eth_chainId']);assert.equal(calls[1].params[0].nativeCurrency.symbol,'ETH');
+});
+
+test('wallet network action adds Robinhood mainnet only for the exact production RPC',async t=>{
+ const f=fixture(t,async()=>{});f.state.thot.capabilities={mode:'thot-production',chain_id:4663,rpc_url:'https://rpc.mainnet.chain.robinhood.com'};let added=false;const calls=[];
+ window.ethereum.request=async p=>{calls.push(p);if(p.method==='wallet_switchEthereumChain'&&!added)throw Object.assign(Error('Unknown chain'),{code:4902});if(p.method==='wallet_addEthereumChain')added=true;if(p.method==='eth_chainId')return '0x1237';};
+ await f.ui.action('thot-network',button());assert.deepEqual(calls.map(c=>c.method),['wallet_switchEthereumChain','wallet_addEthereumChain','wallet_switchEthereumChain','eth_chainId']);
+ assert.equal(calls[1].params[0].chainName,'Robinhood Chain');assert.equal(calls[1].params[0].chainId,'0x1237');
+ f.state.thot.capabilities.rpc_url='https://rpc.testnet.chain.robinhood.com';added=false;calls.length=0;
+ await assert.rejects(f.ui.action('thot-network',button()),/Unknown chain/);assert.equal(calls.some(c=>c.method==='wallet_addEthereumChain'),false);
 });
 
 test('old lock lots expose withdrawal only when principal matures without promising tariff benefits',()=>{

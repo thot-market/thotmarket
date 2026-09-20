@@ -718,7 +718,8 @@ async function acceptClerkSession({actor,permissions}){
 async function startAuthentication(){
   const capability=await api('/v1/auth/capabilities');authMode=capability.mode;
   const environment=document.querySelector('.environment');
-  if(environment)environment.innerHTML=`<span class="status-dot"></span>${authMode==='development'?'Local demo workspace':authMode==='wallet_siwe'?`Wallet workspace · ${capability.wallet.chain_id===31337?'local Anvil':'testnet'}`:'Invited reviewer workspace'}`;
+  const walletNetwork={31337:'local Anvil',46630:'testnet',4663:'mainnet'}[capability.wallet?.chain_id]??'unknown network';
+  if(environment)environment.innerHTML=`<span class="status-dot"></span>${authMode==='development'?'Local demo workspace':authMode==='wallet_siwe'?`Wallet workspace · ${walletNetwork}`:'Invited reviewer workspace'}`;
   if(authMode!=='development'){
     document.querySelector('#role').hidden=true;
     const roleLabel=document.querySelector('label[for="role"]');if(roleLabel)roleLabel.hidden=true;

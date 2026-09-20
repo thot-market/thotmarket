@@ -21,7 +21,8 @@ test('multiple linked wallets require explicit choice and never fall back to an 
 });
 test('Privy public config admits app/client identifiers and drops every unneeded field',()=>{
   assert.deepEqual(validatePrivyConfig({app_id:'cmu2kc1sv03370dla944rfnb7',chain_id:46630,rpc_url:'https://rpc.testnet.chain.robinhood.com',secret:'never-client-side',role:'operator_security'}),{appId:'cmu2kc1sv03370dla944rfnb7',chainId:46630,rpcUrl:'https://rpc.testnet.chain.robinhood.com/'});
+  assert.deepEqual(validatePrivyConfig({app_id:'cmu2kc1sv03370dla944rfnb7',chain_id:4663,rpc_url:'https://rpc.mainnet.chain.robinhood.com'}),{appId:'cmu2kc1sv03370dla944rfnb7',chainId:4663,rpcUrl:'https://rpc.mainnet.chain.robinhood.com/'});
   const rpc='https://thot.example.test/rpc/'+'r'.repeat(43);
   assert.deepEqual(validatePrivyConfig({app_id:'cmu2kc1sv03370dla944rfnb7',client_id:'client-public-fixture',chain_id:31337,rpc_url:rpc}),{appId:'cmu2kc1sv03370dla944rfnb7',clientId:'client-public-fixture',chainId:31337,rpcUrl:rpc});
-  for(const config of [{app_id:'https://evil.test',chain_id:46630},{app_id:'cmu2kc1sv03370dla944rfnb7',client_id:'" unsafe-inline',chain_id:46630},{app_id:'',chain_id:46630},{app_id:'cmu2kc1sv03370dla944rfnb7',chain_id:1},{app_id:'cmu2kc1sv03370dla944rfnb7'}])assert.throws(()=>validatePrivyConfig(config),/not configured/);
+  for(const config of [{app_id:'https://evil.test',chain_id:46630},{app_id:'cmu2kc1sv03370dla944rfnb7',client_id:'" unsafe-inline',chain_id:46630},{app_id:'',chain_id:46630},{app_id:'cmu2kc1sv03370dla944rfnb7',chain_id:1},{app_id:'cmu2kc1sv03370dla944rfnb7',chain_id:4663,rpc_url:'https://rpc.testnet.chain.robinhood.com'},{app_id:'cmu2kc1sv03370dla944rfnb7'}])assert.throws(()=>validatePrivyConfig(config),/not configured/);
 });

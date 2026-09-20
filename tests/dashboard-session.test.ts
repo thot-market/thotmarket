@@ -45,7 +45,7 @@ function documentFixture() {
     } });
     return element;
   };
-  for (const selector of ['#main', '#detail-dialog', '#dialog-content', '#dialog-error', '#notice', '#toast', '#role', '.brand', '.local-tools']) elements.set(selector, make(selector));
+  for (const selector of ['#main', '#detail-dialog', '#dialog-content', '#dialog-error', '#notice', '#toast', '#role', '.brand', '.environment', '.local-tools']) elements.set(selector, make(selector));
   const document = { querySelector(selector: string) { return elements.get(selector) ?? null; }, querySelectorAll() { return []; }, addEventListener(type:string,handler:(event:any)=>unknown) {documentHandlers.set(type,[...(documentHandlers.get(type)??[]),handler]);},
     dispatch(type:string,event:any){for(const callback of documentHandlers.get(type)??[])callback(event);},
     createElement: (name: string) => make(name), body: make('body') };
@@ -382,6 +382,17 @@ test('Robinhood testnet earnings refresh reads contract workspace rather than le
 
 
 const walletCapability={mode:'wallet_siwe',wallet:{chain_id:46630,rpc_url:'https://rpc.testnet.chain.robinhood.com'},privy:{app_id:'cmu2kc1sv03370dla944rfnb7',chain_id:46630,rpc_url:'https://rpc.testnet.chain.robinhood.com'}};
+
+test('wallet workspace banner names the selected local, testnet, or mainnet environment',async t=>{
+  for(const [chainId,label] of [[31337,'local Anvil'],[46630,'testnet'],[4663,'mainnet']] as const){
+    const capability={...walletCapability,wallet:{...walletCapability.wallet,chain_id:chainId}};
+    const a=dashboard(t,async()=>response(capability),{walletAuthFactory:()=>({async restore(){return false;}})});
+    await a.driver.startAuthentication();
+    const banner=a.elements.get('.environment').innerHTML;
+    assert.match(banner,new RegExp(`Wallet workspace · ${label}`));
+    if(chainId===4663)assert.doesNotMatch(banner,/testnet|test assets/i);
+  }
+});
 
 test('dashboard renders one Privy sign-in action before restore and leaves the SDK unloaded',async t=>{
   let imports=0,restores=0;

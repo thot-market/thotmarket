@@ -6,7 +6,8 @@ import {eligiblePrivyWallets, selectPrivyWallet, validatePrivyConfig} from './pr
 
 const chains = {
   31337: {id: 31337, name: 'Private Anvil', nativeCurrency: {name: 'Test Ether', symbol: 'ETH', decimals: 18}, testnet: true},
-  46630: {id: 46630, name: 'Robinhood Chain Testnet', nativeCurrency: {name: 'Test Ether', symbol: 'ETH', decimals: 18}, rpcUrls: {default: {http: ['https://rpc.testnet.chain.robinhood.com']}}, blockExplorers: {default: {name: 'Robinhood Explorer', url: 'https://explorer.testnet.chain.robinhood.com'}}, testnet: true}
+  46630: {id: 46630, name: 'Robinhood Chain Testnet', nativeCurrency: {name: 'Test Ether', symbol: 'ETH', decimals: 18}, rpcUrls: {default: {http: ['https://rpc.testnet.chain.robinhood.com']}}, blockExplorers: {default: {name: 'Robinhood Explorer', url: 'https://explorer.testnet.chain.robinhood.com'}}, testnet: true},
+  4663: {id: 4663, name: 'Robinhood Chain', nativeCurrency: {name: 'Ether', symbol: 'ETH', decimals: 18}, rpcUrls: {default: {http: ['https://rpc.mainnet.chain.robinhood.com']}}, blockExplorers: {default: {name: 'Robinhood Explorer', url: 'https://robinhoodchain.blockscout.com'}}}
 };
 
 /** Privy supplies wallets. Only our server's signed SIWE challenge opens the private vault. */
