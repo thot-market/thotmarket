@@ -19,8 +19,9 @@ async function optionalTarget(path:string){
 }
 
 /** Select only policies shipped with this reviewed helper, never server-supplied pins. */
-export async function recorderPolicyFile(origin:string,env:{THOT_RECORDER_POLICY_FILE?:string}=process.env){
-  if(env.THOT_RECORDER_POLICY_FILE!==undefined)return env.THOT_RECORDER_POLICY_FILE;
+export async function recorderPolicyFile(origin:string,env:Partial<Record<'THOT_RECORDER_POLICY_FILE'|'THOT_RECORDER_POLICY_FILE',string>>=process.env){
+  const override=env.THOT_RECORDER_POLICY_FILE??env.THOT_RECORDER_POLICY_FILE;
+  if(override!==undefined)return override;
   const selectedOrigin=captureOrigin(origin);
   for(const [branch,site] of environments){
     const target=await optionalTarget(`deploy/cvm/${branch}.json`);

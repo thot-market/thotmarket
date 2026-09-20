@@ -30,7 +30,7 @@
     "packages/provenance/portable/verify_dcap.py",
     "packages/provenance/scripts/verify_recorder.py",
     "scripts/capture-terminal-child.ts",
-    "scripts/thot.ts",
+    "scripts/thot-capture.ts",
     "scripts/thot-setup.ts",
     "trace-vault/attestation_verify.py"
   ]

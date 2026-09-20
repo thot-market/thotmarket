@@ -23,15 +23,15 @@ async function copy(path){
       text=text.replace(/(['"])([^'"]*\.ts)\1/g,(_,quote,name)=>quote+name.slice(0,-3)+'.js'+quote);
       target=target.slice(0,-3)+'.js';
     }
-    if(path==='scripts/thot.ts'||path==='scripts/thot-setup.ts'){
-      text=text.replaceAll('thot','thot').replaceAll('thot-setup','thot setup').replaceAll('THOT opens','Thot opens').replaceAll('node scripts/thot.ts','thot');
+    if(path==='scripts/thot-capture.ts'||path==='scripts/thot-setup.ts'){
+      text=text.replaceAll('thot-capture','thot').replaceAll('thot-setup','thot setup');
     }
     if(path==='packages/capture/src/terminal.ts')text=text.replaceAll('THOT |','THOT |').replaceAll('THOT capture','Thot capture');
     body=text;
   }
   await mkdir(dirname(target),{recursive:true});await writeFile(target,body);
 }
-for(const entry of ['scripts/thot.ts','scripts/thot-setup.ts','scripts/capture-terminal-child.ts'])await copy(entry);
+for(const entry of ['scripts/thot-capture.ts','scripts/thot-setup.ts','scripts/capture-terminal-child.ts'])await copy(entry);
 for(const name of ['verify.mjs','canonical.mjs','hardware.mjs','verify_dcap.py','requirements.txt','README.txt'])await copy('packages/provenance/portable/'+name);
 for(const path of ['packages/provenance/scripts/verify_recorder.py','trace-vault/attestation_verify.py'])await copy(path);
 // Production has no accepted API/recorder pair yet. The package must never
@@ -42,7 +42,7 @@ await writeFile(resolve(output,'deploy/tee-recorder-policy.json'),JSON.stringify
 // only the reviewed default policy; operators can explicitly select another file.
 await writeFile(resolve(output,'packages/capture/src/tee/policy-file.js'),`import {fileURLToPath} from 'node:url';
 export async function recorderPolicyFile(origin,env=process.env){
-  return env.THOT_RECORDER_POLICY_FILE ?? fileURLToPath(new URL('../../../../deploy/tee-recorder-policy.json',import.meta.url));
+  return env.THOT_RECORDER_POLICY_FILE ?? env.THOT_RECORDER_POLICY_FILE ?? fileURLToPath(new URL('../../../../deploy/tee-recorder-policy.json',import.meta.url));
 }
 `);
 await chmod(resolve(here,'bin/thot.js'),0o755);

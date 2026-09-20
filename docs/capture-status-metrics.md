@@ -7,8 +7,8 @@ and sync retries. Capture interruption remains visibly red with explicit wording
 For diagnostics, select the optional metrics row for one invocation:
 
 ```sh
-THOT_CAPTURE_STATUS=metrics thot claude
-THOT_CAPTURE_STATUS=metrics thot codex
+THOT_CAPTURE_STATUS=metrics thot-capture claude
+THOT_CAPTURE_STATUS=metrics thot-capture codex
 ```
 
 Example: `THOT | RECORDING | PRIVATE VAULT | 12 saved · 2 pending · save p50/last 110/140ms · lag 2.0s · ↑ 42KiB/s`.

@@ -11,14 +11,24 @@ export function thotOrigin(value:string) {
   if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||!(url.protocol==='https:'||(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname))))throw Error('INVALID_THOT_ORIGIN');
   return url.origin;
 }
+// Prefer ~/.config/thot; read the legacy ~/.config/thot so existing installs keep working.
+async function savedConfig(name:string) {
+  for(const dir of ['.config/thot','.config/thot']){
+    const path=join(thotUserHome(),dir,name);
+    try{const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>4096||(stat.mode&0o077))throw Error('CAPTURE_CONFIG_PERMISSIONS');return JSON.parse(await readFile(path,'utf8'));}
+    catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')continue;throw e;}
+  }
+  return undefined;
+}
 export async function savedThotOrigin() {
-  const path=join(thotUserHome(),'.config/thot/capture.json');
-  try { const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>4096||(stat.mode&0o077))throw Error('CAPTURE_CONFIG_PERMISSIONS');return thotOrigin(JSON.parse(await readFile(path,'utf8')).thot_url); }
-  catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw e;}
+  const value=await savedConfig('capture.json');
+  return value?thotOrigin(value.thot_url??value.thot_url):undefined;
 }
 export async function savedRobinhoodConfig() {
-  const path=join(thotUserHome(),'.config/thot/robinhood.json');
-  try{const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>4096||(stat.mode&0o077))throw Error('ROBINHOOD_CONFIG_PERMISSIONS');const value=JSON.parse(await readFile(path,'utf8'));if(typeof value.config_file!=='string'||!isAbsolute(value.config_file))throw Error('INVALID_ROBINHOOD_CONFIG');return value.config_file as string;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw e;}
+  const value=await savedConfig('robinhood.json');
+  if(!value)return undefined;
+  if(typeof value.config_file!=='string'||!isAbsolute(value.config_file))throw Error('INVALID_ROBINHOOD_CONFIG');
+  return value.config_file as string;
 }
 export async function executable(name:string) {
   for(const candidate of isAbsolute(name)?[name]:(process.env.PATH??'').split(':').filter(isAbsolute).map(dir=>join(dir,name))) {
@@ -37,7 +47,7 @@ export async function probe(command:string,args:string[],cwd?:string) {
 export type SetupCheck={id:string;label:string;ok:boolean;next:string};
 export async function readiness(target:'codex'|'claude'|'robinhood') {
   const qvl=await executable(process.env.TV_DCAP_QVL??'dcap-qvl');
-  const python=await executable(process.env.THOT_CAPTURE_PYTHON??'python3');
+  const python=await executable(process.env.THOT_CAPTURE_PYTHON??process.env.THOT_CAPTURE_PYTHON??'python3');
   const checks:SetupCheck[]=[{id:'node',label:'Node 24 or later',ok:Number(process.versions.node.split('.')[0])>=24,next:'Install Node 24 or later, then rerun this command.'}];
   if(target!=='robinhood') {
     const client=await executable(target);

@@ -4,33 +4,66 @@ The command line client for capturing Claude Code and Codex sessions to a privat
 
 Requires Node.js 24+ and your existing Claude Code or Codex installation/login. Interactive capture also requires tmux. Python 3 and the reviewed hardware verifier enable independent recorder checks and are required by `--require-reference`. Provider clients are not installed by this package.
 
+## Connect to the production deployment
+
+The production Thot deployment runs on Robinhood chain 4663. The app (your vault) and its
+recorder are reached at their native gateway URLs:
+
+- App (`--thot-url`): `https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network`
+- Recorder (`--recorder-url`): `https://ea21eee02e790a01b776070bb846e5d7e3b98b7a-4321.dstack-base-prod5.phala.network`
+
+There is no automatic default; pass the target explicitly (or save it, below). Capturing and
+saving to your private vault works today. **Marketplace purchases are paused, so nothing here
+implies a sale or payout.** Testnet is a separate explicit opt-in, never a default.
+
 ```sh
-thot setup claude
-thot setup codex
-thot claude --thot-url https://YOUR-VAULT-ORIGIN --recorder-url https://YOUR-RECORDER-ORIGIN
-thot codex --thot-url https://YOUR-VAULT-ORIGIN --reference-policy /path/to/reviewed-recorder-policy.json --require-reference -- exec "review this project"
+# 1. Check local prerequisites (installs nothing, opens no account, makes no model call)
+thot setup codex          # or: thot setup claude
+
+# 2. From your project, capture a session to the production vault via the production recorder
+thot codex \
+  --thot-url https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network \
+  --recorder-url https://ea21eee02e790a01b776070bb846e5d7e3b98b7a-4321.dstack-base-prod5.phala.network
+# or: thot claude --thot-url <same app URL> --recorder-url <same recorder URL>
+
 thot --help
 ```
 
-After selecting an accepted production API and recorder pair, a later package
-release can ship those defaults. This prerelease requires an explicit target.
+`thot` opens your browser once to authorize this tool to your signed-in vault account; work
+normally in the coding client and exit it to save. To avoid repeating `--thot-url`, save it once
+(`~/.config/thot/capture.json`); it is then used after an explicit `--thot-url`/`THOT_URL`:
+
+```sh
+node scripts/install-capture-helper.ts --thot-url https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network
+```
+
+The npm release that provides the global `thot` command is pending; until then, run from a source
+checkout as shown under **From a source checkout** below (the commands are otherwise identical).
 
 Existing `THOT_URL`, saved capture configuration, connection and encrypted capture storage remain compatible. This package does not migrate or erase local state. The sanitized `thot` command uses `--thot-url`.
 
-No production API or recorder is accepted yet, so this prerelease has no automatic hosted default. Supply `--thot-url` (or `THOT_URL`/saved configuration) and `--recorder-url` (or `THOT_RECORDER_URL`), or use a reviewed reference policy containing the recorder URL. Localhost works when explicitly selected. Private hosted deployment descriptors and their pins are excluded from the package.
+This prerelease ships **no automatic hosted default**: supply `--thot-url` (or `THOT_URL`/saved configuration) and `--recorder-url` (or `THOT_RECORDER_URL`), or a reviewed reference policy containing the recorder URL. Localhost works when explicitly selected. `--thot-url`/`THOT_URL` remain accepted as aliases. Connect to a production deployment by its **native URL** with a matching recorder, so a production app is never paired with a testnet/default recorder; **testnet stays an explicit opt-in, never a default.** A later package release may ship an accepted production pair as a default only after routing/attestation acceptance. Private hosted deployment descriptors and their pins are excluded from the package.
 
-Normal mode reports whether hardware and independently supplied references were checked before launching the provider client. If the hardware verifier is unavailable, normal mode labels the connection **service trust**: the HTTPS recorder endpoint sees model credentials and content, and the encrypted channel alone does not prove an enclave identity. A hardware quote/key-binding rejection remains fatal. `--reference-policy FILE --require-reference` stops before forwarding provider credentials unless hardware and the listed recorder measurements match. `THOT_RECORDER_POLICY_FILE` remains supported as a policy override. The local assessment is saved with the encrypted capture and written as `client-verification.json` on export; a server P2 receipt alone does not imply independent client verification.
+Normal mode reports whether hardware and independently supplied references were checked before launching the provider client. If the hardware verifier is unavailable, normal mode labels the connection **service trust**: the HTTPS recorder endpoint sees model credentials and content, and the encrypted channel alone does not prove an enclave identity. A hardware quote/key-binding rejection remains fatal. `--reference-policy FILE --require-reference` stops before forwarding provider credentials unless hardware and the listed recorder measurements match. `THOT_RECORDER_POLICY_FILE` (legacy `THOT_RECORDER_POLICY_FILE`) overrides the policy file. The local assessment is saved with the encrypted capture and written as `client-verification.json` on export; a server P2 receipt alone does not imply independent client verification.
 
-From the repository root:
+Distribution of the reviewed production recorder reference policy is pending; there is not yet a public download linked here. Once you have a reviewed policy, pass `--reference-policy FILE --require-reference` (or set `THOT_RECORDER_POLICY_FILE`); the reviewed policy already contains the recorder URL, so it can stand in for `--recorder-url`. Without a reference policy, `--recorder-url` selects the recorder under service trust and the CLI still reports, before forwarding any provider credential, whether hardware and references were checked.
+
+### From a source checkout
+
+Generate the runtime once, then invoke the entry point by its full path from the repository root:
 
 ```sh
-cd packages/thot-cli
-npm run build
-node bin/thot.js --help
-node bin/thot.js setup codex
+node packages/thot-cli/build.mjs
+node packages/thot-cli/bin/thot.js --help
+node packages/thot-cli/bin/thot.js setup codex
+node packages/thot-cli/bin/thot.js codex \
+  --thot-url https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network \
+  --recorder-url https://ea21eee02e790a01b776070bb846e5d7e3b98b7a-4321.dstack-base-prod5.phala.network
 ```
 
-Use `node bin/thot.js` in place of `thot` in the examples when building from source.
+Use `node packages/thot-cli/bin/thot.js` in place of `thot` when running from source. Run
+`node packages/thot-cli/build.mjs` first: `bin/thot.js` loads the generated `runtime/`, so invoking
+it before the build (or as `node bin/thot.js` from the repo root) fails.
 `npm pack` creates a local tarball you can inspect; it does not authenticate a
 published package. See [package.json](package.json), [the build recipe](build.mjs)
 and [the packaged-source list](reviewed-source-files.json). CLI and application

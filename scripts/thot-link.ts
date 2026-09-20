@@ -11,12 +11,14 @@ import {readiness,savedThotOrigin,savedRobinhoodConfig,thotOrigin} from '../pack
 import {startRobinhoodPairing} from '../packages/capture/src/robinhood-pairing.ts';
 
 const argv=process.argv.slice(2),args=new Map<string,string>();
-if(argv[0]!=='robinhood'||argv.includes('--help')){console.log('Usage: thot-link robinhood [--thot-url ORIGIN] [--config PRIVATE_CONFIG] [--trade-trace TRACE --symbol SYMBOL --window-days N]\n\nOpen the printed THOT link in Chrome. The website guides extension setup and account verification.\nUses the saved THOT origin. No gate cookie or THOT login token is needed in your terminal.');process.exit(argv.includes('--help')?0:1);}
-for(let i=1;i<argv.length;i+=2){if(!['--thot-url','--config','--trade-trace','--symbol','--window-days'].includes(argv[i])||!argv[i+1])throw Error('INVALID_ARGUMENTS');args.set(argv[i],argv[i+1]);}
+if(argv[0]!=='robinhood'||argv.includes('--help')){console.log('Usage: thot-link robinhood [--thot-url ORIGIN] [--config PRIVATE_CONFIG] [--trade-trace TRACE --symbol SYMBOL --window-days N]\n\nOpen the printed Thot link in Chrome. The website guides extension setup and account verification.\nUses the saved Thot origin. No gate cookie or login token is needed in your terminal.');process.exit(argv.includes('--help')?0:1);}
+for(let i=1;i<argv.length;i+=2){if(!['--thot-url','--thot-url','--config','--trade-trace','--symbol','--window-days'].includes(argv[i])||!argv[i+1])throw Error('INVALID_ARGUMENTS');args.set(argv[i],argv[i+1]);}
 const tradeFlags=['--trade-trace','--symbol','--window-days'];
 const tradeRequest=tradeFlags.some(k=>args.has(k))?{trace_id:args.get('--trade-trace')??'',symbol:(args.get('--symbol')??'').trim().toUpperCase(),window_days:Number(args.get('--window-days'))}:undefined;
 if(tradeRequest&&(!/^[-A-Za-z0-9:_]{1,200}$/.test(tradeRequest.trace_id)||!/^[A-Z][A-Z0-9.-]{0,14}$/.test(tradeRequest.symbol)||!Number.isInteger(tradeRequest.window_days)||tradeRequest.window_days<1||tradeRequest.window_days>365))throw Error('INVALID_TRADE_REQUEST');
-const origin=thotOrigin(args.get('--thot-url')??process.env.THOT_URL??await savedThotOrigin()??'http://127.0.0.1:4322');
+const configured=args.get('--thot-url')??args.get('--thot-url')??process.env.THOT_URL??process.env.THOT_URL??await savedThotOrigin();
+if(!configured)throw Error('THOT_PRODUCTION_ORIGIN_UNCONFIGURED: use --thot-url or THOT_URL until production is accepted');
+const origin=thotOrigin(configured);
 const checks=await readiness('robinhood');
 if(!checks.ready){const first=checks.checks.find(c=>!c.ok)!;console.error(first.label+' is missing.\nNext: '+first.next+'\nCheck again: thot-setup robinhood');process.exit(1);}
 const root=fileURLToPath(new URL('../',import.meta.url));
@@ -56,6 +58,6 @@ const bridge=await startRobinhoodPairing({origin,tradeRequest,extensionDir,launc
   child.on('close',()=>{if(!gotEvidence)update({error:'CONNECTOR_ENDED_WITHOUT_PROOF'});});
   child.stdin.end(JSON.stringify({...input,python_executable:config.pythonExecutable,bridge_path:config.bridgePath,measurements:config.measurementsPath,dcap_qvl:config.qvlPath,extension_bridge:config.extensionBridge,report_extension_ready:true}));
   return ()=>{lines.close();child.kill('SIGTERM');};
-},onClose(saved){console.log(saved?'Robinhood proof saved and verified by THOT.':'Connection closed. No new success was confirmed.');process.exitCode=saved?0:1;}});
+},onClose(saved){console.log(saved?'Robinhood proof saved and verified by Thot.':'Connection closed. No new success was confirmed.');process.exitCode=saved?0:1;}});
 for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,()=>void bridge.close());
 console.log('Next: open this link in the Chrome profile you use for Robinhood.\n'+bridge.url+'\n\nKeep this terminal open. The website will guide the remaining steps.');

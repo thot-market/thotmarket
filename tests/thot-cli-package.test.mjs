@@ -53,7 +53,7 @@ test('reviewed export builds a standalone CLI tarball with runtime verification 
     const {recorderPolicyFile}=await import(pathToFileURL(join(installed,'runtime/packages/capture/src/tee/policy-file.js')));
     const selected=await recorderPolicyFile('https://unused.invalid',{});
     assert.deepEqual(JSON.parse(await readFile(selected,'utf8')),{url:'',instances:{}});
-    const runtime=await readFile(join(installed,'runtime/scripts/thot.js'),'utf8');
+    const runtime=await readFile(join(installed,'runtime/scripts/thot-capture.js'),'utf8');
     assert(!runtime.includes("??'http://127.0.0.1:4322'"));
     const noDefault=spawnSync(process.execPath,[join(installed,'bin/thot.js'),'--disconnect','codex'],{encoding:'utf8',cwd:temporary,env:{...process.env,THOT_USER_HOME:temporary,THOT_URL:'',THOT_URL:''}});
     assert.notEqual(noDefault.status,0);

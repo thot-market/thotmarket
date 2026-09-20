@@ -32,7 +32,7 @@ test('guided first-time setup: missing helper, extension readiness, account chec
   await guide.getByRole('heading',{name:'Save your AI work privately.'}).waitFor();await pause();
   assert.match(await guide.locator('#install-command').innerText(),new RegExp(origin.replaceAll('.','\\.')));
   await guide.getByRole('link',{name:'← Back to your vault'}).click();await guide.getByRole('heading',{name:'Your traces'}).waitFor();await guide.close();
-  await pause();await page.getByRole('button',{name:'Next: start capture'}).click();assert.match(await page.locator('#detail-dialog').innerText(),/thot claude/);await pause();
+  await pause();await page.getByRole('button',{name:'Next: start capture'}).click();assert.match(await page.locator('#detail-dialog').innerText(),/thot-capture claude/);await pause();
   await page.getByRole('button',{name:'Close',exact:true}).click();
   await page.getByText('Brokerage connection',{exact:true}).click();
   await page.getByRole('button',{name:'Connect Robinhood',exact:false}).click();await pause();

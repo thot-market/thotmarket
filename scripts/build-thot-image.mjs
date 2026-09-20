@@ -17,7 +17,7 @@ const fixed = new Set(['Dockerfile', '.dockerignore', 'package.json', 'pnpm-lock
   'deploy/thot-config.cvm.json', 'deploy/thot-config.trade-candidate.example.json', 'deploy/tee-recorder-policy.json', 'trace-vault/deploy/robinhood-measurements.json',
   'packages/provenance/requirements.txt', 'packages/provenance/vendor/ATTEST-PROXY-LICENSE']);
 const runtimeScripts = new Set(['build-privy-auth.mjs', 'cvm-prestart.ts', 'capture-terminal-child.ts', 'robinhood-existing-browser.mjs',
-  'robinhood-browser-link.mjs', 'thot-link.ts', 'thot.ts', 'thot-setup.ts',
+  'robinhood-browser-link.mjs', 'thot-link.ts', 'thot-capture.ts', 'thot-setup.ts',
   'install-capture-helper.ts', 'migrate-vault-objects.ts', 'storage-backup.ts', 'storage-restore.ts', 'storage-orphans.ts', 'tee-capture-server.ts']);
 const privateAnvilScripts = new Set(['private-anvil-app.mjs', 'private-anvil-bootstrap.mjs', 'private-anvil-fund.mjs', 'private-anvil-rpc.mjs']);
 const profiles = new Set(['public', 'private-anvil']);

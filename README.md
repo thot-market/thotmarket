@@ -10,9 +10,10 @@ session or an analysis.
 This monorepo contains the command line client, web application, marketplace
 contracts, TEE recorder and verification tools. CLI capture uses a trusted
 execution environment (TEE) to record model exchanges and sign evidence of what it observed.
-The client checks the recorder against an independently selected policy before
-forwarding model credentials. Reviewing that policy and the code it approves is
-part of deciding whether to trust the system.
+The client reports its recorder verification status before forwarding model
+credentials. An independently selected reference policy enables strict measurement
+checks; reviewing that policy and the code it approves is part of deciding whether
+to trust the system.
 
 Contributors can import supported histories or capture new sessions, keep them in
 a private library, and authorize selected research for sale. Buyers inspect
@@ -21,9 +22,10 @@ release. Saving privately and authorizing a sale are separate actions.
 
 ## Use Thot Market
 
-Open the **[app](https://thot.market/app)** or read the
-[tutorial](https://thot.market/tutorial). The hosted preview uses **TESTTHOT on
-Robinhood testnet**. Purchases and payouts use test tokens, not production money.
+Open the **[production app](https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network)**
+or read the [tutorial](https://thot.market/tutorial). The production deployment uses
+Robinhood chain 4663. Capture and private saving are available; **marketplace
+purchases remain paused**. These instructions do not imply a sale or payout.
 The [project introduction](https://thot.market/read) explains the motivation; the
 [whitepaper](https://thot.market/whitepaper) covers the market design.
 
@@ -31,21 +33,29 @@ The [project introduction](https://thot.market/read) explains the motivation; th
 
 The CLI package is `@thotmarket/cli`, with command `thot`. The instructions below
 build it from this checkout; they do not require a published npm release. You need
-Node.js 24+, Python 3, your existing Claude Code or Codex installation and login,
-and tmux for interactive capture.
+Node.js 24+, your existing Claude Code or Codex installation and login,
+and tmux for interactive capture. Python 3 and the reviewed hardware verifier
+enable independent recorder checks and are required for strict verification.
 Setup reports the recorder verification prerequisites.
 
 ```sh
 cd packages/thot-cli
 npm run build
 node bin/thot.js setup codex
-node bin/thot.js codex --thot-url https://YOUR-THOT-APP-ORIGIN --project /path/to/project
+node bin/thot.js codex \
+  --thot-url https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network \
+  --recorder-url https://ea21eee02e790a01b776070bb846e5d7e3b98b7a-4321.dstack-base-prod5.phala.network \
+  --project /path/to/project
 ```
 
-Replace the origin with your Thot application's origin. For Claude Code,
+Replace `/path/to/project` with the project you want to capture. For Claude Code,
 substitute `claude` for `codex` in both commands. The helper connects your tool to
-your account and checks the recorder against an independently selected policy
-before forwarding model credentials. See the [CLI guide](packages/thot-cli/README.md)
+your account and reports hardware and reference-check status before forwarding
+model credentials. Without an available hardware verifier, normal mode uses
+service trust: the HTTPS recorder sees credentials and content. Hardware quote or
+key-binding rejection remains fatal. Strict checks require a reviewed policy and
+`--reference-policy FILE --require-reference`; distribution of the production
+reference policy is pending. See the [CLI guide](packages/thot-cli/README.md)
 for policy configuration and prerequisites, or run `node bin/thot.js --help`.
 The [source identity guide](BRANDING.md) describes this source baseline and its
 compatibility boundaries; select an origin and recorder policy accepted for the

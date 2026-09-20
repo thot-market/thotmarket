@@ -13,12 +13,12 @@ import {resolve,join,basename} from 'node:path';
 import {clientInvocation,type CaptureClient} from '../packages/capture/src/index.ts';
 import {captureTiming} from '../packages/capture/src/timing.ts';
 
-// The browser authorizes storage to its signed-in THOT account; the CLI retains its
+// The browser authorizes storage to its signed-in Thot account; the CLI retains its
 // own provider authentication. No provider key, earnings or brokerage link is needed.
 const argv=process.argv.slice(2);
 const timing=captureTiming();timing.emit('helper_started');
 if(argv.includes('--help')||argv.includes('-h')){
-  console.log('Usage: thot codex|claude [--thot-url URL] [--recorder-url URL] [--reference-policy FILE] [--require-reference] [--project DIR] [-- CLI arguments]\n       thot --retry CAPTURE_ID\n       thot --export CAPTURE_ID --output NEW_DIRECTORY\n       thot --disconnect codex|claude\n\nUses your existing CLI login. THOT opens your browser once to connect this tool. Returning captures reuse it.\nWork normally; signed checkpoints save privately while you work. Encrypted local copies are kept after saving.\nExport writes private plaintext files for independent inspection. Keep them private.\nUse --local-retention until-saved to reclaim local bodies after successful save; default: keep.\nA visible bar shows what is saved and what is pending locally.\nAPI selection: --thot-url, THOT_URL, saved configuration. No production default is configured yet.\nRecorder selection: reviewed reference policy or explicit --recorder-url / THOT_RECORDER_URL. Strict reference checks use --require-reference.');
+  console.log('Usage: thot-capture codex|claude [--thot-url URL] [--recorder-url URL] [--reference-policy FILE] [--require-reference] [--project DIR] [-- CLI arguments]\n       thot-capture --retry CAPTURE_ID\n       thot-capture --export CAPTURE_ID --output NEW_DIRECTORY\n       thot-capture --disconnect codex|claude\n\nUses your existing CLI login. Thot opens your browser once to connect this tool. Returning captures reuse it.\nWork normally; signed checkpoints save privately while you work. Encrypted local copies are kept after saving.\nExport writes private plaintext files for independent inspection. Keep them private.\nUse --local-retention until-saved to reclaim local bodies after successful save; default: keep.\nA visible bar shows what is saved and what is pending locally.\nAPI selection: --thot-url, THOT_URL, saved configuration. No production default is configured yet.\nRecorder selection: reviewed reference policy or explicit --recorder-url / THOT_RECORDER_URL. Strict reference checks use --require-reference.');
   process.exit(0);
 }
 if(['codex','claude'].includes(argv[0]))argv.splice(0,1,'--client',argv[0]);
@@ -46,7 +46,7 @@ if(exportId){
 }else if(disconnect){
   if(!['codex','claude'].includes(disconnect))throw Error('Choose codex or claude to disconnect.');
   const origin=await selectedOrigin();
-  await disconnectCapture(connectionRoot,origin,disconnect as CaptureClient);process.stdout.write('This tool is disconnected from THOT. Saved conversations remain in your vault. New automatic listings are stopped; use Connections to confirm wallet revocation of prepared unfunded offers.\n');
+  await disconnectCapture(connectionRoot,origin,disconnect as CaptureClient);process.stdout.write('This tool is disconnected from Thot. Saved conversations remain in your vault. New automatic listings are stopped; use Connections to confirm wallet revocation of prepared unfunded offers.\n');
 }else if(retry){
   if(!/^[a-zA-Z0-9-]{16,80}$/.test(retry))throw new Error('INVALID_CAPTURE_ID');
   const dir=join(stateRoot,retry);let pending:any,final=true;
@@ -57,18 +57,18 @@ if(exportId){
   const client=params.get('--client') as CaptureClient;if(!['codex','claude'].includes(client))throw new Error('Choose --client codex or --client claude.');
   const origin=await selectedOrigin(),project=resolve(params.get('--project')??process.cwd());
   if(!(await lstat(project)).isDirectory())throw new Error('CAPTURE_PROJECT_NOT_DIRECTORY');
-  if(process.stdin.isTTY&&process.stdout.isTTY&&!await executable('tmux')){console.error('Install tmux to show the persistent THOT capture bar, then run this command again.');process.exit(1);}
+  if(process.stdin.isTTY&&process.stdout.isTTY&&!await executable('tmux')){console.error('Install tmux to show the persistent Thot capture bar, then run this command again.');process.exit(1);}
   const setup=await readiness(client);
   timing.emit('readiness_done');
   if(!setup.ready){console.error('Setup needed: '+setup.checks.find(c=>!c.ok)!.next+'\nCheck again: thot-setup '+client);process.exit(1);}
   if(requireReference&&!setup.checks.find(c=>c.id==='verifier')?.ok)throw Error('RECORDER_VERIFIER_REQUIRED');
   const retention=params.get('--local-retention')??'keep';if(!['keep','until-saved'].includes(retention))throw Error('INVALID_LOCAL_RETENTION');
-  const connection={...await connectCapture({origin,client,project:basename(project),root:connectionRoot,...(process.env.THOT_CAPTURE_NO_OPEN==='1'?{open:async()=>false}:{})}),local_retention:retention as 'keep'|'until-saved'};
+  const connection={...await connectCapture({origin,client,project:basename(project),root:connectionRoot,...((process.env.THOT_CAPTURE_NO_OPEN??process.env.THOT_CAPTURE_NO_OPEN)==='1'?{open:async()=>false}:{})}),local_retention:retention as 'keep'|'until-saved'};
   timing.emit('connection_ready');
   process.stdout.write('Private vault account: '+connection.account_id+' · project: '+basename(project)+'\n');
   process.stdout.write(connection.automatic_sales?'Automatic sales: eligible completed sessions use your signed connection policy. A funded purchase is required for earnings.\n':'Private capture: no automatic sale policy is active for this session.\n');
   const recorderUrl=params.get('--recorder-url')??process.env.THOT_RECORDER_URL;
-  const explicitPolicy=params.get('--reference-policy')??process.env.THOT_RECORDER_POLICY_FILE;
+  const explicitPolicy=params.get('--reference-policy')??process.env.THOT_RECORDER_POLICY_FILE??process.env.THOT_RECORDER_POLICY_FILE;
   const policySource=explicitPolicy??(recorderUrl?'explicit-recorder-url':await recorderPolicyFile(origin));
   const policy=recorderUrl&&!explicitPolicy?{url:recorderUrl,instances:{}}:JSON.parse(await readFile(policySource,'utf8'));
   if(recorderUrl&&explicitPolicy){if(new URL(recorderUrl).origin!==new URL(policy.url).origin)throw Error('RECORDER_POLICY_URL_MISMATCH');policy.url=recorderUrl;}
@@ -80,12 +80,12 @@ if(exportId){
   const sync=await captureSync(connection,dir,progress=>{
     timing.emit('sync_progress',{saved:progress.saved,pending:progress.pending,...(progress.saveMsLast!==undefined?{save_ms:progress.saveMsLast}:{})});
     display.update({saved:progress.saved,pending:progress.pending,syncError:!!progress.error,saveMsP50:progress.saveMsP50,saveMsLast:progress.saveMsLast,oldestPendingAt:progress.oldestPendingAt,uploadBps:progress.uploadBps});
-    if(progress.error&&progress.error!==lastSyncError)process.stderr.write('THOT: saved locally; vault sync will retry automatically ('+progress.error+').\n');
+    if(progress.error&&progress.error!==lastSyncError)process.stderr.write('Thot: saved locally; vault sync will retry automatically ('+progress.error+').\n');
     lastSyncError=progress.error;
   });
   let proxy:Awaited<ReturnType<typeof startTeeCapture>>;
   let assessment:RecorderAssessment|undefined;
-  try{proxy=await startTeeCapture({client,captureId:connection.capture_id,uploadToken:connection.upload_token,policy,onTiming:timing.emit,onPart:part=>sync.part(part),onCheckpoint:checkpoint=>sync.checkpoint(checkpoint),onState:(state,detail)=>{if(state==='interrupted'){display.update({interrupted:true});process.stderr.write('THOT capture: '+(detail??'interrupted')+'\n');}}},async attestation=>{
+  try{proxy=await startTeeCapture({client,captureId:connection.capture_id,uploadToken:connection.upload_token,policy,onTiming:timing.emit,onPart:part=>sync.part(part),onCheckpoint:checkpoint=>sync.checkpoint(checkpoint),onState:(state,detail)=>{if(state==='interrupted'){display.update({interrupted:true});process.stderr.write('Thot capture: '+(detail??'interrupted')+'\n');}}},async attestation=>{
     assessment=await assessRecorder(attestation,policy,{strict:requireReference,policySource});
     await storePrivate(join(dir,'client-verification'),assessment);
     const status=assessment.hardware==='verified'&&assessment.references==='matched'?'hardware and references matched':'SERVICE TRUST: hardware '+assessment.hardware+', references '+assessment.references;
@@ -120,11 +120,11 @@ if(exportId){
       else{
         process.stderr.write('Saving the final checkpoint…\n');
         savedMessage(origin,await sync.finish(result));
-        if(retention==='keep')process.stdout.write('Encrypted local copy kept. Export anytime: thot --export '+connection.capture_id+' --output NEW_DIRECTORY\n');
+        if(retention==='keep')process.stdout.write('Encrypted local copy kept. Export anytime: thot-capture --export '+connection.capture_id+' --output NEW_DIRECTORY\n');
       }
     }catch(error){
       const code=error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'CAPTURE_SAVE_INTERRUPTED';
-      process.stderr.write(code+'\nYour local encrypted recording is retained. Earlier acknowledged vault checkpoints remain saved.\nNo model call will be replayed. Retry saving: thot --retry '+connection.capture_id+'\n');process.exitCode=1;
+      process.stderr.write(code+'\nYour local encrypted recording is retained. Earlier acknowledged vault checkpoints remain saved.\nNo model call will be replayed. Retry saving: thot-capture --retry '+connection.capture_id+'\n');process.exitCode=1;
     }finally{sync.close();timing.emit('helper_finished');await timing.flush();}
   }
   process.exitCode=process.exitCode??exitCode;

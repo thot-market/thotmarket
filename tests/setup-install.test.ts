@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,lstat,readFile,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,lstat,readFile,writeFile,rm,mkdir,symlink,readlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawn} from 'node:child_process';
@@ -21,14 +21,38 @@ test('empty THOT home installs helpers once and readiness explains missing prere
   const env={...process.env,THOT_USER_HOME:root};
   const args=['scripts/install-capture-helper.ts','--thot-url','https://thot.example'];
   assert.equal((await run(args,env)).code,0);assert.equal((await run(args,env)).code,0);
-  for(const command of ['thot','thot-link','thot-setup'])assert.equal((await lstat(join(root,'.local/bin',command))).isSymbolicLink(),true);
+  for(const command of ['thot-capture','thot-link','thot-setup'])assert.equal((await lstat(join(root,'.local/bin',command))).isSymbolicLink(),true);
   assert.equal(JSON.parse(await readFile(join(root,'.config/thot/capture.json'),'utf8')).thot_url,'https://thot.example');
   const check=await run(['scripts/thot-setup.ts','robinhood'],{...env,TV_DCAP_QVL:join(root,'missing-verifier'),THOT_CAPTURE_PYTHON:join(root,'missing-python')});
   assert.equal(check.code,1);assert.match(check.output,/Next: Install Python 3/);assert.doesNotMatch(check.output,/prerequisites are ready/);
   const existing=join(root,'existing-connector.json');await writeFile(existing,'{}',{mode:0o600});
   assert.equal((await run(['scripts/install-capture-helper.ts','--robinhood-config',existing],env)).code,0);
   assert.equal(JSON.parse(await readFile(join(root,'.config/thot/robinhood.json'),'utf8')).config_file,existing);
+  // Legacy --thot-url is still accepted (writes the thot config) and still redacts secrets.
   const rejected=await run(['scripts/install-capture-helper.ts','--thot-url','https://secret:password@thot.example'],env);assert.equal(rejected.code,1);assert.doesNotMatch(rejected.output,/secret:password/);
+});
+
+test('upgrade removes only this checkout retired capture link and preserves other commands',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'thot-helper-upgrade-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const bin=join(root,'.local/bin');await mkdir(bin,{recursive:true});
+  const legacy=join(bin,'thot');
+  await symlink(resolve('scripts/thot.ts'),legacy);
+  const unrelated=join(bin,'unrelated-helper'),unrelatedTarget=resolve('scripts/nonexistent-user-helper.ts');
+  await symlink(unrelatedTarget,unrelated);
+  const env={...process.env,THOT_USER_HOME:root,THOT_USER_HOME:root};
+  const result=await run(['scripts/install-capture-helper.ts'],env);
+  assert.equal(result.code,0,result.output);assert.match(result.output,/Removed 1 stale helper/);
+  await assert.rejects(lstat(legacy),{code:'ENOENT'});
+  assert.equal(await readlink(unrelated),unrelatedTarget);
+  assert.equal(await readlink(join(bin,'thot-capture')),resolve('scripts/thot-capture.ts'));
+  // A same-named command owned by another checkout must never be removed.
+  const otherTarget=join(root,'other-checkout/scripts/thot.ts');
+  await symlink(otherTarget,legacy);
+  assert.equal((await run(['scripts/install-capture-helper.ts'],env)).code,0);
+  assert.equal(await readlink(legacy),otherTarget);
+  await rm(legacy);await writeFile(legacy,'user-owned command');
+  assert.equal((await run(['scripts/install-capture-helper.ts'],env)).code,0);
+  assert.equal(await readFile(legacy,'utf8'),'user-owned command');
 });
 
 test('first Robinhood launch generates a private extension without opening a browser or creating a job',async t=>{

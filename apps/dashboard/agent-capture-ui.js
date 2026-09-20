@@ -156,7 +156,7 @@ export function createAgentCaptureUI({ state, api, openDialog, dialog, refresh, 
   function onDialogClose() { if (request && owner) clear(); }
   async function handle(action,button) {
     if(action==='export-agent-capture'){
-      if(typeof window.showDirectoryPicker!=='function'){openDialog('Keep your recording','Use the helper to export a private copy.',`<p>From your terminal:</p><pre>thot --export ${escape(button.dataset.id)} --output NEW_DIRECTORY</pre><p>Or open this vault in Chrome or Edge to save directly to a folder.</p>`);return true;}
+      if(typeof window.showDirectoryPicker!=='function'){openDialog('Keep your recording','Use the helper to export a private copy.',`<p>From your terminal:</p><pre>thot-capture --export ${escape(button.dataset.id)} --output NEW_DIRECTORY</pre><p>Or open this vault in Chrome or Edge to save directly to a folder.</p>`);return true;}
       const actor=state.actor?.id,generation=state.generation;const checkOwner=()=>{if(state.actor?.id!==actor||state.generation!==generation||state.role!=='user')throw Error('Your account changed. Export stopped; the folder may contain partial files.');};
       // Picker must occur in the click's user activation, before network awaits.
       const folder=await chooseEmptyExportDirectory(window.showDirectoryPicker.bind(window));checkOwner();
