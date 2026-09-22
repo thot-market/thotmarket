@@ -10,9 +10,9 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {
 const button=()=>({dataset:{},disabled:false});
 function fixture(t,request,respond,options={}){
  const previousWindow=globalThis.window,previousDocument=globalThis.document;
- const state={actor:{id:'seller'},generation:1,role:'user',thot:{wallet:owner,capabilities:{chain_id:31337,dispute_seconds:3600}}};
+ const state={actor:{id:'seller'},generation:1,role:'user',thot:{market_paused:false,wallet:owner,capabilities:{chain_id:31337,dispute_seconds:3600}}};
  const requests=[],dialogs=[],calls=[],notices=[];let refreshes=0;
- globalThis.window={ethereum:{request:async p=>{requests.push(p);if(p.method==='eth_requestAccounts')return [state.thot.wallet];if(p.method==='eth_chainId')return '0x7a69';return request(p,state);}}};
+ globalThis.window={ethereum:{request:async p=>{requests.push(p);if(p.method==='eth_requestAccounts')return [state.thot.wallet];if(p.method==='eth_chainId')return '0x7a69';if(p.method==='eth_blockNumber')return '0x20';if(p.method==='eth_getBlockByNumber')return {hash:hash(999)};const result=await request(p,state);return p.method==='eth_getTransactionReceipt'&&result?{transactionHash:p.params[0],blockNumber:'0x10',blockHash:hash(999),...result}:result;}}};
  globalThis.document={querySelector:()=>({value:'10000'})};
  const ui=createThotUI({state,api:async(path,options)=>{calls.push({path,options});return respond?respond(path,options):{transactions,notice:'Review the lock.'};},openDialog:(...args)=>dialogs.push(args),dialog:{close(){}},refresh:async()=>{refreshes++;},escape:String,json:JSON.stringify,toast:m=>notices.push(m),...options});
  t.after(()=>{globalThis.window=previousWindow;globalThis.document=previousDocument;});
@@ -85,7 +85,7 @@ test('a refresh requires new review and resumes known hashes instead of duplicat
 
 const atoms=n=>(BigInt(n)*10n**18n).toString();
 function viewFixture(){
- const state={role:'user',traces:[{trace_id:'private-1',title:'My research'}],thot:{
+ const state={role:'user',traces:[{trace_id:'private-1',title:'My research'}],thot:{market_paused:false,
   capabilities:{mode:'thot-anvil',chain_id:31337,market:other,dispute_seconds:3600,subjective_dispute_min_qualifying_spend:atoms(10000000),seller_response_seconds:86400,dispute_vote_seconds:604800,dispute_review_threshold:2},wallet:owner,
   account:{balance:atoms(900000),qualified:atoms(10000),seller_bps:5000,claimable:atoms(17),finalized_independent_spend:atoms(10000000),lots:[]},
   listings:[{id:'listing-1',seller:other,title:'Listed research',workflow:'research',turn_count:4,provenance:'IMPORTED_UNVERIFIED',price_atoms:atoms(100),license:'Evaluation only'}],orders:[],
@@ -383,7 +383,7 @@ test('a network switch during receipt retrieval cannot confirm the action or sen
 
 test('wallet actions use the signed-in provider even when the global Ethereum provider is another wallet',async t=>{
  const calls=[];let sends=0;
- const selected={request:async p=>{calls.push(p);if(p.method==='eth_requestAccounts')return [owner];if(p.method==='eth_chainId')return '0x7a69';if(p.method==='eth_sendTransaction')return hash(++sends);return {status:'0x1'};}};
+ const selected={request:async p=>{calls.push(p);if(p.method==='eth_requestAccounts')return [owner];if(p.method==='eth_chainId')return '0x7a69';if(p.method==='eth_sendTransaction')return hash(++sends);if(p.method==='eth_blockNumber')return '0x20';if(p.method==='eth_getBlockByNumber')return {hash:hash(999)};return {status:'0x1',transactionHash:p.params[0],blockNumber:'0x10',blockHash:hash(999)};}};
  const f=fixture(t,async()=>{throw Error('Wrong global wallet used');},undefined,{getProvider:()=>selected});
  await f.prepare();await f.send();assert.equal(sends,2);assert.equal(f.requests.length,0);assert(calls.every(call=>typeof call.method==='string'));
 });
@@ -525,4 +525,127 @@ test('seller response waiver is separate, explicit and unavailable before an onc
  assert.doesNotMatch(f.ui.offersHTML(),/thot-dispute-waive-response/);receipt.dispute.response_hash=hash(94);assert.match(f.ui.offersHTML(),/thot-dispute-waive-response/);
  await f.ui.action('thot-dispute-waive-response',{dataset:{id:hash(93)}});assert.equal(f.calls.length,0);assert.match(f.dialogs.at(-1)[2],/cannot reopen/);
  await f.ui.action('thot-dispute-waive-confirm',{dataset:{id:hash(93)}});assert.equal(f.calls[0].path,'/v1/thot/disputes/waive-response');assert.deepEqual(f.calls[0].options.body,{id:hash(93),confirm_final_response:true});assert.equal(f.requests.length,0);
+});
+
+
+test('every supported chain blocks new purchases while paused or unknown but retains delivery and exits',async t=>{
+ for(const mode of ['thot-anvil','thot-testnet','thot-production']){
+  const {state,ui}=viewFixture();state.thot.capabilities.mode=mode;
+  state.thot.orders=[{id:hash(8),title:'Funded trace',buyer:owner,seller:other,receipt:{status:3,delivered_at:1,block:{timestamp:2}}}];
+  for(const paused of [true,null,undefined]){
+   state.thot.market_paused=paused;const html=ui.offersHTML();
+   assert.doesNotMatch(html,/data-action="thot-buy"|data-action="thot-reserve-buy"/);
+   assert.match(html,/thot-delivery/);assert.match(html,/paused|unknown/);
+  }
+  state.thot.market_paused=false;assert.match(ui.offersHTML(),/data-action="thot-buy"/);
+ }
+ const f=fixture(t,()=>{throw Error('Wallet must not be called');},()=>{throw Error('API must not be called');});
+ f.state.thot.market_paused=null;await assert.rejects(f.ui.action('thot-buy',{dataset:{id:'listing'}}),/unknown/);
+});
+
+test('purchase recovery survives a new UI instance and reconciles existing hashes during pause',async t=>{
+ const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ let sends=0,fail=true,prepares=0;
+ const request=async p=>{if(p.method==='eth_sendTransaction')return hash(++sends);if(p.params[0]===hash(2)&&fail)throw Error('Receipt unavailable');return {status:'0x1'};};
+ const respond=async path=>{if(path==='/v1/thot/workspace')return {market_paused:!fail};prepares++;return {id:hash(9),transactions};};
+ const first=fixture(t,request,respond,{recoveryStorage:storage});
+ await first.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(first.send(),/Receipt unavailable/);assert.equal(sends,2);
+ const stored=JSON.parse([...data.values()][0]);assert.equal(stored.id,hash(9));assert.equal(stored.steps[1].hash,hash(2));assert.equal(stored.extra,undefined);
+ fail=false;
+ const second=fixture(t,request,respond,{recoveryStorage:storage});second.state.thot.market_paused=true;
+ await second.ui.action('thot-buy',{dataset:{id:'listing'}});assert.match(second.dialogs.at(-1)[0],/Resume/);
+ await second.send();assert.equal(sends,2);assert.equal(prepares,1);assert.equal(data.size,0);
+});
+
+test('a pause after the approval prevents payment without resending approval on recovery',async t=>{
+ let sends=0,checks=0,paused=true;
+ const f=fixture(t,async p=>p.method==='eth_sendTransaction'?hash(++sends):{status:'0x1'},async path=>path==='/v1/thot/workspace'?{market_paused:++checks>1&&paused}:{id:hash(10),transactions});
+ await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/Purchases are paused/);assert.equal(sends,1);
+ paused=false;await f.send();assert.equal(sends,2);
+});
+
+test('failed availability RPC blocks payment and marks state unknown',async t=>{
+ let sends=0;
+ const f=fixture(t,async()=>{sends++;},async path=>{if(path==='/v1/thot/workspace')throw Error('RPC secret diagnostic');return {transactions};});
+ await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/availability is unknown/);assert.equal(sends,0);assert.equal(f.state.thot.market_paused,null);
+});
+
+test('a reload with unknown submission never resends and another identity cannot adopt it',async t=>{
+ const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ let sends=0;
+ const request=async()=>{sends++;throw Error('Transport closed');};
+ const respond=async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions};
+ const first=fixture(t,request,respond,{recoveryStorage:storage});await first.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(first.send(),/Transport closed/);
+ const second=fixture(t,request,respond,{recoveryStorage:storage});await second.ui.action('thot-resume-payment',button());await assert.rejects(second.send(),/may already have submitted/);assert.equal(sends,1);
+ second.state.actor.id='other-person';await assert.rejects(second.ui.action('thot-resume-payment',button()),/No pending/);
+});
+
+test('browser recovery storage failure blocks sending before a wallet is contacted',async t=>{
+ let sends=0;
+ const storage={getItem:()=>null,setItem:()=>{throw Error('Storage unavailable');}};
+ const f=fixture(t,async()=>{sends++;},null,{recoveryStorage:storage});
+ await assert.rejects(f.prepare(),/Storage unavailable/);assert.equal(sends,0);
+});
+
+
+test('two confirmations retain recovery until depth and revalidate stored receipts after reload',async t=>{
+ t.mock.method(globalThis,'setTimeout',fn=>{queueMicrotask(fn);return 0;});
+ const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ let sends=0,head='0x10';
+ const request=async p=>p.method==='eth_sendTransaction'?hash(++sends):{status:'0x1'};
+ const first=fixture(t,request,undefined,{recoveryStorage:storage});first.state.thot.capabilities.confirmations=2;
+ let original=window.ethereum.request;window.ethereum.request=p=>p.method==='eth_blockNumber'?Promise.resolve(head):original(p);
+ await first.prepare();await assert.rejects(first.send(),/Confirmation is pending/);assert.equal(sends,1);assert.equal(data.size,1);
+ // Even an old stored success marker must not bypass the confirmed-depth check.
+ const key=[...data.keys()][0],record=JSON.parse(data.get(key));record.steps[0].confirmed=true;data.set(key,JSON.stringify(record));
+ const second=fixture(t,request,undefined,{recoveryStorage:storage});second.state.thot.capabilities.confirmations=2;
+ original=window.ethereum.request;window.ethereum.request=p=>p.method==='eth_blockNumber'?Promise.resolve(head):original(p);
+ await second.prepare();await assert.rejects(second.send(),/Confirmation is pending/);assert.equal(sends,1);
+ head='0x11';await second.send();assert.equal(sends,2);assert.equal(data.size,0);
+});
+
+test('a receipt on a replaced block stays recoverable and is never resubmitted',async t=>{
+ let sends=0,canonical=false;
+ const f=fixture(t,async p=>p.method==='eth_sendTransaction'?hash(++sends):{status:'0x1'});
+ const original=window.ethereum.request;window.ethereum.request=p=>p.method==='eth_getBlockByNumber'?Promise.resolve({hash:hash(canonical?999:998)}):original(p);
+ await f.prepare();await assert.rejects(f.send(),/confirmation changed/);assert.equal(sends,1);
+ canonical=true;await f.send();assert.equal(sends,2);
+});
+
+test('unknown purchase submission does not block a separately authorized claim or erase recovery',async t=>{
+ let sends=0;
+ const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===1)throw Error('Submission unknown');return hash(sends);}return {status:'0x1'};},async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[transactions[0]]},{recoveryStorage:storage});
+ await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/Submission unknown/);
+ await f.ui.action('thot-claim',button());assert.doesNotMatch(f.dialogs.at(-1)[0],/Resume/);await f.send();assert.equal(sends,2);assert.equal(data.size,1);
+ await f.ui.action('thot-resume-payment',button());await assert.rejects(f.send(),/may already have submitted/);assert.equal(sends,2);
+});
+
+
+test('unknown purchase preserves deadline-sensitive dispute filing and seller response actions',async t=>{
+ const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ let sends=0,confirmedDispute;
+ const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===1)throw Error('Purchase submission unknown');return hash(sends);}return {status:'0x1'};},async(path,options)=>{
+  if(path==='/v1/thot/workspace')return {market_paused:false};
+  if(path==='/v1/thot/disputes/confirm'){confirmedDispute=options.body;return {status:'confirmed'};}
+  return {wallet:owner,transactions:[transactions[0]]};
+ },{recoveryStorage:storage});
+ await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/Purchase submission unknown/);
+ f.state.thot.market_paused=true;
+ for(const action of ['dispute-confirm','dispute-response-preview','dispute-waive-confirm']){
+  await f.ui.action('thot-'+action,{dataset:{id:hash(91)}});assert.doesNotMatch(f.dialogs.at(-1)[0],/Resume/);await f.send();assert.equal(data.size,1);
+ }
+ assert.deepEqual(confirmedDispute,{id:hash(91),transaction_hash:hash(2)});assert.equal(sends,4);
+ await f.ui.action('thot-resume-payment',button());await assert.rejects(f.send(),/may already have submitted/);assert.equal(sends,4);
+});
+
+
+test('refunded purchase cards show frozen discounted buyer payment and never advertise seller proceeds',()=>{
+ const {state,ui}=viewFixture();state.role='buyer_member';state.thot.account.claimable='0';
+ const order={id:hash(81),title:'Discounted purchase',seller:other,buyer:owner,gross:atoms(100),buyer_total:'99800000000000000000',receipt:{status:6,buyer_total:'99700000000000000000',seller_amount:'99200000000000000000',referral_amount:atoms(1),economics:{service_fee:atoms(1)}}};
+ state.thot.orders=[order];
+ let html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 99\.7000 THOT/);assert.match(html,/Payout is not yet confirmed here/);assert.doesNotMatch(html,/Seller receives|99\.2000|99\.8000|full seller price|Refund paid to buyer wallet/);
+ order.refund_transaction=hash(82);html=ui.offersHTML();assert.match(html,/Refund paid to buyer wallet/);assert.match(html,/Refund paid to the buyer wallet: 99\.7000 THOT/);assert.doesNotMatch(html,/claimable|Payout is not yet confirmed|Seller receives|99\.2000/);
+ order.receipt.dispute={outcome:2};html=ui.offersHTML();assert.match(html,/Refund paid to the buyer wallet: 49\.8500 THOT/);assert.match(html,/remaining 49\.8500 THOT was sent to the canonical dead sink/);assert.doesNotMatch(html,/Seller receives|claimable/);
+ delete order.refund_transaction;html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 49\.8500 THOT/);assert.match(html,/Payout is not yet confirmed here/);
 });

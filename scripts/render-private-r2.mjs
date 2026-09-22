@@ -35,6 +35,7 @@ export async function renderPrivateR2(config,volume){
   const environment='      THOT_OBJECT_STORAGE: "s3"\n'+names.map(name=>`      ${name.replace('THOT_','THOT_')}: "\${${name}:?sealed R2 configuration}"`).join('\n')+`\n      THOT_QUOTA_DATABASE_URL: "\${THOT_QUOTA_DATABASE_URL:?CVM-local quota database}"\n`+(initialize?'      THOT_REMOTE_STORAGE_INITIALIZE: "true"\n':'')+'    depends_on:\n      thot-quota:\n        condition: service_healthy';
   const service=`  thot-quota:
     image: "${config.quota_image}"
+    logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
     restart: unless-stopped
     mem_limit: 256m
     pids_limit: 80

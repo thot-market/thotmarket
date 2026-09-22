@@ -116,7 +116,10 @@ if(exportId){
     clearInterval(heartbeat);
     try{
       const result=await proxy.finish();
-      if(!(result.bundle.format==='thot.proxy-capture/2'?result.bundle.parts.length:result.bundle.exchanges.length))process.stderr.write('No model exchanges were captured. Nothing was saved.\n');
+      if(!(result.bundle.format==='thot.proxy-capture/2'?result.bundle.parts.length:result.bundle.exchanges.length)){
+        process.stderr.write('No model exchanges were captured. Nothing was saved.\n');
+        process.exitCode=1;
+      }
       else{
         process.stderr.write('Saving the final checkpoint…\n');
         savedMessage(origin,await sync.finish(result));

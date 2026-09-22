@@ -130,7 +130,27 @@ export function clientInvocation(client:CaptureClient,baseUrl:string,args:string
     // This relay forwards unchanged to api.anthropic.com. Preserve the installed
     // Claude CLI's first-party subscription/context behavior for this child only.
     env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL='1';
-    return {command:'claude',args,env};
+    // Claude's user settings can contain env.ANTHROPIC_BASE_URL and an auth
+    // token for another gateway. A launch-time settings override takes
+    // precedence over those values. Empty token means use the native login;
+    // never forward an unrelated gateway credential through this relay.
+    const delimiter=args.indexOf('--'),at=delimiter<0?args.length:delimiter;
+    const nativeArgs=args.slice(0,at),settingsAt=nativeArgs.findIndex(arg=>arg==='--settings'||arg.startsWith('--settings='));
+    let requested:Record<string,unknown>={};
+    if(settingsAt>=0){
+      const inline=nativeArgs[settingsAt].startsWith('--settings=');
+      const raw=inline?nativeArgs[settingsAt].slice('--settings='.length):nativeArgs[settingsAt+1];
+      if(!raw?.startsWith('{'))throw new Error('CLAUDE_SETTINGS_FILE_NOT_SUPPORTED_DURING_CAPTURE');
+      try{requested=JSON.parse(raw);}catch{throw new Error('CLAUDE_SETTINGS_JSON_INVALID');}
+      if(!requested||typeof requested!=='object'||Array.isArray(requested))throw new Error('CLAUDE_SETTINGS_JSON_INVALID');
+      nativeArgs.splice(settingsAt,inline?1:2);
+      if(nativeArgs.some(arg=>arg==='--settings'||arg.startsWith('--settings=')))throw new Error('CLAUDE_MULTIPLE_SETTINGS_NOT_SUPPORTED_DURING_CAPTURE');
+    }
+    const requestedEnv=requested.env;
+    if(requestedEnv!==undefined&&(!requestedEnv||typeof requestedEnv!=='object'||Array.isArray(requestedEnv)))throw new Error('CLAUDE_SETTINGS_ENV_INVALID');
+    if(requestedEnv&&('ANTHROPIC_API_KEY' in requestedEnv||'ANTHROPIC_AUTH_TOKEN' in requestedEnv))throw new Error('USE_SUBSCRIPTION_LOGIN_REMOVE_API_OVERRIDE');
+    const routeSettings=JSON.stringify({...requested,env:{...(requestedEnv as Record<string,unknown>|undefined),ANTHROPIC_BASE_URL:baseUrl,ANTHROPIC_AUTH_TOKEN:''}});
+    return {command:'claude',args:[...nativeArgs,'--settings',routeSettings,...args.slice(at)],env};
   }
   // A scoped custom Responses provider preserves ChatGPT auth and uses SSE. Global
   // config and credential files are untouched. WebSocket capture is not claimed.

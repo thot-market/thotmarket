@@ -39,7 +39,7 @@ test('upgrade removes only this checkout retired capture link and preserves othe
   await symlink(resolve('scripts/thot.ts'),legacy);
   const unrelated=join(bin,'unrelated-helper'),unrelatedTarget=resolve('scripts/nonexistent-user-helper.ts');
   await symlink(unrelatedTarget,unrelated);
-  const env={...process.env,THOT_USER_HOME:root,THOT_USER_HOME:root};
+  const env={...process.env,THOT_USER_HOME:root};
   const result=await run(['scripts/install-capture-helper.ts'],env);
   assert.equal(result.code,0,result.output);assert.match(result.output,/Removed 1 stale helper/);
   await assert.rejects(lstat(legacy),{code:'ENOENT'});

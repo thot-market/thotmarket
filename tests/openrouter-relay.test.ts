@@ -79,7 +79,7 @@ test('the encrypted source retains all accepted request fields and response byte
   const bytes=[];for(const part of row.parts)bytes.push(Buffer.from((await app.privacy.open(owner.id,part.ref)).bytes_b64,'base64'));
   assert.deepEqual(JSON.parse(Buffer.concat(bytes).toString()),output);
   const privateView=await app.library.item(owner,row.trace_id);assert.equal(privateView.content.turns[0].role,'system');assert.equal(privateView.content.turns[0].content,'Private system context');assert.match(privateView.content.turns[1].content,/Non-text content retained in private source/);assert.match(privateView.content.turns[2].content,/Provider exposed reasoning/);
-  assert.equal(privateView.private,true);assert.equal(privateView.private_import.can_prepare_sale,true);
+  assert.equal(privateView.private,true);assert.equal(privateView.private_import,null);assert.equal(privateView.sale_eligibility.status,'REVIEW_REQUIRED');assert.equal(privateView.sale_eligibility.reason_code,'PRIVATE_RELEASE_UNSUPPORTED');assert.equal(privateView.sale_eligibility.can_prepare_sale,false);assert.equal(privateView.sale_eligibility.can_list,false);
   const source=await app.openrouter.source(owner,row.request_id);assert.equal(source.private,true);assert.deepEqual(source.request,input);assert.deepEqual(JSON.parse(Buffer.from(source.response.body_b64,'base64').toString()),output);assert.equal(source.response.complete,true);assert.equal(source.capture_model.returned_model,output.model);
   assert.equal(Object.hasOwn(source.request,'Authorization'),false);assert.equal(Object.hasOwn(source.response,'Authorization'),false);assert.ok(!JSON.stringify(source).includes(providerKey));
   await assert.rejects(app.openrouter.source(other,row.request_id),/NOT_FOUND/);

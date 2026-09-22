@@ -9,6 +9,8 @@ import {createApplication} from '../packages/market/src/bootstrap.ts';
 import {captureLabel} from '../packages/capture/src/terminal.ts';
 // @ts-expect-error Browser-native module.
 import {verifyProxyCapture} from '../apps/dashboard/agent-capture-ui.js';
+// @ts-expect-error Browser-native module.
+import {createLibraryUI} from '../apps/dashboard/library-ui.js';
 
 const actor={id:'user_demo',role:'user' as const};
 const answer='data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"The PDF marker is THOT_PDF_OK."}}\n\ndata: {"type":"message_stop"}\n\n';
@@ -93,4 +95,30 @@ test('optional metrics keep private-vault and interruption cues without printing
     process.env.THOT_CAPTURE_STATUS='default';
     assert.match(captureLabel({interrupted:false,saved:12,pending:0,saveMsP50:10,saveMsLast:15}),/12 exchanges verified & saved/);
   }finally{if(previous===undefined)delete process.env.THOT_CAPTURE_STATUS;else process.env.THOT_CAPTURE_STATUS=previous;}
+});
+
+
+test('pre-model checkpoint stays pending, later model save clears errors, terminal no-model still warns',async t=>{
+  const app=await appFor(t),c=await app.agentCapture.begin(actor,{client:'codex',save_privately:true});
+  const codexManifest=()=>{const value=manifest(c.capture_id,records);const {root,...base}=value;return {...base,client:'codex',root:canonicalHash({...base,client:'codex'})};};
+  const records:any[]=[],proxy=await startCaptureProxy({client:'codex',captureId:c.capture_id,incremental:true,onExchange:e=>records.push(e),transport:async()=>new Response(answer,{headers:{'content-type':'text/event-stream'}})});
+  t.after(()=>proxy.finishManifest());
+  await(await fetch(proxy.baseUrl+'/models')).text();
+  await app.agentCapture.part(c.capture_id,c.upload_token,'prelude-part',{part:records[0]});
+  const prelude=codexManifest();
+  await assert.rejects(app.agentCapture.checkpoint(c.capture_id,c.upload_token,'prelude-checkpoint',{bundle:prelude}),/CAPTURE_HAS_NO_MODEL_EXCHANGE/);
+  const render=(traceLibrary:any)=>createLibraryUI({state:{traceLibrary},escape:String}).sectionHTML();
+  let library=await app.library.list(actor);
+  assert.equal(library.items.length,0);assert.equal(library.attempts[0].error_code,null);
+  assert.match(render(library),/awaiting a verified checkpoint/);assert.doesNotMatch(render(library),/Save needs attention/);
+  await assert.rejects(app.agentCapture.complete(c.capture_id,c.upload_token,'terminal-no-model',{bundle:prelude}),/CAPTURE_HAS_NO_MODEL_EXCHANGE/);
+  library=await app.library.list(actor);assert.equal(library.attempts[0].error_code,'CAPTURE_HAS_NO_MODEL_EXCHANGE');assert.match(render(library),/Save needs attention/);
+  await(await fetch(proxy.baseUrl+'/responses',{method:'POST',body:'{"messages":[{"role":"user","content":"hello"}]}'})).text();
+  await app.agentCapture.part(c.capture_id,c.upload_token,'model-part',{part:records[1]});
+  const bundle=codexManifest();
+  const checkpoint=await app.agentCapture.checkpoint(c.capture_id,c.upload_token,'model-checkpoint',{bundle});
+  assert.equal(checkpoint.capture_summary.model_exchanges,1);
+  const saved=await app.agentCapture.complete(c.capture_id,c.upload_token,'model-final',{bundle});
+  assert.equal(saved.status,'SAVED');assert.equal(saved.trace_id,checkpoint.trace_id);
+  const capture=await app.db.transaction(tx=>tx.get('agent_captures',c.capture_id,actor.id));assert.equal(capture.last_error_code,undefined);assert.doesNotMatch(render(await app.library.list(actor)),/Save needs attention/);
 });

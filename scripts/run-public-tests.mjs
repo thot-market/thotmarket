@@ -10,6 +10,7 @@ if (process.argv.length !== 3 || (selected !== 'all' && !Object.hasOwn(suites, s
   throw new Error(`Choose one suite: ${Object.keys(suites).join(', ')}, all`);
 }
 const env = { ...process.env, NODE_ENV: 'test', THOT_MONEY_POOL: 'local-v2' };
+env.THOT_E2E_BROWSER ??= env.THOT_E2E_BROWSER;
 if (env.THOT_ANVIL_PATH) {
   if (!isAbsolute(env.THOT_ANVIL_PATH)) throw new Error('THOT_ANVIL_PATH must be absolute');
   // Both fixture implementations must use the selected local binary.
@@ -28,7 +29,7 @@ function python(name) {
 for (const name of selected === 'all' ? Object.keys(suites) : [selected]) {
   const suite = suites[name];
   console.log(`Public test suite: ${name}`);
-  for (const path of [...(suite.node ?? []), ...(suite.python ?? [])]) {
+  for (const path of [...(suite.node ?? []), ...(suite.python ?? []), ...(suite.node_commands ?? []).map(command => command[0])]) {
     if (!existsSync(new URL('../' + path, import.meta.url))) throw new Error(`Missing exported test: ${path}`);
   }
   for (const requirement of suite.requires ?? []) {
@@ -47,5 +48,7 @@ for (const name of selected === 'all' ? Object.keys(suites) : [selected]) {
     }
   }
   if (suite.node?.length) run(process.execPath, ['--test', '--test-concurrency=1', ...suite.node]);
+  // Explicit script arguments, run serially after node:test. No shell interpolation.
+  for (const command of suite.node_commands ?? []) run(process.execPath, command);
   for (const path of suite.python ?? []) run(python('THOT_TRADE_TEST_PYTHON'), [path]);
 }

@@ -19,7 +19,9 @@
     "test:browser": "node scripts/run-public-tests.mjs browser",
     "test:packaging": "node scripts/run-public-tests.mjs packaging",
     "test:all": "node scripts/run-public-tests.mjs all",
-    "check": "pnpm build && pnpm test"
+    "check": "pnpm build && pnpm test",
+    "test:thot:browser": "node scripts/record-thot-purchase.mjs --economics quoted-cost",
+    "test:thot:browser:percentage": "node scripts/record-thot-purchase.mjs --economics percentage"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1135.0",

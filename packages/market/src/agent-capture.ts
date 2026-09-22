@@ -83,7 +83,12 @@ export class AgentCaptureIngestion {
 
   async checkpoint(captureId:string,token:string,key:string,input:Document) {
     ensure(input.bundle?.format==='thot.proxy-capture/2','CHECKPOINT_MANIFEST_REQUIRED');
-    try{return await this.save(captureId,token,key,input,false);}catch(error){await this.failed(captureId,token,error);throw error;}
+    try{return await this.save(captureId,token,key,input,false);}catch(error){
+      // A pre-model checkpoint is still pending. Keep rejecting its seal, but
+      // reserve the persisted failure banner for terminal or real save errors.
+      if(!(error instanceof Error&&error.message==='CAPTURE_HAS_NO_MODEL_EXCHANGE'))await this.failed(captureId,token,error);
+      throw error;
+    }
   }
 
   private async failed(captureId:string,token:string,error:unknown){

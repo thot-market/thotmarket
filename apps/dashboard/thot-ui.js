@@ -1,6 +1,6 @@
 import {renderLiveStaking,parseStakingAmount} from './staking-ui.js';
 // Contributors sign explicit enrollment terms; only the reserve worker moves its own funds.
-export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,getProvider=()=>globalThis.window?.ethereum}) {
+export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,getProvider=()=>globalThis.window?.ethereum,recoveryStorage=globalThis.window?.sessionStorage}) {
  let pending=null,listingMetadata=null,listingScope=null,listingEnrollment=null,samplingPreview=null,samplingScope=null,reserveSelection=null,inFlight=false;
  const recoveries=new Map();
  const fmt=value=>{const n=BigInt(value??0),base=10n**18n;return `${(n/base).toLocaleString()}.${String(n%base).padStart(18,'0').slice(0,4)} THOT`;};
@@ -9,6 +9,8 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  const supported=mode=>['thot-anvil','thot-testnet','thot-production'].includes(mode);
  const capabilities=()=>state.role==='operator_security'?(state.thotSampling?.capabilities??state.thot?.capabilities??{}):(state.thot?.capabilities??state.thotSampling?.capabilities??{});
  const production=()=>capabilities().mode==='thot-production';
+ const purchasesPaused=()=>state.thot?.market_paused!==false;
+ const pauseNotice=()=>state.thot?.market_paused===true?'Purchases are paused. Existing purchases can still be delivered, settled or refunded.':'Purchase availability is unknown. Refresh to check the chain before buying.';
  const concurrentCampaigns=()=>capabilities().reserve_campaigns===true;
  const campaignRows=()=>state.thotSampling?.campaigns??[];
  const campaignAvailable=c=>!c.closed&&!c.paused&&c.status==='active'&&BigInt(c.available_atoms??0)>0n;
@@ -32,46 +34,71 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  }
  async function wallet(){await checkNetwork();const a=await provider().request({method:'eth_requestAccounts'});await checkNetwork();if(!a[0])throw Error('Choose a wallet account.');return a[0];}
  async function connected(operator=false){const expected=operator?operatorWallet():state.thot?.wallet,a=await wallet();if(a.toLowerCase()!==expected?.toLowerCase())throw Error(operator?'Choose the designated operator wallet to sign this decision.':'Choose the wallet linked to this signed-in account.');return a;}
- const recoveryKey=(operator=false)=>`${state.actor?.id}:${operator?'operator':'participant'}:${(operator?capabilities().operator_address:state.thot?.wallet)?.toLowerCase()}:${capabilities().chain_id}`;
+ const recoveryKey=(operator=false,exit=false)=>`${state.actor?.id}:${operator?'operator':'participant'}:${(operator?capabilities().operator_address:state.thot?.wallet)?.toLowerCase()}:${capabilities().chain_id}:${capabilities().market??''}${exit?':exit':''}`;
+ const storageKey=key=>'thot.wallet-recovery.v1:'+key;
+ function saveRecovery(operation){
+  if(!recoveryStorage)return;
+  const {key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps}=operation;
+  recoveryStorage.setItem(storageKey(key),JSON.stringify({version:1,key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps}));
+ }
+ function savedRecovery(key){
+  if(recoveries.has(key))return recoveries.get(key);
+  const raw=recoveryStorage?.getItem(storageKey(key));if(!raw)return null;
+  let value;try{value=JSON.parse(raw);}catch{throw Error('Saved wallet recovery is unreadable. Check your wallet before another payment.');}
+  if(value.version!==1||value.key!==key||!Array.isArray(value.steps)||value.steps.length>20)throw Error('Saved wallet recovery is invalid. Check your wallet before another payment.');
+  recoveries.set(key,value);return value;
+ }
  const attempted=operation=>!operation.steps.some(step=>step.reverted)&&operation.steps.some(step=>step.hash||step.uncertain);
- async function send(from,step,current,operator=false){
-  if(step.confirmed)return;
+ async function send(from,step,current,operator=false,operation=pending){
+  // A saved success flag is not evidence after reload or a chain reorganization.
+  if(step.hash){step.confirmed=false;saveRecovery(operation);}
   if(step.reverted)throw Error(`Transaction ${step.hash} reverted. No later transaction was sent. Review a new action after checking your wallet.`);
   if(step.uncertain)throw Error('The wallet did not return a transaction hash. It may already have submitted this action. Check your wallet; this page will not resend it automatically.');
   current();const selected=await connected(operator);current();if(selected.toLowerCase()!==from.toLowerCase())throw Error('Wallet account changed.');
   if(!step.hash){
    // Persist submission uncertainty before yielding to the wallet. Only an explicit
    // user rejection is safe to retry without a transaction hash.
-   step.uncertain=true;
+   step.uncertain=true;saveRecovery(operation);
    try{
     const hash=await provider().request({method:'eth_sendTransaction',params:[{...step.transaction,from}]});
     if(typeof hash!=='string'||!/^0x[0-9a-f]{64}$/i.test(hash))throw Error('The wallet returned no valid transaction hash. Check your wallet before taking further action.');
-    step.hash=hash;step.uncertain=false;
-   }catch(error){if(Number(error?.code)===4001)step.uncertain=false;throw error;}
+    step.hash=hash;step.uncertain=false;saveRecovery(operation);
+   }catch(error){if(Number(error?.code)===4001){step.uncertain=false;saveRecovery(operation);}throw error;}
    current();
   }
   for(let n=0;n<120;n++){
    await checkNetwork();current();const r=await provider().request({method:'eth_getTransactionReceipt',params:[step.hash]});current();await checkNetwork();current();
    if(r){
     if(r.transactionHash&&r.transactionHash.toLowerCase()!==step.hash.toLowerCase())throw Error('Wallet returned a receipt for a different transaction.');
-    if(r.status==='0x0'){step.reverted=true;throw Error(`Transaction ${step.hash} reverted. No later transaction was sent.`);}
+    if(r.status==='0x0'){step.reverted=true;saveRecovery(operation);throw Error(`Transaction ${step.hash} reverted. No later transaction was sent.`);}
     if(r.status!=='0x1')throw Error(`Transaction ${step.hash} has no confirmed execution status yet.`);
-    step.confirmed=true;return;
+    const depth=Number(capabilities().confirmations??1);
+    if(!Number.isSafeInteger(depth)||depth<1||depth>100)throw Error('The required confirmation depth is unavailable. Refresh before continuing.');
+    if(!/^0x[0-9a-f]+$/i.test(r.blockNumber??'')||!/^0x[0-9a-f]{64}$/i.test(r.blockHash??''))throw Error('The receipt has no confirmed block identity. Check this transaction again.');
+    const head=await provider().request({method:'eth_blockNumber'});current();
+    if(!/^0x[0-9a-f]+$/i.test(head??''))throw Error('The latest chain height is unavailable. Check this transaction again.');
+    if(BigInt(head)-BigInt(r.blockNumber)+1n>=BigInt(depth)){
+     const block=await provider().request({method:'eth_getBlockByNumber',params:[r.blockNumber,false]});current();
+     const confirmed=await provider().request({method:'eth_getTransactionReceipt',params:[step.hash]});current();await checkNetwork();current();
+     if(block?.hash?.toLowerCase()!==r.blockHash.toLowerCase()||confirmed?.blockHash?.toLowerCase()!==r.blockHash.toLowerCase()||confirmed?.blockNumber!==r.blockNumber||confirmed?.status!=='0x1'||confirmed?.transactionHash?.toLowerCase()!==step.hash.toLowerCase())throw Error('Transaction confirmation changed. Check the same transaction again; it will not be resubmitted.');
+     step.confirmed=true;saveRecovery(operation);return;
+    }
    }
    await new Promise(resolve=>setTimeout(resolve,500));
   }
   throw Error(`Confirmation is pending for ${step.hash}. Retry here to check the same transaction; it will not be submitted again.`);
  }
  function review(title,prepared,extra=''){
-  const operator=prepared.authority==='operator',key=recoveryKey(operator),saved=recoveries.get(key);
+  const operator=prepared.authority==='operator',key=recoveryKey(operator,prepared.exit===true),saved=savedRecovery(key);
   if(saved&&attempted(saved)){
    pending=saved;title='Resume your previous wallet action';
-   extra='<p>A previously submitted action is still unresolved. This review keeps its original transactions and checks existing hashes before sending any remaining transaction.</p>'+saved.extra;
+   extra='<p>A previously submitted action is still unresolved. This review keeps its original transactions and checks existing hashes before sending any remaining transaction.</p>'+(saved.extra??'');
   }else{
    pending={...prepared,key,extra,steps:prepared.transactions.map(transaction=>({transaction,hash:null,confirmed:false,uncertain:false,reverted:false}))};
    recoveries.set(key,pending);
   }
-  const current=scope();pending.current=()=>{current();if(recoveryKey(operator)!==key)throw Error('The linked wallet or chain changed. Review this action again.');};
+  saveRecovery(pending);
+  const current=scope(),operation=pending;pending.current=()=>{current();if(recoveryKey(operator,operation.exit===true)!==key)throw Error('The linked wallet or chain changed. Review this action again.');};
   const progress=pending.steps.map(step=>({transaction:step.transaction,hash:step.hash,status:step.confirmed?'confirmed':step.reverted?'reverted':step.uncertain?'submission unknown':step.hash?'pending':'not submitted'}));
   openDialog(title,networkName()+(production()?' · THOT':' · test THOT')+' · review before signing',`<p>${escape(pending.notice??'Your wallet will submit the displayed action. Contract state is authoritative.')}</p>${extra}<details><summary>Exact wallet transactions and progress</summary><pre class="json-view">${json(progress)}</pre></details>`,button('send','Confirm or check in wallet'));
  }
@@ -96,11 +123,14 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  const walletPrompt=()=>`<section class="panel"><h2>Link your wallet</h2><p>Connect a wallet to see your balances and act on offers. The link uses a message signature and grants no spending approval.</p>${button('link','Link a wallet')}${button('network','Switch to '+escape(networkName()))}</section>`;
  const explorerLink=(kind,value)=>{const base=capabilities().explorer_url;if(!base||!/^https:\/\//.test(base)||!/^0x[0-9a-f]+$/i.test(value??''))return '';return `<a href="${escape(base.replace(/\/$/,'')+'/'+kind+'/'+value)}" target="_blank" rel="noopener noreferrer">View on explorer ↗</a>`;};
  const contractDetails=()=>`${capabilities().legacy_workspace_origin?`<p class="legal-note">Earlier test assets remain available. <a href="${escape(capabilities().legacy_workspace_origin)}/app">Open previous test workspace →</a></p>`:''}<p class="legal-note">${escape(networkName())} · chain ${escape(capabilities().chain_id)} ${button('network','Switch wallet network')}</p><details class="technical-details"><summary>Contract details</summary><p>Chain ${escape(capabilities().chain_id)} · market <code>${escape(capabilities().market)}</code>. ${explorerLink('address',capabilities().market)}</p></details>`;
- function settlementHTML(r){
+ function settlementHTML(r,{refundPaid=false,buyerTotal=r.buyer_total??r.gross}={}){
   if(r.status===2){const deadline=r.accepted_at?date(Number(r.accepted_at)+48*3600):null;return `<p class="thot-settlement">Delivery pending.${deadline?' Delivery deadline: '+escape(deadline)+'.':''} The ${disputeWindow(r)} starts when delivery is recorded.</p>`;}
   if(r.status===3&&r.delivered_at){const seconds=disputeSeconds(r),deadline=seconds?Number(r.delivered_at)+seconds:null,ready=deadline!==null&&chainNow(r)>=deadline;return `<p class="thot-settlement">Delivered ${escape(date(r.delivered_at))}. ${deadline===null?'Checking the contract’s dispute period.':ready?'The dispute window has ended; automatic payout is pending confirmation.':'Undisputed proceeds become payable '+escape(date(deadline))+'.'}</p>`;}
   if(r.status===4&&r.dispute){const now=chainNow(r),phase=now<r.dispute.vote_starts_at?`The seller may respond until ${date(r.dispute.vote_starts_at)}.`:now<r.dispute.vote_ends_at?`Governance voting closes ${date(r.dispute.vote_ends_at)}.`:'The vote ended without a decision; anyone may apply the default uphold.';return `<p class="thot-settlement">A subjective dispute is holding this payment. ${escape(phase)} ${escape(capabilities().dispute_review_threshold??2)} matching governance vote(s) decide it.</p>`;}
-  if(r.status===6)return r.dispute?.outcome===2?'<p class="thot-settlement">Governance found for the buyer. Half the total escrow is claimable by the buyer and half was sent immediately to the canonical dead sink. Seller, referrer and protocol receive zero from this purchase.</p>':'<p class="thot-settlement">The full seller price and buyer surcharge are claimable by the buyer.</p>';
+  if(r.status===6){
+   const disputed=r.dispute?.outcome===2,total=buyerTotal==null?null:BigInt(buyerTotal),refund=total===null?null:disputed?total/2n:total;
+   return `<p class="thot-settlement">${disputed?'Governance found for the buyer. ':''}${refund===null?'Checking the frozen refund amount.':`Refund ${refundPaid?'paid to the buyer wallet':'allocated to the buyer'}: ${escape(fmt(refund))}.`}${refundPaid?'':' Payout is not yet confirmed here; check the available claim balance.'}${disputed&&total!==null?` The remaining ${escape(fmt(total-refund))} was sent to the canonical dead sink.`:''} Seller, referrer and protocol receive no sale proceeds from this purchase.</p>`;
+  }
   return '';
  }
  function settlementActions(o){
@@ -134,27 +164,29 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  function orderCard(o){
   const r=o.receipt,seller=sameWallet(o.seller,state.thot.wallet),buyer=sameWallet(o.buyer,state.thot.wallet);
   const refundPaid=r.status===6&&/^0x[0-9a-f]{64}$/i.test(o.refund_transaction??'');
-  const label=refundPaid?'Refund paid to buyer wallet':r.status===1?(seller?'Funded · awaiting your consent':'Funded · awaiting seller consent'):status[r.status];
-  return `<article class="panel thot-order"><span class="pill">${escape(label)}</span><h3>${escape(o.title)}</h3><p>${seller?'Your sale':'Your purchase'} · seller price ${escape(fmt(r.seller_gross??o.seller_gross??o.gross))}</p><p>${r.economics?'Service fee '+escape(fmt(r.economics.service_fee)):'Buyer surcharge '+escape(fmt(r.buyer_surcharge??o.buyer_surcharge??0))} · total escrow ${escape(fmt(r.buyer_total??o.buyer_total??o.gross))}. Seller receives ${escape(fmt(r.seller_amount))}. Referral ${escape(fmt(r.referral_amount))}.</p>
+  const label=r.status===0?'Payment not yet confirmed':r.status===5?(o.payout_transaction?'Payout transaction confirmed':'Finalized · payout pending'):refundPaid?'Refund paid to buyer wallet':r.status===1?(seller?'Funded · awaiting your consent':'Funded · awaiting seller consent'):status[r.status];
+  return `<article class="panel thot-order"><span class="pill">${escape(label)}</span><h3>${escape(o.title)}</h3><p>${seller?'Your sale':'Your purchase'}${r.status===6?' · refunded':` · seller price ${escape(fmt(r.seller_gross??o.seller_gross??o.gross))}`}</p>${r.status===6?'':`<p>${r.economics?'Service fee '+escape(fmt(r.economics.service_fee)):'Buyer surcharge '+escape(fmt(r.buyer_surcharge??o.buyer_surcharge??0))} · total escrow ${escape(fmt(r.buyer_total??o.buyer_total??o.gross))}. Seller receives ${escape(fmt(r.seller_amount))}. Referral ${escape(fmt(r.referral_amount))}.</p>`}
    ${r.status===1&&seller?button('review','Review exact release',o.id):''}
    ${[2,3,4,5].includes(r.status)&&buyer?button('delivery','Open licensed release',o.id):''}
    ${r.status===1&&buyer?button('cancelOffer','Cancel funded offer',o.id):''}
-   ${settlementHTML(r)}${settlementActions(o)}${refundPaid?`<p>${explorerLink('tx',o.refund_transaction)}</p>`:''}
+   ${o.last_error?`<p role="status">Processing needs attention (${escape(o.last_error)}). Refresh this purchase; the worker retries recoverable failures. Keep the purchase reference below for support.</p>`:''}${o.job_status==='awaiting_reconciliation'?'<p>Checking a previously submitted transaction. No new payment is needed.</p>':''}
+   ${settlementHTML(r,{refundPaid,buyerTotal:r.buyer_total??o.buyer_total??r.gross??o.gross})}${settlementActions(o)}${refundPaid?`<p>${explorerLink('tx',o.refund_transaction)}</p>`:''}
    <details><summary>Purchase receipt</summary><p class="mono">${escape(o.id)}</p></details></article>`;
  }
  function offersHTML(){
   if(!active())return '';
-  const w=state.thot,orders=w.orders??[],traces=state.traces??[];
+  const w=state.thot,orders=w.orders??[],traces=state.traces??[],saved=savedRecovery(recoveryKey());
+  const recovery=saved&&attempted(saved)?`<section class="panel"><h2>Payment confirmation pending</h2><p>Check the previous wallet action before starting another purchase.</p>${button('resume-payment','Resume wallet action')}</section>`:'';
   const open=orders.filter(o=>o.receipt.status<5),closed=orders.filter(o=>o.receipt.status>=5);
   return heading('Offers',state.role==='user'?'A buyer for your work.':'Research you can use.',state.role==='user'?'Authorize a trace once. Matching buyers can purchase it without another approval.':'Check trace properties, purchase a licensed conversation and track delivery here.')+
-   (!w.wallet?walletPrompt():'')+
+   (!w.wallet?walletPrompt():'')+recovery+
    (state.role!=='user'&&w.account&&BigInt(w.account.claimable)>0n?`<section class="panel"><h2>Available to claim</h2><strong>${escape(fmt(w.account.claimable))}</strong><p>Contract funds ready to return to your wallet, including purchase refunds and any eligible referral payouts.</p>${button('claim','Claim tokens')}</section>`:'')+
    `<div class="section-head"><h2>Open offers & purchases</h2>${state.role==='user'?nav('earnings','View earnings →'):nav('thot','Manage THOT →')}</div><section class="cards">${open.map(orderCard).join('')||'<div class="panel"><p>No open offers yet. Your funded purchases and offers from buyers will appear here.</p></div>'}</section>`+
    `${closed.length?`<details class="technical-details"><summary>Completed & refunded purchases (${closed.length})</summary><section class="cards">${closed.map(orderCard).join('')}</section></details>`:''}
    ${w.orders_truncated?'<p class="legal-note">Showing the latest 50 purchase records.</p>':''}
    ${w.wallet&&state.role==='user'?`<section class="panel"><h2>List a trace you choose</h2><p>Inspect the scrubbed trace in your private vault, then set its price and sign one exact sale authorization. A matching purchase releases the licensed content automatically.</p>${traces.length?`<label for="thot-trace">Your trace</label><select id="thot-trace">${traces.map(t=>`<option value="${escape(t.trace_id)}">${escape(traceTitle(t))}</option>`).join('')}</select>${capabilities().trade_evidence===true?button('trade-evidence-begin','Add trade proof'):''}${button('list-configure','Set listing terms')}`:`<p>Save a trace in your private library first.</p>${nav('vault','Open your traces →')}`}</section>`:''}
    <section class="panel"><h2>Check workflow and length</h2><p>Compare the listing’s inferred category and turn count with your criteria. This fixed allowlisted check returns only a signed predicate result; it does not disclose or judge the conversation.</p><div class="thot-filters"><div><label for="thot-workflow">Workflow</label><select id="thot-workflow"><option value="coding">Coding</option><option value="investment_research">Investment research</option><option value="research">Research</option><option value="contract_review">Contract review</option></select></div><div><label for="thot-min-turns">Minimum turns</label><input id="thot-min-turns" type="number" min="1" max="1000" value="2"></div></div></section>
-   <div class="section-head"><h2>Available traces</h2><p>Before purchase, buyers can inspect listing metadata, the licence, allowlisted predicate results and any contributor-approved proof. Trace text is delivered only after purchase.</p></div><section class="cards">${(w.listings??[]).map(l=>`<article class="panel"><h3>${escape(l.title)}</h3><p>${escape(l.workflow)} · ${escape(l.turn_count)} turns · ${escape(l.provenance)}</p>${modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}<strong>${escape(fmt(l.price_atoms))}</strong><details><summary>License</summary><p>${escape(l.license)}</p></details>${w.wallet&&!sameWallet(l.seller,w.wallet)?button('assay','Check workflow & length',l.id)+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+button('reserve-buy','Buy using reserve',l.id):'')+button('buy','Buy this trace',l.id):''}${sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</article>`).join('')||'<div class="panel"><p>No traces are listed yet.</p></div>'}</section>${contractDetails()}`;
+   <div class="section-head"><h2>Available traces</h2><p>Before purchase, buyers can inspect listing metadata, the licence, allowlisted predicate results and any contributor-approved proof. Trace text is delivered only after purchase.</p></div>${purchasesPaused()?`<p role="status">${escape(pauseNotice())}</p>`:''}<section class="cards">${(w.listings??[]).map(l=>`<article class="panel"><h3>${escape(l.title)}</h3><p>${escape(l.workflow)} · ${escape(l.turn_count)} turns · ${escape(l.provenance)}</p>${modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}<strong>${escape(fmt(l.price_atoms))}</strong><details><summary>License</summary><p>${escape(l.license)}</p></details>${w.wallet&&!sameWallet(l.seller,w.wallet)?button('assay','Check workflow & length',l.id)+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):'')+(purchasesPaused()?'':button('buy','Buy this trace',l.id)):''}${sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</article>`).join('')||'<div class="panel"><p>No traces are listed yet.</p></div>'}</section>${contractDetails()}`;
  }
  function earningsHTML({updatedAt,error=false}={}){
   if(!active())return '';
@@ -344,7 +376,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    const prepared=await api('/v1/thot/governance/prepare',{method:'POST',body});current();
    review('Reserve governance',prepared,prepared.review?`<h3>Exact governance change</h3><pre class="json-view">${json(prepared.review)}</pre>`:'');return true;
   }
-  if(op==='refresh'){await refresh();return true;}
+  if(op==='refresh'){if(state.thot)state.thot.market_paused=null;await refresh();return true;}
   if(op==='network'){
    if(inFlight)throw Error('Finish the current wallet request first.');
    if(!getProvider()?.request)throw Error('Open this app in a browser with an Ethereum wallet.');
@@ -360,6 +392,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    if(inFlight)return true;inFlight=true;element.disabled=true;
    try{const address=await wallet();current();const c=await api('/v1/thot/wallet/challenge',{method:'POST',body:{address}});current();const bytes=new TextEncoder().encode(c.message),hex='0x'+Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');const signature=await provider().request({method:'personal_sign',params:[hex,address]});current();const selected=await wallet();current();if(selected.toLowerCase()!==address.toLowerCase())throw Error('Wallet account changed. Link the intended account again.');await api('/v1/thot/wallet/link',{method:'POST',body:{id:c.id,signature}});current();await refresh();return true;}finally{inFlight=false;element.disabled=false;}
   }
+  if(op==='resume-payment'){const saved=savedRecovery(recoveryKey());if(!saved)throw Error('No pending wallet action.');review('Resume wallet action',saved);return true;}
   if(op==='send'){
    if(inFlight)return true;
    if(!pending)throw Error('Review this action again.');
@@ -367,14 +400,22 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    try{
     const from=await connected(operation.authority==='operator');operation.current();
     if(operation.wallet&&!sameWallet(operation.wallet,from))throw Error('The prepared action requires a different wallet. Review it again.');
-    for(const step of operation.steps)await send(from,step,operation.current,operation.authority==='operator');
+    for(const step of operation.steps){
+     // Already submitted transactions must reconcile even during a pause.
+     if(operation.purchase&&!step.hash&&!step.uncertain&&!step.confirmed){
+      let workspace;try{workspace=await api('/v1/thot/workspace');}catch(error){state.thot.market_paused=null;throw Error('Purchase availability is unknown. Check the chain before submitting payment.');}
+      operation.current();state.thot.market_paused=workspace.market_paused??null;if(purchasesPaused())throw Error(pauseNotice());
+     }
+     await send(from,step,operation.current,operation.authority==='operator',operation);
+    }
     if(operation.confirmDisputeId){await api('/v1/thot/disputes/confirm',{method:'POST',body:{id:operation.confirmDisputeId,transaction_hash:operation.steps.at(-1).hash}});operation.current();}
-    operation.current();recoveries.delete(operation.key);if(pending===operation)pending=null;
+    operation.current();recoveryStorage?.removeItem(storageKey(operation.key));recoveries.delete(operation.key);if(pending===operation)pending=null;
     dialog.close();await refresh();toast('Transaction confirmed. The displayed contract state has been refreshed.');
    }finally{inFlight=false;element.disabled=false;}
    return true;
   }
   if(inFlight)throw Error('Finish the current wallet request before starting another action.');
+  if(['buy','reserve-buy','reserve-buy-confirm'].includes(op)){const saved=savedRecovery(recoveryKey());if(saved&&attempted(saved)){review('Resume wallet action',saved);return true;}if(purchasesPaused())throw Error(pauseNotice());}
   if(op==='trade-evidence-begin'){
    if(capabilities().trade_evidence!==true)throw Error('Trade proof import is unavailable in this workspace.');
    const trace=document.querySelector('#thot-trace')?.value;if(!trace||!/^[-A-Za-z0-9:_]{1,200}$/.test(trace))throw Error('Choose a trace first.');
@@ -466,7 +507,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    if(!job?.resume_available||job.receipt?.status!==0)throw Error('Refresh the unfunded reserve purchase before resuming it.');
    const prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:job.listing_id,funding_source:'reserve',...(job.campaign_id?{campaign_id:String(job.campaign_id)}:{})}});current();
    if(prepared.id!==job.id||prepared.resumed!==true)throw Error('The purchase reference changed. Refresh before signing.');
-   review('Resume reserve purchase',prepared,purchaseReviewHTML(prepared,true)+`<p>This resumes ${escape(job.title??'your selected trace')} with its original purchase reference${job.campaign_id?' and campaign '+escape(job.campaign_id):''}. It creates no second purchase.</p>`);return true;
+   review('Resume reserve purchase',{...prepared,purchase:true},purchaseReviewHTML(prepared,true)+`<p>This resumes ${escape(job.title??'your selected trace')} with its original purchase reference${job.campaign_id?' and campaign '+escape(job.campaign_id):''}. It creates no second purchase.</p>`);return true;
   }
   if(op==='reserve-buy'&&concurrentCampaigns()){
    if(!state.thot?.reserve_buyer&&!state.thotSampling?.reserve_buyer)throw Error('An authorized reserve buyer wallet is required.');
@@ -481,9 +522,14 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    const selected=document.querySelector('#thot-buy-campaign')?.value,campaign=campaignRows().find(c=>String(c.id)===selected);
    if(!campaign||!campaignAvailable(campaign))throw Error('Choose an active campaign with spending available.');
    const prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:selection.listing_id,funding_source:'reserve',campaign_id:String(campaign.id)}});current();selection.current();if(reserveSelection!==selection)throw Error('The selected trace changed. Review the intended purchase again.');reserveSelection=null;
-   review('Purchase from campaign '+campaign.id,prepared,purchaseReviewHTML(prepared,true)+`<p>Campaign ${escape(campaign.id)} pays the contributor’s asking price. Only this campaign’s available allowance is used.</p>`);return true;
+   review('Purchase from campaign '+campaign.id,{...prepared,purchase:true},purchaseReviewHTML(prepared,true)+`<p>Campaign ${escape(campaign.id)} pays the contributor’s asking price. Only this campaign’s available allowance is used.</p>`);return true;
   }
-  if(op==='reserve-buy'||op==='buy'){const reserve=op==='reserve-buy',prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:id,...(reserve?{funding_source:'reserve'}:{})}});current();review(reserve?'Purchase from campaign reserve':'Buy this licensed trace',prepared,purchaseReviewHTML(prepared,reserve));return true;}
+  if(op==='reserve-buy'||op==='buy'){
+   const reserve=op==='reserve-buy';let prepared;
+   try{prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:id,...(reserve?{funding_source:'reserve'}:{})}});}
+   catch(error){const messages={BUYER_BALANCE_FOR_TOTAL_PAYMENT:'Your THOT balance does not cover the quoted total. Add tokens to the linked wallet before buying.',THOT_MARKET_PAUSED:'Purchases are paused. Existing purchases remain available.',AUTHORIZATION_UNAVAILABLE:'The seller authorization is no longer available. Refresh the listings before buying.'};if(error.message==='THOT_MARKET_PAUSED')state.thot.market_paused=true;throw Error(messages[error.message]??error.message);}
+   current();review(reserve?'Purchase from campaign reserve':'Buy this licensed trace',{...prepared,purchase:true},purchaseReviewHTML(prepared,reserve));return true;
+  }
   if(op==='review'){const r=await api('/v1/thot/offers/review',{method:'POST',body:{id}});current();if(!r.transaction){openDialog('Your authorized sale','This purchase already uses your enrollment signature.',releaseHTML(r.release)+`<details><summary>Sale receipt</summary><pre class="json-view">${json(r.receipt)}</pre></details>`);return true;}review('Accept this exact funded release',{transactions:[r.transaction],notice:`Your wallet acceptance binds this content, license and payment split. Delivery is due within 48 hours, followed by a ${disputeWindow(r.receipt)}.`},`<p>Your agreed share: ${escape(fmt(r.receipt.seller_amount))} from ${escape(fmt(r.receipt.gross))} gross.</p>${releaseHTML(r.release)}`);return true;}
   if(op==='delivery'){const r=await api('/v1/thot/offers/delivery',{method:'POST',body:{id}});current();const content=releaseHTML(r.release)+settlementHTML(r.receipt??{})+`<details><summary>Delivery receipt</summary><pre class="json-view">${json({receipt:r.receipt,delivery_hash:r.delivery_hash,notice:r.notice})}</pre></details>`;if(r.acknowledgment)review('Your licensed trace',{transactions:[r.acknowledgment],notice:`Confirm only if you received this licensed release. Confirmation starts the ${disputeWindow(r.receipt)}.`},content);else openDialog('Your licensed trace','Purchased under the contributor’s signed terms. Read the conversation and its licence below.',content);return true;}
   if(op==='disputes-more'){
@@ -513,11 +559,11 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
   if(op==='dispute-finalize'){const prepared=await api('/v1/thot/disputes/finalize',{method:'POST',body:{id}});current();review('Apply expired-vote default',prepared,`<p>The seven-day vote window ended without the required matching votes. This transaction upholds delivery under the contract’s default rule.</p>`);return true;}
   if(op==='dispute-respond'){openDialog('Respond to the buyer complaint','Your response is encrypted for governance review; only its hash goes onchain.',`<label for="thot-dispute-response">Seller response</label><textarea id="thot-dispute-response" minlength="10" maxlength="2000" rows="4"></textarea><p>You may respond once during the 24-hour response period. After your response confirms, you can separately choose to finish the period early; otherwise you keep the remaining time.</p>`,button('dispute-response-preview','Review response transaction',id));return true;}
   if(op==='dispute-waive-response'){openDialog('Finish your response period?','Only the seller can waive their own remaining response time.',`<p>You have already submitted your response. Continuing lets governance review and decide this dispute immediately after confirmation. You cannot reopen the remaining response period. Keep waiting if you want to retain that time.</p>`,button('dispute-waive-confirm','I am finished — allow review now',id));return true;}
-  if(op==='dispute-waive-confirm'){const prepared=await api('/v1/thot/disputes/waive-response',{method:'POST',body:{id,confirm_final_response:true}});current();review('Finish seller response period',prepared);return true;}
-  if(op==='dispute-response-preview'){const response=document.querySelector('#thot-dispute-response').value,prepared=await api('/v1/thot/disputes/respond',{method:'POST',body:{id,response}});current();review('Confirm seller response',prepared,`<p>Your encrypted response remains offchain; the response hash is recorded onchain for reviewers to verify.</p>`);return true;}
+  if(op==='dispute-waive-confirm'){const prepared=await api('/v1/thot/disputes/waive-response',{method:'POST',body:{id,confirm_final_response:true}});current();review('Finish seller response period',{...prepared,exit:true});return true;}
+  if(op==='dispute-response-preview'){const response=document.querySelector('#thot-dispute-response').value,prepared=await api('/v1/thot/disputes/respond',{method:'POST',body:{id,response}});current();review('Confirm seller response',{...prepared,exit:true},`<p>Your encrypted response remains offchain; the response hash is recorded onchain for reviewers to verify.</p>`);return true;}
   if(op==='dispute'){const receipt=state.thot?.orders?.find(order=>order.id===id)?.receipt;openDialog('Dispute this delivery','Your complaint is encrypted for governance review. Its hash goes onchain when you sign.',`<label for="thot-reason">Reason</label><textarea id="thot-reason" minlength="10" maxlength="2000" rows="4"></textarea><p>Only an independent buyer whose current reviewed purchase plus prior finalized reviewed purchases totals at least 10,000,000 THOT can file. Sign within ${disputeDuration(receipt)} of recorded delivery. A buyer win makes half claimable and sends half to the canonical dead sink.</p>`,button('dispute-confirm','Review dispute',id));return true;}
   if(op==='holder-policy'){const prepared=await api('/v1/thot/transaction',{method:'POST',body:{action:'holder-policy',first_threshold_atoms:inputAtoms(document.querySelector('#holder-first').value),second_threshold_atoms:inputAtoms(document.querySelector('#holder-second').value),first_bps:Math.round(Number(document.querySelector('#holder-low').value)*100),second_bps:Math.round(Number(document.querySelector('#holder-high').value)*100),...(document.querySelector('#holder-lock-amount')?{lock_threshold_atoms:inputAtoms(document.querySelector('#holder-lock-amount').value),lock_days:Number(document.querySelector('#holder-lock-days').value),lock_bps:Math.round(Number(document.querySelector('#holder-lock-rate').value)*100)}:{})}});current();review('Change future holder fees',prepared);return true;}
-  if(op==='holder-rebate'){const prepared=await api('/v1/thot/transaction',{method:'POST',body:{action:'holder-rebate',offer_id:id}});current();review('Claim your fee cashback',prepared,`<p>You receive ${escape(fmt(prepared.quote.amount_atoms))}.</p>`);return true;}
+  if(op==='holder-rebate'){const prepared=await api('/v1/thot/transaction',{method:'POST',body:{action:'holder-rebate',offer_id:id}});current();review('Claim your fee cashback',{...prepared,exit:true},`<p>You receive ${escape(fmt(prepared.quote.amount_atoms))}.</p>`);return true;}
   if(op==='stake'){
    const section=[...document.querySelectorAll('[data-staking-campaign]')].find(el=>el.dataset.stakingCampaign===id);
    if(!section)throw Error('Refresh staking offers.');
@@ -525,7 +571,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    review('Review your stake',prepared,`<p>Lock ${escape(fmt(prepared.quote.principal_atoms))}. Receive ${escape(fmt(prepared.quote.payout_atoms))} at maturity, including ${escape(fmt(prepared.quote.reward_atoms))} in reserved rewards.</p>`);return true;
   }
   const body=op==='lock'?{action:op,amount:document.querySelector('#thot-lock').value}:op==='refer'?{action:op,referrer:document.querySelector('#thot-referrer').value}:op==='withdraw'||op==='extend'?{action:op,lot_id:Number(id)}:op==='dispute-confirm'?{action:'dispute',id,reason:document.querySelector('#thot-reason').value}:{action:op,id};
-  const prepared=await api('/v1/thot/transaction',{method:'POST',body});current();review(op==='dispute-confirm'?'Review your dispute':'Review THOT action',{...prepared,...(op==='dispute-confirm'?{confirmDisputeId:id}:{})});return true;
+  const prepared=await api('/v1/thot/transaction',{method:'POST',body});current();review(op==='dispute-confirm'?'Review your dispute':'Review THOT action',{...prepared,...(['claim','finalize','cancelOffer','refundExpired','refundUndelivered','withdraw','staking-claim','dispute-confirm'].includes(op)?{exit:true}:{}),...(op==='dispute-confirm'?{confirmDisputeId:id}:{})});return true;
  }
  return {offersHTML,earningsHTML,tokenHTML,valuationsHTML,samplingHTML,disputesHTML,onInput,action};
 }

@@ -31,6 +31,7 @@
         "tests/dashboard-session.test.ts",
         "tests/thot-trade-evidence-ui.test.mjs",
         "tests/thot-ui.test.mjs",
+        "tests/thot-purchase-status.test.ts",
         "tests/thot-valuations.test.ts",
         "tests/staking-ui.test.mjs",
         "tests/thot-campaign-ui.test.mjs",
@@ -106,6 +107,18 @@
       ],
       "node": [
         "tests/e2e/anvil-money.browser.mjs"
+      ],
+      "node_commands": [
+        [
+          "scripts/record-thot-purchase.mjs",
+          "--economics",
+          "quoted-cost"
+        ],
+        [
+          "scripts/record-thot-purchase.mjs",
+          "--economics",
+          "percentage"
+        ]
       ]
     },
     "packaging": {

@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createApplication} from '../packages/market/src/bootstrap.ts';
 import {canonicalHash} from '../packages/protocol/src/index.ts';
+import {traceSaleEligibility} from '../packages/market/src/trace-library.ts';
 import {appendCapturedExchange} from '../packages/market/src/capture-session.ts';
 
 const actor={id:'demo-user',role:'user' as const},operator={id:'operator',role:'operator_security' as const};
@@ -46,7 +47,7 @@ async function save(app:any,text='A useful answer about tests.'){
 test('owner reads a live saved conversation, bookmarks and annotates it without changing proof or exposing private metadata',async t=>{
   const app=await fixture(t),saved=await save(app),before=await app.agentCapture.proof(actor,saved.capture_id);
   const library=await app.library.list(actor);assert.equal(library.summary.saved,1);assert.equal(library.summary.recording,1);assert.equal(library.items[0].title,'Review the concurrency bug.');
-  const item=await app.library.item(actor,saved.trace_id);assert.equal(item.content.turns[1].content,'A useful answer about tests.');assert.equal(item.state,'RECORDING');assert.ok(item.events.some(e=>e.label==='Checkpoint saved'));
+  const item=await app.library.item(actor,saved.trace_id);assert.equal(item.content.turns[1].content,'A useful answer about tests.');assert.equal(item.state,'RECORDING');assert.equal(item.sale_eligibility.can_list,false);assert.equal(item.private_import,null);assert.ok(item.events.some(e=>e.label==='Checkpoint saved'));
   await app.library.update(actor,'bookmark-test',saved.trace_id,{bookmarked:true,title:'My private lock lesson',note:'Use this explanation for the next locking review.'});
   const found=await app.library.list(actor,{q:'locking review',bookmarked:'true'});assert.equal(found.items[0].trace_id,saved.trace_id);assert.equal(found.summary.bookmarked,1);
   assert.deepEqual((await app.agentCapture.proof(actor,saved.capture_id)).receipt,before.receipt);
@@ -172,4 +173,39 @@ test('readable continuation after compaction does not append its entire replayed
   appendConversationTurns(saved,['summary','new task','new answer','follow-up','follow-up answer'].map(turn));
   assert.deepEqual(saved.map(t=>t.content),['original','first answer','summary','new task','new answer','follow-up','follow-up answer']);
   appendConversationTurns(saved,['summary','new task','new answer','follow-up','follow-up answer'].map(turn));assert.equal(saved.length,7);
+});
+
+
+test('sale prerequisites distinguish private READY/P2 from assessed, current licensed releases',()=>{
+  const now='2026-09-22T12:00:00.000Z';
+  const assessed={retention_expires_at:'2026-09-23T12:00:00.000Z',rights_status:'eligible',scrub_ref:{id:'synthetic-ref'},normalized_hash:'a'.repeat(64),provenance_id:'synthetic-receipt'};
+  assert.equal(traceSaleEligibility(assessed,now).can_list,true,'Legacy imports without a capture projection remain supported');
+  const capture={...assessed,agent_capture_id:'synthetic-capture',capture_state:'COMPLETED',provenance_status:'VERIFIED',projection:{status:'READY',source_root:'current'},release_preparation:{status:'READY',source_root:'current'}};
+  assert.equal(traceSaleEligibility(capture,now).can_list,true);
+  const cases=[
+    [{...capture,rights_status:'manual_review'},'TRACE_RIGHTS_REVIEW_REQUIRED'],
+    [{...capture,projection:{status:'PENDING',source_root:'current'}},'PROJECTION_NOT_READY'],
+    [{...capture,projection:{status:'PARTIAL',source_root:'current'}},'PROJECTION_NOT_READY'],
+    [{...capture,release_preparation:{status:'READY',source_root:'old'}},'RELEASE_CHANGED'],
+    [{...capture,release_preparation:{status:'ERROR'}},'RELEASE_PREPARATION_FAILED'],
+    [{...capture,release_preparation:{status:'DEFERRED'}},'RELEASE_CONTENT_LIMIT'],
+    [{...capture,scrub_ref:null},'RELEASE_EVIDENCE_UNAVAILABLE'],
+    [{...capture,capture_state:'RECORDING'},'CAPTURE_NOT_COMPLETE'],
+    [{...capture,capture_summary:{interrupted:1}},'CAPTURE_INTERRUPTED'],
+    [{...assessed,deleted:true},'TRACE_CONTENT_UNAVAILABLE'],
+    [{...assessed,retention_expires_at:now},'TRACE_CONTENT_UNAVAILABLE']
+  ] as const;
+  for(const [trace,reason] of cases){const eligibility=traceSaleEligibility(trace,now);assert.equal(eligibility.can_list,false,reason);assert.equal(eligibility.reason_code,reason);assert.equal(eligibility.can_prepare_sale,false,reason);}
+  const deposit=traceSaleEligibility({...assessed,save_privately:true,import_preview:{},import_content_hash:'a'.repeat(64)},now);
+  assert.equal(deposit.can_list,false);assert.equal(deposit.can_prepare_sale,true);assert.equal(deposit.reason_code,'IMPORT_RIGHTS_CONFIRMATION_REQUIRED');
+});
+
+test('a completed private capture remains readable but cannot use import rights preparation',async t=>{
+  const app=await fixture(t),saved=await saveNative(app,'codex','synthetic-private-native');
+  const item=await app.library.item(actor,saved.trace_id);
+  assert.equal(item.projection,'READY');assert.equal(item.state,'COMPLETED');
+  assert.equal(item.sale_eligibility.can_list,false);assert.equal(item.sale_eligibility.reason_code,'TRACE_RIGHTS_REVIEW_REQUIRED');assert.equal(item.private_import,null);
+  assert.ok(item.content.turns.length>0);
+  await assert.rejects(app.portfolio.prepareSale(actor,'no-retroactive-capture-rights',saved.trace_id,{content_commitment:canonicalHash(item.content),rights_confirmed:true,model_output_licensed:true}),/PRIVATE_IMPORT_REQUIRED/);
+  assert.equal((await app.library.item(actor,saved.trace_id)).sale_eligibility.can_list,false);
 });

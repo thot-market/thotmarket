@@ -177,7 +177,12 @@ test('production documents keep calibration out; public examples identify their 
     const copy = await readFile(new URL('../' + path, import.meta.url), 'utf8');
     assert.doesNotMatch(copy, /TESTTHOT|test calibration|testnet tariff|0\.0(?:01|04|06|1|2|3|34|4|6)\b|one.hour|10 million THOT/i, path);
     assert.match(copy, /12 hours after recorded delivery to raise an eligible dispute/, path);
-    assert.match(copy, /production (?:policy for lock-based benefits|tariff)/i, path);
+    if (path === 'apps/site/mechanism.html') {
+      assert.match(copy, /production tariff will be published before purchases open/i, path);
+    } else {
+      assert.match(copy, /launch service fee is \*\*1% of the posted trace price\*\*, rounded up to the nearest token base unit/i, path);
+      assert.match(copy, /Holder and locker discounts reduce that fee independently for each side/i, path);
+    }
   }
   for (const path of ['apps/site/index.html', 'apps/site/affiliates.html']) {
     const html = await readFile(new URL('../' + path, import.meta.url), 'utf8');

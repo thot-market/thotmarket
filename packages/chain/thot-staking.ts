@@ -1,6 +1,6 @@
 import {Contract,getAddress,keccak256} from 'ethers';
 import {ensure} from '../storage/src/index.ts';
-import type {ThotChain} from './thot.ts';
+import type {ThotChain,ThotSnapshot} from './thot.ts';
 
 export const STAKING_ABI=[
  'function token() view returns(address)','function governor() view returns(address)',
@@ -13,9 +13,9 @@ export const STAKING_ABI=[
  'function stake(uint256,uint256,uint256) returns(uint256)','function claim(uint256)',
 ];
 
-export async function stakingWorkspace(chain:ThotChain,owner?:string){
+export async function stakingWorkspace(chain:ThotChain,owner?:string,sharedBlock?:ThotSnapshot){
  if(!chain.config.staking)return null;
- const config=chain.config,block=await chain.snapshot(),at={blockTag:block.number};
+ const config=chain.config,block=sharedBlock??await chain.snapshot(),at={blockTag:block.number};
  ensure(/^0x[\da-f]{64}$/i.test(config.codeHashes.staking??''),'INVALID_STAKING_CODE_PIN');
  const pool=new Contract(getAddress(config.staking!),STAKING_ABI,chain.provider);
  const code=await chain.provider.getCode(config.staking!,block.number);
@@ -37,7 +37,7 @@ export async function stakingWorkspace(chain:ThotChain,owner?:string){
  }
  const positions=[];
  for(const id of ids){const p=await pool.positions(id,at);ensure(getAddress(p.owner)===getAddress(owner!),'STAKING_OWNER_MISMATCH');positions.push({id:String(id),campaign_id:String(p.campaignId),principal:String(p.principal),reward:String(p.reward),deposited_at:Number(p.depositedAt),unlock_at:Number(p.unlockAt),claimed:p.claimed});}
- await chain.assertSnapshot(block);
+ if(!sharedBlock)await chain.assertSnapshot(block);
  return {address:config.staking!,block,campaigns,positions,protected_balance:String(protectedBalance),pool_balance:String(balance)};
 }
 

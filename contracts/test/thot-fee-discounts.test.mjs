@@ -1,7 +1,13 @@
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {parseEther as u,id,MaxUint256,keccak256} from 'ethers';
 import {deployThotFixture} from '../scripts/thot-local-fixture.mjs';
+import {createApplication} from '../../packages/market/src/bootstrap.ts';
+import {ThotMarketplace} from '../../packages/market/src/thot-market.ts';
+import {demoUser} from '../../packages/market/src/fixtures.ts';
 let f,gov,pool,policy,a,market,reserve;
 const tx=async p=>(await p).wait();
 before(async()=>{
@@ -38,6 +44,59 @@ test('policy has no funding dependency and rejects unauthorized changes',async()
  assert.equal(await f.token.balanceOf(await policy.getAddress()),0n);
  await assert.rejects(policy.connect(f.buyer).setPolicy.staticCall(1,2,1000,2500),/GOVERNOR/);
  await assert.rejects(gov.submitAndExecute.staticCall(await policy.getAddress(),policy.interface.encodeFunctionData('setPolicy',[1,2,1000,3501])));
+});
+
+test('workspace shares one guarded block across discounts, staking and reserve reads, then checks it',async()=>{
+ const {ThotChain}=await import('../../packages/chain/thot.ts');
+ const {holderRewardsWorkspace}=await import('../../packages/chain/thot-holder-rewards.ts');
+ const config={...f.config,market:await market.getAddress(),reserve:await reserve.getAddress(),governor:await gov.getAddress(),staking:await pool.getAddress(),feeDiscounts:await policy.getAddress(),manualReserve:true,codeHashes:{...f.config.codeHashes}};
+ for(const key of ['market','reserve','governor','staking','feeDiscounts'])config.codeHashes[key]=keccak256(await f.provider.getCode(config[key]));
+ const chain=new ThotChain(config),dir=await mkdtemp(join(tmpdir(),'thot-workspace-snapshot-'));
+ let app;
+ try{
+  app=await createApplication({dataDir:dir,memory:true});
+  const marketplace=new ThotMarketplace(app.service,chain),wallet=a[1];
+  await app.db.transaction(tx=>tx.insert('thot_records','wallet:'+demoUser.id,demoUser.id,{kind:'wallet',address:wallet}));
+  const guard=chain.guard.bind(chain),assertSnapshot=chain.assertSnapshot.bind(chain);
+  let guards=0,finalChecks=0;
+  chain.guard=async()=>{guards++;return guard();};
+  chain.assertSnapshot=async block=>{finalChecks++;return assertSnapshot(block);};
+  const first=await marketplace.workspace(demoUser);
+  assert.equal(guards,2,'local Anvil verifies deployment at both ends of the request');
+  assert.equal(finalChecks,1,'one final hash check covers all stages');
+  assert.equal(first.account.block.number,first.holder_rewards.block.number);
+  assert.equal(first.account.block.number,first.staking.block.number);
+  assert.equal(typeof first.reserve_buyer,'boolean');
+  guards=0;finalChecks=0;
+  await marketplace.workspace(demoUser);
+  assert.equal(guards,2,'a later request independently verifies deployment');
+  assert.equal(finalChecks,1);
+  guards=0;finalChecks=0;
+  await holderRewardsWorkspace(chain,wallet);
+  assert.equal(guards,1,'standalone discount reads keep their own guard');
+  assert.equal(finalChecks,1,'standalone discount reads keep their final check');
+
+  const beforeCodeChange=await f.provider.send('evm_snapshot',[]);
+  const authorized=chain.reserve.authorizedBuyers.bind(chain.reserve);
+  chain.reserve.authorizedBuyers=async(...args)=>{
+   const result=await authorized(...args);
+   await f.provider.send('anvil_setCode',[config.token,'0x60006000fd']);
+   return result;
+  };
+  try{await assert.rejects(marketplace.workspace(demoUser),/THOT_CODE_PIN_MISMATCH/);}
+  finally{chain.reserve.authorizedBuyers=authorized;await f.provider.send('evm_revert',[beforeCodeChange]);}
+
+  const beforeReorg=await f.provider.send('evm_snapshot',[]);
+  await f.advance(1);
+  let changed=false;
+  chain.reserve.authorizedBuyers=async(...args)=>{
+   const result=await authorized(...args);
+   if(!changed){changed=true;await f.provider.send('evm_revert',[beforeReorg]);await f.advance(3);}
+   return result;
+  };
+  try{await assert.rejects(marketplace.workspace(demoUser),/THOT_SNAPSHOT_CHANGED/);assert.equal(changed,true);}
+  finally{chain.reserve.authorizedBuyers=authorized;}
+ }finally{if(app)await app.close();chain.close();await rm(dir,{recursive:true,force:true});}
 });
 
 async function purchase(label,gross=u('1')){

@@ -7,6 +7,26 @@ const sourceName=(t:Document)=>String(t.capture_preview?.source??t.import_previe
 const recent=(value:string|undefined,now:string,seconds:number)=>!!value&&Date.parse(value)>Date.parse(now)-seconds*1000;
 const eventNames:Record<string,string>={AgentCaptureCheckpointSaved:'Checkpoint saved',AgentCaptureCompleted:'Capture saved',CaptureProjectionUpdated:'Readable view updated',CaptureProjectionFailed:'Readable view needs attention',TraceReceived:'Conversation added',LibraryBookmarked:'Bookmarked for reuse',LibraryUnbookmarked:'Bookmark removed',LibraryRenamed:'Title updated',LibraryNoteSaved:'Your note saved',TraceDeletionRequested:'Deletion requested'};
 
+// This reports release prerequisites, not an entitlement or a signed listing.
+// Keep private readback/provenance separate from the rights to license content.
+export function traceSaleEligibility(trace:Document,now:string){
+  const result=(status:string,reason_code:string,can_prepare_sale=false,can_list=false)=>({status,reason_code,can_prepare_sale,can_list,rights_status:trace.rights_status??'pending'});
+  if(trace.deleted||!trace.retention_expires_at||trace.retention_expires_at<=now)return result('UNAVAILABLE','TRACE_CONTENT_UNAVAILABLE');
+  if(trace.projection&&trace.projection.status!=='READY')return result('PREPARING','PROJECTION_NOT_READY');
+  if(trace.agent_capture_id&&trace.capture_state!=='COMPLETED')return result('UNAVAILABLE','CAPTURE_NOT_COMPLETE');
+  if(trace.release_preparation?.status==='DEFERRED')return result('REVIEW_REQUIRED','RELEASE_CONTENT_LIMIT');
+  if(trace.release_preparation?.status==='ERROR')return result('PREPARING','RELEASE_PREPARATION_FAILED');
+  if(trace.agent_capture_id&&(!trace.release_preparation||trace.release_preparation.status!=='READY'||!trace.release_preparation.source_root||trace.projection?.status!=='READY'||trace.release_preparation.source_root!==trace.projection.source_root))return result('PREPARING','RELEASE_CHANGED');
+  if(trace.save_privately===true){
+    if(trace.import_preview&&trace.import_content_hash&&!trace.agent_capture_id&&!trace.openrouter_request_id)return result('CONSENT_REQUIRED','IMPORT_RIGHTS_CONFIRMATION_REQUIRED',true);
+    return result('REVIEW_REQUIRED','PRIVATE_RELEASE_UNSUPPORTED');
+  }
+  if(!['eligible','eligible_with_restrictions'].includes(trace.rights_status))return result('REVIEW_REQUIRED','TRACE_RIGHTS_REVIEW_REQUIRED');
+  if(!trace.scrub_ref||!trace.normalized_hash||!trace.provenance_id)return result('UNAVAILABLE','RELEASE_EVIDENCE_UNAVAILABLE');
+  if(trace.capture_summary?.interrupted>0)return result('UNAVAILABLE','CAPTURE_INTERRUPTED');
+  return result('READY_FOR_REVIEW','EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED',false,true);
+}
+
 export class TraceLibrary {
   readonly service:ThotService;
   constructor(service:ThotService){this.service=service;}
@@ -30,13 +50,13 @@ export class TraceLibrary {
       turn_count:preview.turn_count??0,exchanges:trace.capture_summary?.exchanges??0,
       created_at:trace.created_at,updated_at:trace.updated_at??trace.created_at,session_at:preview.source_date??(trace.agent_capture_id?trace.observed_at:null),
       last_checkpoint_at:trace.last_checkpoint_at??null,retention_expires_at:trace.retention_expires_at,
-      evidence:trace.provenance_status,model_history:trace.model_history??[],capture_model:trace.capture_model??null,private:true,segments:1,native_conversations:trace.native_session_keys?.length??0};
+      sale_eligibility:traceSaleEligibility(trace,this.service.now()),evidence:trace.provenance_status,model_history:trace.model_history??[],capture_model:trace.capture_model??null,private:true,segments:1,native_conversations:trace.native_session_keys?.length??0};
   }
   private async groupCard(group:Document[],captures:Map<string,Document>):Promise<Document>{
     const cards:Document[]=[];for(const trace of group)cards.push(await this.card(trace,captures.get(trace.agent_capture_id)));
     const first=cards[0],last=cards.at(-1)!;
     const projection=groupProjection(cards.map(c=>c.projection));
-    return {...first,answer_preview:last.answer_preview,segments:group.length,updated_at:cards.map(c=>c.updated_at).sort().at(-1),
+    return {...first,...(group.length>1?{sale_eligibility:{status:'REVIEW_REQUIRED',reason_code:'GROUPED_RELEASE_REVIEW_REQUIRED',can_prepare_sale:false,can_list:false}}:{}),answer_preview:last.answer_preview,segments:group.length,updated_at:cards.map(c=>c.updated_at).sort().at(-1),
       last_checkpoint_at:cards.map(c=>c.last_checkpoint_at).filter(Boolean).sort().at(-1)??null,
       state:groupState(cards.map(c=>c.state)),
       projection,display_issues:cards.reduce((n,c)=>n+c.display_issues,0),exchanges:cards.reduce((n,c)=>n+c.exchanges,0),
@@ -94,7 +114,7 @@ export class TraceLibrary {
       return {...card,content,release_preparation:group.filter(t=>t.agent_capture_id&&t.release_preparation).map(t=>({capture_id:t.agent_capture_id,...t.release_preparation})),projection_details:{status:card.projection,issues:group.flatMap(t=>(t.projection?.issues??[]).map((issue:Document)=>({...issue,capture_id:t.agent_capture_id})))},events:events.filter(e=>eventNames[e.event_type]).map(e=>({id:e.id,label:eventNames[e.event_type],at:new Date(e.created_at).toISOString(),...(typeof e.payload.exchange_count==='number'?{exchanges:e.payload.exchange_count}:{}),...(e.payload.status?{status:e.payload.status}:{})})),checkpoint_count:[...captures.values()].reduce((n,c)=>n+(c.checkpoints?.length??0),0),
         receipt:(await tx.get('provenance_receipts',trace.provenance_id,actor.id)).receipt,
         capture_segments:segments,
-        private_import:group.length===1&&trace.save_privately===true&&trace.import_preview&&trace.import_content_hash&&!trace.agent_capture_id?{can_prepare_sale:true,content_commitment:trace.import_content_hash}:null};
+        private_import:card.sale_eligibility.can_prepare_sale?{can_prepare_sale:true,content_commitment:trace.import_content_hash}:null};
     });
   }
   async update(actor:Actor,key:string,id:string,input:Document){

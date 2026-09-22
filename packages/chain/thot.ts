@@ -9,7 +9,7 @@ export const THOT_MARKET_ABI = [
  'function DISPUTE_WINDOW() view returns(uint256)', 'function SELLER_RESPONSE_WINDOW() view returns(uint256)',
  'function DISPUTE_VOTE_WINDOW() view returns(uint256)', 'function SUBJECTIVE_DISPUTE_MIN_QUALIFYING_SPEND() view returns(uint256)',
  'function DEAD_SINK() view returns(address)', 'function STREAM_AUTHORIZATION_TYPEHASH() view returns(bytes32)',
- 'function operator() view returns(address)', 'function governor() view returns(address)', 'function acquisitionVault() view returns(address)', 'function buyerEligible(address) pure returns(bool)',
+ 'function paused() view returns(bool)', 'function operator() view returns(address)', 'function governor() view returns(address)', 'function acquisitionVault() view returns(address)', 'function buyerEligible(address) pure returns(bool)',
  'function offerId(address,bytes32) view returns(bytes32)',
  'function inputDigest(address,(bytes32 id,bytes32 nonce,address seller,uint256 gross,bytes32 licenseHash,bytes32 evidenceHash)) view returns(bytes32)',
  'function reviewOffer(address,(bytes32 id,bytes32 nonce,address seller,uint256 gross,bytes32 licenseHash,bytes32 evidenceHash),bytes32,bool)',
@@ -103,7 +103,7 @@ export interface ThotOperatorJournal {
  history():Promise<ThotOperatorJournalEntry[]>;
  put(entry:ThotOperatorJournalEntry):Promise<void>;
 }
-interface ThotSnapshot {number:number;hash:string|null;timestamp:number;}
+export interface ThotSnapshot {number:number;hash:string|null;timestamp:number;}
 const address=(v:string)=>{ensure(/^0x[\da-fA-F]{40}$/.test(v)&&!/^0x0{40}$/.test(v),'INVALID_THOT_ADDRESS');return getAddress(v);};
 async function boundedMap<T,R>(items:T[],concurrency:number,read:(item:T,index:number)=>Promise<R>):Promise<R[]>{
  const results=new Array<R>(items.length);let cursor=0,failed=false;
@@ -225,7 +225,7 @@ export class ThotChain {
  operatorAvailable(){return this.publicChain()?Boolean(this.operatorSigner):Boolean(this.config.localDeliverySigner);}
  authorizationDomain(){return {name:'thot market',version:'0.9',chainId:this.config.chainId,verifyingContract:this.config.market};}
  async authorizationState(seller:string,nonce:string,signature?:string){const block=await this.snapshot();const [uses,revoked]=await Promise.all([this.market.authorizationUses(seller,nonce,{blockTag:block.number}),this.market.authorizationRevoked(seller,nonce,{blockTag:block.number})]);let streamUnavailable=false;const e=signature?decodeStreamSignature(signature):null;if(e){const [n,r]=await Promise.all([this.market.streamUses(seller,e.stream.nonce,{blockTag:block.number}),this.market.authorizationRevoked(seller,e.stream.nonce,{blockTag:block.number})]);streamUnavailable=!!r||Number(n)>=e.stream.maxSales||block.timestamp>=e.stream.validUntil;}await this.assertSnapshot(block);return {uses:Number(uses),revoked:Boolean(revoked)||streamUnavailable,block};}
- async isReserveBuyer(wallet:string){if(!this.config.manualReserve)return false;const block=await this.snapshot();const allowed=await this.reserve.authorizedBuyers(wallet,{blockTag:block.number});await this.assertSnapshot(block);return !!allowed;}
+ async isReserveBuyer(wallet:string,sharedBlock?:ThotSnapshot){if(!this.config.manualReserve)return false;const block=sharedBlock??await this.snapshot();const allowed=await this.reserve.authorizedBuyers(wallet,{blockTag:block.number});if(!sharedBlock)await this.assertSnapshot(block);return !!allowed;}
  async reserveState(campaignId?:string){
   if(this.config.reserveCampaigns)return campaignReserveState(this,{campaignId});
   const block=await this.snapshot(),at={blockTag:block.number};
@@ -295,14 +295,20 @@ export class ThotChain {
   const dispute=Number(c.openedAt)>0?{reason_hash:String(c.reasonHash),response_hash:String(c.responseHash),opened_at:Number(c.openedAt),vote_starts_at:Number(c.voteStartsAt),vote_ends_at:Number(c.voteEndsAt),uphold_votes:Number(c.upholdVotes),buyer_votes:Number(c.buyerVotes),outcome:Number(c.outcome),reviewer_vote:Number(reviewerVote),reviewer_decision_hash:String(reviewerDecisionHash)}:null;
   return {id,buyer:getAddress(o.buyer),seller:getAddress(o.seller),gross:o.gross.toString(),seller_gross:payment.sellerGross.toString(),buyer_surcharge:payment.surcharge.toString(),buyer_total:payment.total.toString(),buyer_surcharge_bps:Number(payment.surchargeBps),buyer_pricing_hash:String(payment.pricingHash),economics:{policy:this.config.percentageFees?'percentage/1':'quoted-cost/1',fee_bps:this.config.percentageFees?Number(tariff.allocatedOverhead):null,direct_cost:String(tariff.directCost),allocated_overhead:this.config.percentageFees?'0':String(tariff.allocatedOverhead),policy_hash:String(tariff.policyHash),service_fee:(payment.total-o.sellerAmount).toString(),net_contribution:(BigInt(payment.total)-BigInt(o.sellerAmount)-BigInt(tariff.directCost)).toString()},seller_amount:o.sellerAmount.toString(),referral_amount:o.referralAmount.toString(),referrer:o.referrer,license_hash:o.licenseHash,evidence_hash:o.evidenceHash,review_hash:o.reviewHash,delivery_hash:o.deliveryHash,issued_at:Number(o.issuedAt),accepted_at:Number(o.acceptedAt),delivered_at:Number(o.deliveredAt),dispute_seconds:this.disputeWindowSeconds!,finalized_at:Number(o.finalizedAt),seller_bps:Number(o.sellerBps),referral_bps:Number(o.referralBps),treasury:o.treasury,independent:o.independent,status:Number(o.status),quote_digest:quoteDigest,dispute,block};
  }
- async readWorkspace(owner:string|undefined,offerIds:string[]){
+ async readWorkspace(owner:string|undefined,offerIds:string[],sharedBlock?:ThotSnapshot){
   ensure(Array.isArray(offerIds)&&offerIds.length<=50&&offerIds.every(id=>/^0x[\da-f]{64}$/i.test(id)),'INVALID_WORKSPACE_OFFERS');
   if(owner!==undefined)address(owner);
   // Request-local batching only: no time-based reuse across HTTP requests or
   // transaction decisions. Every field is read at the same confirmed height.
-  const block=await this.snapshot(),account=owner?await this.accountAt(owner,block):null;
+  // A caller supplying sharedBlock must assert it after all of its reads finish.
+  const block=sharedBlock??await this.snapshot(),account=owner?await this.accountAt(owner,block):null;
   const offers=await boundedMap(offerIds,4,id=>this.offerAt(id,block,owner));
-  await this.assertSnapshot(block);return {account,offers,block};
+  const market_paused=Boolean(await this.market.paused({blockTag:block.number}));
+  if(!sharedBlock)await this.assertSnapshot(block);return {account,offers,market_paused,block};
+ }
+ async marketPaused(){
+  const block=await this.snapshot(),paused=Boolean(await this.market.paused({blockTag:block.number}));
+  await this.assertSnapshot(block);return paused;
  }
  async disputeReview(id:string,reviewer:string){
   ensure(/^0x[\da-f]{64}$/i.test(id),'INVALID_OFFER_ID');address(reviewer);

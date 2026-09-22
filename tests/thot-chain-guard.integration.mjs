@@ -230,14 +230,14 @@ test('critical THOT reads and delivery sends fail closed after local runtime/cha
       try {
         const first = await app.thot.workspace(demoUser), valuation = first.valuations.find(v => v.trace_id === traceId).estimate;
         assert.equal(first.account.wallet, owner);
-        assert.equal(codeReads, 4, 'valuation must not perform a second deployment guard inside the same request');
+        assert.equal(codeReads, 8, 'local workspace checks four runtime pins at entry and completion, without a separate valuation guard');
         assert.equal(checkedBlocks.length, 1, 'duplicate observation anchors remain deduplicated');
         assert.equal(checkedBlocks[0], first.account.block, 'anchor checks use the actual account/order block object');
         assert.equal(valuation.window.to, new Date(first.account.block.timestamp * 1000).toISOString());
         assert.equal(valuation.independent.median_gross_atoms, '200');
         codeReads = 0; checkedBlocks = [];
         const next = await app.thot.workspace(demoUser);
-        assert.equal(codeReads, 4, 'a later workspace independently checks all runtime pins again');
+        assert.equal(codeReads, 8, 'a later local workspace independently checks all runtime pins at both boundaries');
         assert(next.account.block.number > first.account.block.number);
         assert.equal(checkedBlocks[0], next.account.block);
 

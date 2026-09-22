@@ -5,6 +5,7 @@ import {THOT_DISPUTE_REVIEW_POLICY,THOT_DISPUTE_REVIEW_AUTHORIZATION} from './th
 import {ThotGovernance} from './thot-governance.ts';
 import {ThotStreams,THOT_STREAM_LICENSE} from './thot-streams.ts';
 import {assertCaptureSaleAuthority} from './capture-sale-policy.ts';
+import {traceSaleEligibility} from './trace-library.ts';
 import type {ThotTradeEvidence} from './thot-trade-evidence.ts';
 import {verifySaleSignature} from '../../chain/thot-authorizations.ts';
 import {randomBytes,createHmac} from 'node:crypto';
@@ -97,15 +98,22 @@ export class ThotMarketplace {
   const listings=records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r));
   const own=records.filter(r=>r.kind==='listing'&&r.owner_id===actor.id).map(r=>({...this.publicListing(r),active:r.active}));
   const intents=records.filter(r=>r.kind==='intent'&&(r.owner_id===actor.id||r.seller_id===actor.id));
-  // One coherent account/order snapshot per request, with bounded RPC fanout.
-  const visible=intents.slice(-50),view=this.chain?await this.chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id))):null;
+  // All chain-backed fields share one guarded, confirmed request snapshot.
+  const chain=this.chain,block=chain?await chain.snapshot():null;
+  const visible=intents.slice(-50),view=chain?await chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id)),block!):null;
   const orders=[];
   if(view)for(let n=0;n<visible.length;n++){const i=visible[n]!,receipt=view.offers[n]!;if(receipt.status!==0||i.owner_id===actor.id)orders.push({...this.publicIntent(i),receipt});}
-  const valuations=actor.role==='user'&&this.chain&&view?await this.valuationRows(actor,records,wallet,view.block):[];
-  return {holder_rewards:this.chain?await holderRewardsWorkspace(this.chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id)):null,staking:this.chain?await stakingWorkspace(this.chain,wallet):null,capabilities:this.capabilities(),reserve_buyer:wallet&&this.chain?await this.chain.isReserveBuyer(wallet):false,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
+  const valuations=actor.role==='user'&&chain&&block?await this.valuationRows(actor,records,wallet,block):[];
+  const holderRewards=chain?await holderRewardsWorkspace(chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id),block!):null;
+  const staking=chain?await stakingWorkspace(chain,wallet,block!):null;
+  const reserveBuyer=wallet&&chain?await chain.isReserveBuyer(wallet,block!):false;
+  // Anvil can change code at the same height without changing the block hash.
+  if(chain&&!chain.publicChain())await chain.guard();
+  if(chain&&block)await chain.assertSnapshot(block);
+  return {holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
  }
  private publicListing(r:Document){return {...(r.brokerage_claim?{brokerage_claim:r.brokerage_claim}:{}),id:r.id,seller:r.wallet,owner_label:'Contributor',title:r.title,price_atoms:r.price_atoms,license:r.license,license_hash:r.license_hash,evidence_hash:r.evidence_hash,provenance:r.provenance,workflow:r.workflow,turn_count:r.turn_count,capture_model:r.capture_model??null,created_at:r.created_at,automatic_sales:!!r.signature,treasury_opt_in:r.treasury_sampling_consent===THOT_TREASURY_SAMPLING_POLICY};}
- private publicIntent(r:Document){return {...(r.campaign_id?{campaign_id:r.campaign_id}:{}),...(r.selection_id?{selection_id:r.selection_id}:{}),id:r.offer_id,listing_id:r.listing_id,title:r.title,buyer:r.wallet,seller:r.seller_wallet,gross:r.gross,economics:r.economics??null,seller_gross:r.seller_gross??r.gross,buyer_surcharge:r.buyer_surcharge??'0',buyer_total:r.buyer_total??r.gross,buyer_surcharge_bps:r.buyer_surcharge_bps??0,license_hash:r.license_hash,evidence_hash:r.evidence_hash,automatic:r.automatic===true,payout_transaction:r.payout_transaction??null,refund_transaction:r.refund_transaction??null,payout_scope:'beneficiary_claimable_batch'};}
+ private publicIntent(r:Document){return {job_status:['queued','awaiting_funding','awaiting_reconciliation','awaiting_settlement','disputed','blocked','complete'].includes(r.job_status)?r.job_status:null,last_error:r.last_error?(['AUTHORIZATION_UNAVAILABLE','CONTENT_ALREADY_SUBSIDIZED','THOT_DELIVERY_ACK_PENDING','THOT_MARKET_PAUSED','THOT_OPERATOR_UNAVAILABLE'].includes(r.last_error)?r.last_error:'AUTOMATION_PENDING'):null,...(r.campaign_id?{campaign_id:r.campaign_id}:{}),...(r.selection_id?{selection_id:r.selection_id}:{}),id:r.offer_id,listing_id:r.listing_id,title:r.title,buyer:r.wallet,seller:r.seller_wallet,gross:r.gross,economics:r.economics??null,seller_gross:r.seller_gross??r.gross,buyer_surcharge:r.buyer_surcharge??'0',buyer_total:r.buyer_total??r.gross,buyer_surcharge_bps:r.buyer_surcharge_bps??0,license_hash:r.license_hash,evidence_hash:r.evidence_hash,automatic:r.automatic===true,payout_transaction:r.payout_transaction??null,refund_transaction:r.refund_transaction??null,payout_scope:'beneficiary_claimable_batch'};}
  async listingMetadata(actor:Actor,traceId:string){
   allowed(actor);ensure(actor.role==='user','FORBIDDEN',403);
   return this.service.db.transaction(async tx=>{
@@ -127,7 +135,7 @@ export class ThotMarketplace {
   return this.service.db.command(actor.id,key,{action:'thotList',input},async tx=>{
    await assertOperationEnabled(tx,'sales');const wallet=await this.wallet(tx,actor),t=await tx.get('traces',input.trace_id,actor.id);
    if(streamPolicy)await assertCaptureSaleAuthority(tx,t,this.service.now());
-   ensure(!t.deleted&&t.retention_expires_at>this.service.now()&&['eligible','eligible_with_restrictions'].includes(t.rights_status),'TRACE_INELIGIBLE');
+   ensure(traceSaleEligibility(t,this.service.now()).can_list,'TRACE_INELIGIBLE');
    const content=await this.service.privacy.open(actor.id,t.scrub_ref);
    ensure(input.content_hash===digest(content),'RELEASE_CHANGED',409);
    const p=(await tx.get('provenance_receipts',t.provenance_id,actor.id)).receipt,f=await tx.get('trace_features',t.trace_id,actor.id);
@@ -245,6 +253,7 @@ export class ThotMarketplace {
  }
  async prepareOffer(actor:Actor,key:string,input:Document){
   allowed(actor);const chain=this.enabled();
+  ensure(!await chain.marketPaused(),'THOT_MARKET_PAUSED',409);
   const prepared:Document=await this.service.db.command(actor.id,key,{action:'thotOffer',input},async tx=>{
    await assertOperationEnabled(tx,'sales');
    const ownedIntents=(await tx.list('thot_records',actor.id)).filter(r=>r.kind==='intent');
@@ -301,7 +310,7 @@ export class ThotMarketplace {
    if(reserveTransaction)Object.assign(intent,{reserve_transaction:reserveTransaction});
    await tx.insert('thot_records','intent:'+id,actor.id,intent);
    if(treasury)await this.reserveContent(tx,l,actor.id,id,'queued');
-   return {...this.publicIntent(intent),...(selectedCampaign?{campaign_id:selectedCampaign}:{}),...(treasury?{}:{seller_authorization:l.authorization,seller_signature:l.signature}),transactions:treasury?[reserveTransaction!]:[chain.transaction('token','approve',[chain.config.market,BigInt(quote.total)])],notice:`You pay ${quote.total} token atoms after a buyer discount of ${quote.buyer_discount} atoms. The seller receives an independent fee reduction of ${quote.seller_discount} atoms. The base service tariff is ${quote.economics.service_fee} atoms; the seller allocation is ${quote.economics.seller_amount} atoms. Funding freezes these terms; an ordinary purchase rejects a changed reviewed tariff. Recorded delivery starts a ${Number(chain.capabilities().dispute_seconds)/3600}-hour dispute window.`};
+   return {...this.publicIntent(intent),...(selectedCampaign?{campaign_id:selectedCampaign}:{}),...(treasury?{}:{seller_authorization:l.authorization,seller_signature:l.signature}),transactions:treasury?[reserveTransaction!]:[chain.transaction('token','approve',[chain.config.market,BigInt(quote.total)])],notice:`Funding freezes the quoted price, fees and proceeds. An ordinary purchase rejects a changed reviewed tariff. Recorded delivery starts a ${Number(chain.capabilities().dispute_seconds)/3600}-hour dispute window.`};
   });
   if(input.funding_source==='reserve')return prepared;
   const intent=await this.service.db.transaction(tx=>tx.get('thot_records','intent:'+prepared.id,actor.id));

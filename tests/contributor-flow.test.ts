@@ -170,12 +170,14 @@ test('private import release preparation preserves provenance and needs a separa
   const preview=app.portfolio.preview(demoUser,{filename:'session.jsonl',text});
   const saved=await app.portfolio.import(demoUser,'private-upgrade-import',{filename:'session.jsonl',text,content_commitment:preview.content_commitment,save_privately:true});
   const before=await app.service.db.transaction(tx=>tx.get('traces',saved.trace_id,demoUser.id));
+  const privateItem=await app.library.item(demoUser,saved.trace_id);assert.equal(privateItem.sale_eligibility.can_list,false);assert.equal(privateItem.sale_eligibility.can_prepare_sale,true);
   assert.equal((await app.library.item(demoUser,saved.trace_id)).private_import.content_commitment,preview.content_commitment);
   await app.service.createPolicy(demoUser,'private-upgrade-policy',policyInput(app.service));
   const mandate=await app.service.createMandate(demoBuyer,'private-upgrade-mandate',mandateInput(app.service));
   await app.service.fundMandate(demoBuyer,'private-upgrade-fund',mandate.mandate_id,{});await app.service.activateMandate(demoBuyer,'private-upgrade-active',mandate.mandate_id);
   const choice={content_commitment:preview.content_commitment,rights_confirmed:true,model_output_licensed:false};
   const result=await app.portfolio.prepareSale(demoUser,'private-upgrade-rights',saved.trace_id,choice);
+  const prepared=await app.library.item(demoUser,saved.trace_id);assert.equal(prepared.sale_eligibility.can_list,true);assert.equal(prepared.sale_eligibility.status,'READY_FOR_REVIEW');assert.equal(prepared.private_import,null);
   assert.equal(result.status,'AVAILABLE');assert.equal(result.listed,false);
   assert.deepEqual(await app.portfolio.prepareSale(demoUser,'private-upgrade-rights',saved.trace_id,choice),result);
   const after=await app.service.db.transaction(tx=>tx.get('traces',saved.trace_id,demoUser.id));

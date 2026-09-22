@@ -11,7 +11,7 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
   if (!definition || rpc?.protocol !== 'https:' || chainId === 4663 && rpc.href !== 'https://rpc.mainnet.chain.robinhood.com/') throw new Error('Wallet login is not configured for this network.');
   const network={...definition,rpcUrls:[rpc.href]};
   const sessionReady = onSession ?? onSignedIn ?? (() => {}), changing = onIdentityChanging ?? onSessionChanging ?? (() => {});
-  let provider = null, listeners = [], epoch = 0, busy = false, destroyed = false, busyEpoch = null, busyKind = null;
+  let provider = null, listeners = [], epoch = 0, busy = false, destroyed = false, busyEpoch = null, busyKind = null, restoreCompletion = null;
   const current = expected => { if (destroyed || expected !== epoch) throw new Error('The wallet changed during sign-in. Please try again.'); };
 
   function availableProviders() {
@@ -75,6 +75,12 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
     if (!result.actor?.id || !result.actor?.role || result.chain_id !== chainId || result.wallet_address?.toLowerCase() !== wallet.toLowerCase()) throw new Error('The signed-in account does not match the selected wallet.');
   }
   async function signIn(kind = 'injected', suppliedProvider = null, expectedAddress = null) {
+    // Keep the first visible login action while startup checks the session.
+    // Logout, destruction or another login invalidates this queued intent.
+    if (busyKind === 'restore') {
+      const queuedEpoch = epoch; await restoreCompletion;
+      if (destroyed || queuedEpoch !== epoch) return false;
+    }
     if (busy || destroyed) return false;
     busy = true; const expected = ++epoch; busyEpoch = expected; busyKind = 'sign-in'; changing(); detach();
     try {
@@ -103,6 +109,7 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
   }
   async function restore() {
     if (busy || destroyed) return false;
+    let finishRestore; restoreCompletion = new Promise(resolve => { finishRestore = resolve; });
     busy = true; const expected = ++epoch; busyEpoch = expected; busyKind = 'restore'; changing({restoring: true});
     try {
       const { response, result } = await api('/v1/auth/session'); current(expected);
@@ -129,7 +136,7 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
       validateSession(result, result.wallet_address); attach(selected); await bounded(context(selected, expected, result.wallet_address), providerTimeoutMs, 'Wallet provider did not respond. Retry sign-in.'); current(expected);
       await sessionReady(sessionValue(result)); return true;
     } catch (error) { if (!destroyed && expected === epoch) { await onSignedOut(); onError(error); } return false; }
-    finally { if (busyEpoch === expected) {busy = false; busyEpoch = null; busyKind = null;} }
+    finally { if (busyEpoch === expected) {busy = false; busyEpoch = null; busyKind = null;} finishRestore(); }
   }
   async function signOut() { ++epoch; if (busyKind === 'restore') {busy = false; busyEpoch = null; busyKind = null;} changing(); detach(); try { await revokeRemote(); } finally { if (!destroyed) await onSignedOut(); } }
   function destroy() { ++epoch; destroyed = true; detach(); }

@@ -81,6 +81,13 @@ test('clientInvocation preserves the caller environment and never mutates it', (
   assert.deepEqual(claudeEnv,{PATH:'/bin',CLAUDE_CONFIG_DIR:'/tmp/claude-login'});
   assert.equal(claude.env.CLAUDE_CONFIG_DIR,'/tmp/claude-login');
   assert.equal(claude.env.ANTHROPIC_BASE_URL,'http://127.0.0.1:4567/r/nonce');
+  assert.deepEqual(JSON.parse(claude.args.at(-1)!),{env:{ANTHROPIC_BASE_URL:'http://127.0.0.1:4567/r/nonce',ANTHROPIC_AUTH_TOKEN:''}});
+  assert.deepEqual(clientInvocation('claude','http://127.0.0.1:4567/r/nonce',['-p','hello','--','literal'],claudeEnv).args.slice(-4),
+    ['--settings',JSON.stringify({env:{ANTHROPIC_BASE_URL:'http://127.0.0.1:4567/r/nonce',ANTHROPIC_AUTH_TOKEN:''}}),'--','literal']);
+  const configured=clientInvocation('claude','http://127.0.0.1:4567/r/nonce',['--settings','{"disableAllHooks":true}','-p','hello'],claudeEnv);
+  assert.equal(JSON.parse(configured.args.at(-1)!).disableAllHooks,true);
+  assert.throws(()=>clientInvocation('claude','http://127.0.0.1:4567/r/nonce',['--settings','settings.json'],claudeEnv),/CLAUDE_SETTINGS_FILE_NOT_SUPPORTED_DURING_CAPTURE/);
+  assert.throws(()=>clientInvocation('claude','http://127.0.0.1:4567/r/nonce',['--settings','{"env":{"ANTHROPIC_AUTH_TOKEN":"secret"}}'],claudeEnv),/USE_SUBSCRIPTION_LOGIN_REMOVE_API_OVERRIDE/);
 });
 
 test('native capture bypasses the local bridge without changing upstream proxy settings',()=>{

@@ -7,6 +7,7 @@ import { appraisePortfolio, buildPortfolioCard, type VerifiedCredentialReference
 import type { RobinhoodLinks } from './robinhood-link.ts';
 import type { PlaidLinks } from './plaid-link.ts';
 import { demoBuyer, mandateInput, policyInput } from './fixtures.ts';
+import { traceSaleEligibility } from './trace-library.ts';
 
 export class ContributorPortfolio {
   readonly service:ThotService; readonly robinhood:RobinhoodLinks; readonly plaid:PlaidLinks;
@@ -46,6 +47,7 @@ export class ContributorPortfolio {
       ensure(!trace.deleted&&trace.retention_expires_at>this.service.now(),'TRACE_CONTENT_UNAVAILABLE',410);
       ensure(trace.save_privately===true&&trace.import_preview&&trace.import_content_hash&&!trace.agent_capture_id,'PRIVATE_IMPORT_REQUIRED',409);
       ensure(input.content_commitment===trace.import_content_hash,'IMPORT_PREVIEW_CHANGED',409);
+      ensure(traceSaleEligibility(trace,this.service.now()).can_prepare_sale,'RELEASE_NOT_READY',409);
       const content=await this.service.privacy.open(actor.id,trace.raw_ref);
       ensure(canonicalHash(content)===trace.import_content_hash,'IMPORT_PREVIEW_CHANGED',409);
       const assessment=await this.service.privacy.assess(traceId,content,trace.category,input);

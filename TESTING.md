@@ -11,7 +11,7 @@ not silently add a provider call or operator task to CI.
 | `pnpm test` | Authentication, wallet/consent UI, privacy, storage/migrations, capture and recovery |
 | `pnpm test:contracts` | Local contracts, governance, reserve, accounting and paid-delivery integration |
 | `pnpm test:evidence` | Genuine historical DCAP fixtures, portable verification, evidence tampering and synthetic Python trade verification, capture and account linking |
-| `pnpm test:browser` | Older AtomicTraceMarket synthetic purchase/delivery browser journey |
+| `pnpm test:browser` | Current THOT purchase, licensed delivery, recovery and payout in both fee modes, plus the older AtomicTraceMarket journey |
 | `pnpm test:packaging` | Image import authenticity, packaging, snapshot and provenance boundaries |
 | `pnpm test:all` | All five suites, sequentially |
 
@@ -26,7 +26,11 @@ pnpm build
 Contracts/browser tests require Anvil 1.7.1 on PATH (or `THOT_ANVIL_PATH`). Money
 fixtures are forced to `local-v2`; no upstream fork, funded wallet or hosted chain
 is selected. Browser tests require Chromium/Chrome via the absolute
-`THOT_E2E_BROWSER` path, plus Xvfb and ffmpeg on Linux. They use synthetic accounts.
+`THOT_E2E_BROWSER` path, plus Xvfb and ffmpeg on Linux. They use synthetic accounts. The current THOT journeys run sequentially with
+quoted-cost and percentage-fee fixtures. To run just one, use
+`pnpm test:thot:browser` or `pnpm test:thot:browser:percentage`. See
+[the local purchase demo](docs/local-purchase-demo.md) for the evidence format and
+limits: local time acceleration does not prove a hosted payout deadline elapsed.
 
 For evidence tests, create three isolated Python environments, using Python 3.12:
 

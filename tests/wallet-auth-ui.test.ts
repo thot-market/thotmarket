@@ -219,3 +219,28 @@ test('sign-out cancels a restore without letting an unresolved signature overlap
   release('0x'+'12'.repeat(65));assert.equal(await first,false);assert.equal(a.sessions.length,0);
   a.state.sign=async()=>'0x'+'12'.repeat(65);assert.equal(await a.ui.signIn(),true);assert.equal(a.sessions.length,1);a.ui.destroy();
 });
+
+
+test('first wallet login waits for anonymous restore and sends one challenge despite repeated clicks', async () => {
+  let release!: (value: any) => void;
+  const pendingSession = new Promise(resolve => { release = resolve; });
+  const a = fixture({fetch: (path: string) => path === '/v1/auth/session' ? pendingSession : null});
+  const restore = a.ui.restore(); await tick();
+  const first = a.ui.signIn('metamask'), duplicate = a.ui.signIn('metamask');
+  assert.equal(a.calls.filter(call => call.path.endsWith('/challenge')).length, 0);
+  release(response({}, 401)); await restore;
+  assert.equal(await first, true); assert.equal(await duplicate, false);
+  assert.equal(a.calls.filter(call => call.path.endsWith('/challenge')).length, 1);
+  assert.equal(a.calls.filter(call => call.path.endsWith('/verify')).length, 1);
+  assert.equal(a.sessions.length, 1); a.ui.destroy();
+});
+
+for (const action of ['signOut', 'destroy']) test(`queued early login is cancelled by ${action}`, async () => {
+  let release!: (value: any) => void;
+  const pendingSession = new Promise(resolve => { release = resolve; });
+  const a = fixture({fetch: (path: string) => path === '/v1/auth/session' ? pendingSession : null});
+  const restore = a.ui.restore(); await tick(); const login = a.ui.signIn('metamask');
+  await a.ui[action](); release(response({}, 401)); await restore;
+  assert.equal(await login, false); assert.equal(a.sessions.length, 0);
+  assert.equal(a.calls.filter(call => call.path.endsWith('/challenge')).length, 0); a.ui.destroy();
+});

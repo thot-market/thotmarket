@@ -80,3 +80,23 @@ test('private library reader submits explicit release rights without listing or 
  assert.doesNotMatch(dialogs.at(-1)!,/id="library-prepare-sale"/);assert.match(toasts.at(-1)!,/Sign once there/);
  assert.equal(calls.filter(c=>c.options?.method==='POST').length,1);
 });
+
+test('library explains release blockers without offering a rights bypass for private captures',async()=>{
+ // @ts-expect-error Browser-native UI module.
+ const {createLibraryUI}=await import('../apps/dashboard/library-ui.js');
+ const item:any={trace_id:'private-capture',title:'Private capture',source:'Codex',origin:'capture',projection:'READY',content:{turns:[]},events:[],model_history:[],private_import:null};
+ const dialogs:string[]=[];
+ const instance=createLibraryUI({state:{},api:async()=>item,openDialog(_t:string,_s:string,body:string){dialogs.push(body);},dialog:{},escape,toast(){}});
+ for(const [reason,explanation] of [
+  ['TRACE_RIGHTS_REVIEW_REQUIRED',/P2 capture proof does not grant licensing rights/],
+  ['PROJECTION_NOT_READY',/Wait for the complete readable view/],
+  ['RELEASE_CHANGED',/earlier content commitment cannot authorize changed content/],
+  ['RELEASE_CONTENT_LIMIT',/exceeds the supported release assessment limit/],
+  ['RELEASE_EVIDENCE_UNAVAILABLE',/assessed release or its evidence is unavailable/],
+  ['EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED',/license and price in Offers, then sign/]
+ ] as const){
+  item.sale_eligibility={reason_code:reason,can_prepare_sale:false};
+  await instance.handle('library-open',{dataset:{id:item.trace_id}});
+  const html=dialogs.at(-1)!;assert.match(html,explanation);assert.match(html,/Listing requires explicit seller authorization/);assert.doesNotMatch(html,/id="library-prepare-sale"/);
+ }
+});
