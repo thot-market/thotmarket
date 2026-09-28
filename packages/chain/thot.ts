@@ -71,6 +71,25 @@ export const THOT_TOKEN_ABI=['function balanceOf(address) view returns(uint256)'
 export const ROBINHOOD_TESTNET_CHAIN_ID=46630;
 export const ROBINHOOD_TESTNET_RPC='https://rpc.testnet.chain.robinhood.com';
 export const ROBINHOOD_TESTNET_EXPLORER='https://explorer.testnet.chain.robinhood.com';
+// ethers' waitForTransaction prints the raw receipt-lookup error (console.log "EEE"), which can
+// carry RPC URLs and response bodies. Poll instead and let lookup errors propagate.
+export async function waitForReceipt(provider:JsonRpcProvider,hash:string,confirmations:number,timeoutMs:number){
+ const deadline=Date.now()+timeoutMs;
+ for(;;){
+  const receipt=await provider.getTransactionReceipt(hash);
+  if(receipt&&await receipt.confirmations()>=confirmations)return receipt;
+  ensure(Date.now()<deadline,'TRANSACTION_RECEIPT_TIMEOUT',409);
+  await new Promise(resolve=>setTimeout(resolve,500));
+ }
+}
+// A private Anvil chain mines only on transactions, so its head timestamp freezes while idle.
+// When opted in, mine one empty block once the head is older than staleSeconds so deadline
+// checks see wall time; idle growth is bounded to one block per staleSeconds of activity.
+export async function catchUpLocalClock(provider:JsonRpcProvider,staleSeconds:number){
+ if(!staleSeconds)return;
+ const head=await provider.getBlock('latest');ensure(head,'THOT_BLOCK_UNAVAILABLE',503);
+ if(head.timestamp<Math.floor(Date.now()/1000)-staleSeconds)await provider.send('evm_mine',[]);
+}
 export interface ThotChainConfig {
  mode?:'local-anvil'|'robinhood-testnet'|'production';
  chainName?:string; explorerUrl?:string;
@@ -221,6 +240,7 @@ export class ThotChain {
   }
  }
  capabilities(){const testnet=this.config.mode==='robinhood-testnet',production=this.config.mode==='production';return {mode:production?'thot-production':testnet?'thot-testnet':'thot-anvil',chain_name:production?this.config.chainName:testnet?'Robinhood Chain Testnet':'Local Anvil',rpc_url:this.config.rpcUrl,explorer_url:production?this.config.explorerUrl??null:testnet?ROBINHOOD_TESTNET_EXPLORER:null,version:'0.9',test_assets:!production,production_enabled:production,operator_available:this.operatorAvailable(),operator_address:this.config.operatorAddress??this.config.localDeliverySigner??null,chain_id:this.config.chainId,token:this.config.token,market:this.config.market,locks:this.config.locks,reserve:this.config.reserve,confirmations:this.config.confirmations,holding_income:false,economics_policy:this.config.percentageFees?'percentage/1':'quoted-cost/1',idle_lock_benefits:!!this.config.percentageFees,automatic_sales:true,stream_sales:this.config.streamSales===true,manual_reserve:this.config.manualReserve===true,reserve_campaigns:this.config.reserveCampaigns===true,buyer_surcharge:true,dispute_seconds:this.disputeWindowSeconds??null,seller_response_seconds:this.sellerResponseWindowSeconds??null,dispute_vote_seconds:this.disputeVoteWindowSeconds??null,subjective_dispute_min_qualifying_spend:this.subjectiveDisputeMinQualifyingSpend??null,dispute_review_threshold:this.disputeReviewThreshold??null};}
+ waitForReceipt(hash:string){return waitForReceipt(this.provider,hash,this.config.confirmations,120_000);}
  publicChain(){return this.config.mode==='robinhood-testnet'||this.config.mode==='production';}
  operatorAvailable(){return this.publicChain()?Boolean(this.operatorSigner):Boolean(this.config.localDeliverySigner);}
  authorizationDomain(){return {name:'thot market',version:'0.9',chainId:this.config.chainId,verifyingContract:this.config.market};}
@@ -234,6 +254,7 @@ export class ThotChain {
  }
  async snapshot(){
   await this.guard();
+  if(!this.publicChain()&&this.config.chainId===31337)await catchUpLocalClock(this.provider,Number(process.env.THOT_LOCAL_ANVIL_MINE_STALE_SECONDS??0));
   const latest=await this.provider.getBlockNumber();const number=latest-this.config.confirmations+1;
   ensure(number>=this.config.deploymentBlock,'THOT_WAIT_FOR_CONFIRMATIONS',409);
   const block=await this.recentBlock(number);ensure(block,'THOT_BLOCK_UNAVAILABLE',503);
@@ -332,7 +353,7 @@ export class ThotChain {
   if(receipt){
    const current=await this.provider.getBlock(receipt.blockNumber);
    if(current?.hash!==receipt.blockHash)receipt=null;
-   else receipt=await this.provider.waitForTransaction(entry.hash,this.config.confirmations,120_000);
+   else receipt=await this.waitForReceipt(entry.hash);
   }
   if(!receipt){
    // Never replace an uncertain transaction with a fresh nonce. A consumed nonce
@@ -343,7 +364,7 @@ export class ThotChain {
     // Already-known and transport-timeout responses are both uncertain. Wait by
     // the locally computed hash; do not infer broadcast failure or sign again.
    }
-   receipt=await this.provider.waitForTransaction(entry.hash,this.config.confirmations,120_000);
+   receipt=await this.waitForReceipt(entry.hash);
   }
   ensure(receipt,'THOT_OPERATOR_TRANSACTION_PENDING',409);
   ensure(await this.isCanonicalBlock({number:receipt.blockNumber,hash:receipt.blockHash}),'THOT_TRANSACTION_REORGED',409);

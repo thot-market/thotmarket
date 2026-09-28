@@ -498,7 +498,7 @@ export function dstackMasterKey(socketPath:string):Promise<Buffer> {
   return new Promise((resolve,reject)=>{
     const req=httpRequest({socketPath,path:'/GetKey',method:'POST',headers:{'Content-Type':'application/json'}},res=>{
       let raw='';res.on('data',chunk=>raw+=chunk);res.on('end',()=>{
-        try{ensure(res.statusCode===200,'DSTACK_GET_KEY_FAILED');const key=Buffer.from(JSON.parse(raw).key,'hex');ensure(key.length>=32,'DSTACK_GET_KEY_FAILED');resolve(createHash('sha256').update(key).digest());}catch(error){reject(error);}
+        try{ensure(res.statusCode===200,'DSTACK_GET_KEY_FAILED');const key=Buffer.from(JSON.parse(raw).key,'hex');ensure(key.length>=32,'DSTACK_GET_KEY_FAILED');resolve(createHash('sha256').update(key).digest());}catch{reject(new Error('DSTACK_GET_KEY_FAILED'));}
       });
     });
     req.on('error',reject);req.end(JSON.stringify({path:'thot/master-key/v1',purpose:'thot-master-key'}));
@@ -602,7 +602,15 @@ export async function startServer(options:{port?:number;dataDir?:string;database
     return {app,server,url:`http://127.0.0.1:${actualPort}`,close};
   }catch(error){await close();throw error;}
 }
+// Startup errors can wrap configuration, keys or RPC responses: report coded messages and stack frames only.
+export function reportStartupFailure(error:unknown){
+  const e=error instanceof Error?error:new Error('STARTUP_FAILED'),coded=(v:unknown)=>typeof v==='string'&&/^[A-Z][A-Z0-9_]{2,80}$/.test(v)?v:null;
+  process.stderr.write(JSON.stringify({event:'startup_failed',name:e.name,code:coded((e as {code?:unknown}).code),message:coded(e.message),frames:(e.stack??'').split('\n').slice(1).map(line=>line.trim()).slice(0,12)})+'\n');
+  process.exitCode=1;
+}
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
-  const running=await startServer({databaseUrl:process.env.DATABASE_URL,tokenEnabled:process.env.THOT_MOCK_TOKEN==='true'});
-  for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,async()=>{await running.close();process.exit(0);});
+  try{
+    const running=await startServer({databaseUrl:process.env.DATABASE_URL,tokenEnabled:process.env.THOT_MOCK_TOKEN==='true'});
+    for(const signal of ['SIGINT','SIGTERM'] as const)process.once(signal,async()=>{await running.close();process.exit(0);});
+  }catch(error){reportStartupFailure(error);}
 }

@@ -33,6 +33,7 @@ async function fixture(t) {
     manifest_url: 'https://artifacts.example/reviewed-release/manifest.json',
     chain_path: join(dir, 'chain.json'), chain_sha256: hash(JSON.stringify(chain)),
     operator_key_path: join(dir, 'operator.key'), image_key_path: join(dir, 'image.key'),
+    log_token_path: join(dir, 'log.token'), caddy_image: 'caddy@sha256:'+'4'.repeat(64),
     gateway_domain: 'reviewed-gateway.phala.network', data_volume: 'preserved-vault',
     governance_owners: owners, privy_app_id: 'reviewed-public-app', output_dir: join(dir, 'prepared') };
   const imageKey = key.toString('base64');
@@ -41,7 +42,9 @@ async function fixture(t) {
   await writeFile(config.chain_path, JSON.stringify(chain));
   await writeFile(config.operator_key_path, wallet.privateKey, { mode: 0o600 });
   await writeFile(config.image_key_path, imageKey, { mode: 0o600 });
-  return { dir, config, chain, wallet, imageKey };
+  const logToken = randomBytes(32).toString('base64url');
+  await writeFile(config.log_token_path, logToken, { mode: 0o600 });
+  return { dir, config, chain, wallet, imageKey, logToken };
 }
 
 test('explicit reviewed inputs produce current measured app settings and private env only', async t => {
@@ -70,7 +73,7 @@ test('explicit reviewed inputs produce current measured app settings and private
   if (spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status === 0) {
     const checked = spawnSync('docker', ['compose', '--file', join(f.config.output_dir, 'app.compose.yml'), 'config', '--quiet'], {
       encoding: 'utf8', env: { PATH: process.env.PATH, DSTACK_APP_ID: 'a'.repeat(40), DSTACK_GATEWAY_DOMAIN: f.config.gateway_domain,
-        THOT_CHAIN_CONFIG_B64: Buffer.from(JSON.stringify(f.chain)).toString('base64'), THOT_TESTNET_OPERATOR_KEY: f.wallet.privateKey },
+        THOT_CHAIN_CONFIG_B64: Buffer.from(JSON.stringify(f.chain)).toString('base64'), THOT_TESTNET_OPERATOR_KEY: f.wallet.privateKey, THOT_LOG_TOKEN: f.logToken },
     });
     assert.equal(checked.status, 0, 'Generated deployment must pass Docker Compose validation');
   }
@@ -78,7 +81,7 @@ test('explicit reviewed inputs produce current measured app settings and private
     assert.ok(!publicText.includes(f.wallet.privateKey)); assert.ok(!publicText.includes(f.imageKey));
     assert.ok(!/__THOT_[A-Z_]+__/.test(publicText));
   }
-  assert.equal(env.split('\n').filter(Boolean).length, 3);
+  assert.equal(env.split('\n').filter(Boolean).length, 4);
   assert.ok(env.includes(f.wallet.privateKey) && env.includes(f.imageKey));
   for (const filename of ['app.compose.yml', 'prelaunch.sh', 'sealed.env', 'rollout-plan.json']) {
     assert.equal((await stat(join(f.config.output_dir, filename))).mode & 0o777, 0o600);
@@ -152,14 +155,14 @@ test('stable TLS alias preserves native identity, application data and separate 
   assert.ok(compose.includes('certificate="/etc/letsencrypt/lego/certificates/$${DOMAIN:?domain required}.crt"'));
   assert.ok(compose.includes('exec /scripts/entrypoint.sh "$$@"'));
   if (spawnSync('docker', ['compose', 'version'], {stdio:'ignore'}).status === 0) {
-    const checked=spawnSync('docker',['compose','-f',join(f.config.output_dir,'app.compose.yml'),'config','--format','json'],{encoding:'utf8',env:{PATH:process.env.PATH,DSTACK_APP_ID:'a'.repeat(40),DSTACK_GATEWAY_DOMAIN:'dstack-pha-prod5.phala.network',THOT_PRIVATE_IMAGE_KEY_B64:f.imageKey,THOT_TESTNET_OPERATOR_KEY:f.wallet.privateKey,THOT_CHAIN_CONFIG_B64:Buffer.from(JSON.stringify(f.chain)).toString('base64')}});
+    const checked=spawnSync('docker',['compose','-f',join(f.config.output_dir,'app.compose.yml'),'config','--format','json'],{encoding:'utf8',env:{PATH:process.env.PATH,DSTACK_APP_ID:'a'.repeat(40),DSTACK_GATEWAY_DOMAIN:'dstack-pha-prod5.phala.network',THOT_PRIVATE_IMAGE_KEY_B64:f.imageKey,THOT_TESTNET_OPERATOR_KEY:f.wallet.privateKey,THOT_CHAIN_CONFIG_B64:Buffer.from(JSON.stringify(f.chain)).toString('base64'),THOT_LOG_TOKEN:f.logToken}});
     assert.equal(checked.status,0,'Final generated Compose must parse without host DOMAIN or shell-local variables');
     assert.deepEqual(JSON.parse(checked.stdout).services['dstack-ingress'].entrypoint,['/bin/bash','-euc',STABLE_INGRESS_BOOT_REFRESH.replaceAll('$',()=> '$$'),'--']);
   }
   assert.equal(plan.stable_app_origin, f.config.stable_app_origin);
   assert.equal(plan.certificate_volume, 'preserved-vault-certificates');
   assert.equal(plan.evidence_volume, 'preserved-vault-evidences');
-  assert.equal((await readFile(join(f.config.output_dir, 'sealed.env'), 'utf8')).split('\n').filter(Boolean).length, 3);
+  assert.equal((await readFile(join(f.config.output_dir, 'sealed.env'), 'utf8')).split('\n').filter(Boolean).length, 4);
   for (const invalid of ['http://app.test.thot.market', 'https://app.test.thot.market/app', 'https://app.test.thot.market/',
     'https://app.test.thot.market:443', 'https://app.test.thot.market?x=1', 'https://evil.example', 'https://app.test.thot.market\nDOMAIN: injected']) {
     assert.throws(() => renderStableAppIngress({ ...f.config, stable_app_origin: invalid }));
@@ -211,4 +214,23 @@ test('boot refresh permits initial certificate issuance and rejects ambiguous pe
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /INGRESS_ACCOUNT_AMBIGUOUS/);
   await assert.rejects(stat(marker), { code: 'ENOENT' });
+});
+
+test('rendered app carries the token log gate and logs-only filter with the token sealed, not measured', async t => {
+  const f = await fixture(t); await prepare(f.config);
+  const compose = await readFile(join(f.config.output_dir, 'app.compose.yml'), 'utf8');
+  const sealed = await readFile(join(f.config.output_dir, 'sealed.env'), 'utf8');
+  assert.ok(!compose.includes(f.logToken));
+  assert.match(sealed, new RegExp('^THOT_LOG_TOKEN=' + f.logToken + '$', 'm'));
+  const filter = JSON.parse(compose.match(/^  thot-log-filter: (.*)$/m)[1]), gate = JSON.parse(compose.match(/^  thot-log-gate: (.*)$/m)[1]);
+  assert.deepEqual(filter.volumes, ['/var/run/docker.sock:/var/run/docker.sock:ro']);
+  assert.equal(filter.ports, undefined); assert.equal(gate.volumes, undefined);
+  assert.deepEqual(gate.ports, ['4330:4330']); assert.equal(gate.environment.THOT_LOG_TOKEN, '${THOT_LOG_TOKEN:?sealed log access token}');
+  for (const service of [filter, gate]) { assert.equal(service.image, f.config.caddy_image); assert.equal(service.read_only, true); }
+  if (spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status !== 0) return;
+  const checked = spawnSync('docker', ['compose', '--env-file', join(f.config.output_dir, 'sealed.env'), '-f', join(f.config.output_dir, 'app.compose.yml'), 'config', '--format', 'json'], { encoding: 'utf8', env: { PATH: process.env.PATH, DSTACK_APP_ID: 'a'.repeat(40), DSTACK_GATEWAY_DOMAIN: f.config.gateway_domain } });
+  assert.equal(checked.status, 0, checked.stderr);
+  const services = JSON.parse(checked.stdout).services;
+  assert.equal(services['thot-log-gate'].environment.THOT_LOG_TOKEN, f.logToken);
+  assert.match(services["thot-log-gate"].command[2], /\{\$\$THOT_LOG_TOKEN\}/);
 });

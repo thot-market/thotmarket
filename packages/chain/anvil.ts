@@ -4,6 +4,7 @@ import { ensure, type Document, type Transaction } from '../storage/src/index.ts
 import { currentDraftInput } from '../market/src/mandate-draft.ts';
 import { assertOperationEnabled } from '../market/src/operational-controls.ts';
 import type { Actor, ThotService } from '../market/src/service.ts';
+import { waitForReceipt } from './thot.ts';
 
 export const approvalTuple='(bytes32 licenseId,bytes32 mandateId,bytes32 releaseHash,bytes32 termsHash,address recipient,uint256 gross,uint256 minThot,uint256 deadline)';
 export const marketAbi=[
@@ -178,7 +179,7 @@ export class AnvilMoneyPath {
           const existing=await this.provider.getTransactionReceipt(order.transaction_hash);
           if(existing?.status===0) {delete order.raw_transaction;delete order.transaction_hash;throw new Error('CHAIN_TRANSACTION_REVERTED');}
           if(!existing)await this.provider.broadcastTransaction(order.raw_transaction);
-          await this.provider.waitForTransaction(order.transaction_hash,1,10_000);
+          await waitForReceipt(this.provider,order.transaction_hash,1,10_000);
           receipt=await this.findReceipt(order);ensure(receipt,'SETTLEMENT_NOT_CONFIRMED');
           await this.afterMined?.();
         }

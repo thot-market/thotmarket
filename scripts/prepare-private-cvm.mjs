@@ -7,11 +7,12 @@ import { Wallet, getAddress } from 'ethers';
 import { renderPrelaunch } from './render-private-image-prelaunch.mjs';
 import { renderPrivateR2 } from './render-private-r2.mjs';
 import { validateManifest } from '../deploy/private-image-bootstrap.mjs';
+import { logFilterName, logFilterService, logGateName, logGateService } from './log-filter.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const fields = ['schema_version', 'image_id', 'manifest_path', 'manifest_sha256', 'manifest_url',
-  'chain_path', 'chain_sha256', 'operator_key_path', 'image_key_path', 'gateway_domain',
+  'chain_path', 'chain_sha256', 'operator_key_path', 'image_key_path', 'log_token_path', 'caddy_image', 'gateway_domain',
   'data_volume', 'governance_owners', 'privy_app_id', 'privy_client_id', 'stable_app_origin', 'output_dir', 'remote_storage'];
 const fail = () => { throw new Error('Invalid reviewed deployment configuration'); };
 const check = value => { if (!value) fail(); };
@@ -189,6 +190,7 @@ export async function prepare(config) {
     check(/^[a-z0-9][a-z0-9.-]*\.phala\.network$/.test(config.gateway_domain));
     check(!config.gateway_domain.includes('..'));
     check(/^[a-z][a-z0-9_-]{0,62}$/.test(config.data_volume));
+    check(/^[a-z0-9][a-z0-9._/-]*(:[a-z0-9._-]+)?@sha256:[a-f0-9]{64}$/.test(config.caddy_image));
     check(/^[a-zA-Z0-9_-]{8,128}$/.test(config.privy_app_id));
     if (config.privy_client_id !== undefined) check(/^[a-zA-Z0-9_-]{8,128}$/.test(config.privy_client_id));
     check(Array.isArray(config.governance_owners) && config.governance_owners.length === 3);
@@ -213,6 +215,8 @@ export async function prepare(config) {
     const operator = new Wallet(operatorKey).address;
     check(operator === getAddress(chain.operatorAddress) && !owners.includes(operator));
     const imageKey = await readPrivate(config.image_key_path);
+    const logToken = (await readPrivate(config.log_token_path)).trim();
+    check(/^[A-Za-z0-9_-]{43,128}$/.test(logToken));
     const keyBytes = Buffer.from(imageKey, 'base64');
     check(keyBytes.length === 32 && keyBytes.toString('base64') === imageKey);
     try { await verifyLocalImage(config.manifest_path, manifest, keyBytes); }
@@ -220,6 +224,7 @@ export async function prepare(config) {
     const stable = renderStableAppIngress(config);
     const remote = await renderPrivateR2(config.remote_storage, config.data_volume);
     const substitutions = {
+      __THOT_LOG_SERVICES__: `  ${logFilterName}: ${JSON.stringify(logFilterService(config.caddy_image))}\n  ${logGateName}: ${JSON.stringify(logGateService(config.caddy_image))}`,
       __THOT_REMOTE_ENV__: remote.environment, __THOT_QUOTA_SERVICE__: remote.service, __THOT_QUOTA_VOLUMES__: remote.volumes,
       __THOT_IMAGE_ID__: config.image_id, __THOT_CHAIN_SHA256__: config.chain_sha256,
       __THOT_GATEWAY_DOMAIN__: config.gateway_domain, __THOT_VOLUME__: config.data_volume,
@@ -258,7 +263,7 @@ export async function prepare(config) {
     };
     for (const [name, text] of Object.entries({
       'app.compose.yml': compose, 'prelaunch.sh': prelaunch,
-      'sealed.env': remote.sealedEnv + (process.env.THOT_NEAR_PRIVACY_KEY ? `THOT_NEAR_PRIVACY_KEY=${process.env.THOT_NEAR_PRIVACY_KEY.trim()}\n` : '') + `THOT_PRIVATE_IMAGE_KEY_B64=${imageKey}\nTHOT_TESTNET_OPERATOR_KEY=${operatorKey}\nTHOT_CHAIN_CONFIG_B64=${chainBytes.toString('base64')}\n`,
+      'sealed.env': remote.sealedEnv + (process.env.THOT_NEAR_PRIVACY_KEY ? `THOT_NEAR_PRIVACY_KEY=${process.env.THOT_NEAR_PRIVACY_KEY.trim()}\n` : '') + `THOT_PRIVATE_IMAGE_KEY_B64=${imageKey}\nTHOT_LOG_TOKEN=${logToken}\nTHOT_TESTNET_OPERATOR_KEY=${operatorKey}\nTHOT_CHAIN_CONFIG_B64=${chainBytes.toString('base64')}\n`,
       'rollout-plan.json': JSON.stringify(plan, null, 2) + '\n',
     })) await writeFile(resolve(output, name), text, { flag: 'wx', mode: 0o600 });
     return { output_dir: output, ...plan };

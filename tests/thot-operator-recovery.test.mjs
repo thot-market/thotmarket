@@ -46,7 +46,7 @@ function scenario(){
  };
  const start=(bindJournal=true)=>{
   const chain=new ThotChain(config,{operatorSigner:{getAddress:async()=>wallet.address,signTransaction:async tx=>{signed.push(tx);return wallet.signTransaction(tx);}}});
-  chain.provider.destroy();chain.provider=provider;chain.guard=async()=>{};
+  chain.provider.destroy();chain.provider=provider;chain.guard=async()=>{};chain.waitForReceipt=hash=>provider.waitForTransaction(hash);
   chain.isCanonicalBlock=async anchor=>blocks.get(anchor.number)?.hash===anchor.hash;
   if(bindJournal)chain.bindOperatorJournal(journal);return chain;
  };
