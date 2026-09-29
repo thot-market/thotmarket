@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {Contract, Interface} from 'ethers';
+import {Contract, Interface, type Log} from 'ethers';
 import {ensure, type Document, type Transaction} from '../../storage/src/index.ts';
 import type {ThotChain} from '../../chain/thot.ts';
 import type {Actor, ThotService} from './service.ts';
@@ -81,9 +81,14 @@ export class ThotAnalytics {
   const from=previous?previous.through+(previous.partial_index===undefined?1:0):chain.config.deploymentBlock;
   if(from>head.number)return this.status();
   let through=Math.min(head.number,from+499),logs;
-  for(;;){
-   logs=await chain.provider.getLogs({address:chain.config.market,fromBlock:from,toBlock:through,topics:[topics]});
-   logs=logs.filter(log=>previous?.partial_index===undefined||log.blockNumber!==previous.through||log.index>previous.partial_index).sort((a,b)=>a.blockNumber-b.blockNumber||a.index-b.index);
+  const pending=(found:Log[])=>found.filter(log=>previous?.partial_index===undefined||log.blockNumber!==previous.through||log.index>previous.partial_index).sort((a,b)=>a.blockNumber-b.blockNumber||a.index-b.index);
+  if(chain.config.mode==='local-anvil'){
+   // Compacted local chains keep only genesis, transaction blocks and the head, so an arbitrary
+   // page boundary may not exist. End each batch at the head or at the block of its 32nd event.
+   logs=pending(await chain.provider.getLogs({address:chain.config.market,fromBlock:from,toBlock:head.number,topics:[topics]}));
+   through=logs.length>32?logs[31]!.blockNumber:head.number;logs=logs.filter(log=>log.blockNumber<=through);
+  }else for(;;){
+   logs=pending(await chain.provider.getLogs({address:chain.config.market,fromBlock:from,toBlock:through,topics:[topics]}));
    if(logs.length<=32)break;
    if(through===from)break;through=from+Math.floor((through-from)/2);
   }
