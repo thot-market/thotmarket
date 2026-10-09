@@ -6,7 +6,7 @@ import type {Document} from '../../storage/src/index.ts';
  * These exact request fields were observed in real native resume tests. */
 export function nativeConversationKey(owner:string,client:string,request:Document):string|undefined{
   let id:unknown;
-  if(client==='claude'){
+  if(client==='claude'||client==='zai'){
     const value=request.metadata?.user_id;
     if(typeof value==='string'&&value.length<=4096){try{id=JSON.parse(value).session_id;}catch{}}
   }else if(client==='codex')id=request.client_metadata?.thread_id;

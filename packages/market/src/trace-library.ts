@@ -4,6 +4,8 @@ import type {Actor,ThotService} from './service.ts';
 import {conversationGroups,appendConversationTurns,groupState,groupProjection} from './capture-session.ts';
 
 const sourceName=(t:Document)=>String(t.capture_preview?.source??t.import_preview?.source_label??t.import_preview?.source??'Uploaded trace').replace(/ \(user supplied\)$/,'');
+// Imported traces carry no capture record; their tool is inferred from the label.
+const importedClient=(name:string)=>{const value=name.toLowerCase();return value.includes('z.ai')?'zai':value.includes('codex')?'codex':value.includes('claude')?'claude':'upload';};
 const recent=(value:string|undefined,now:string,seconds:number)=>!!value&&Date.parse(value)>Date.parse(now)-seconds*1000;
 const eventNames:Record<string,string>={AgentCaptureCheckpointSaved:'Checkpoint saved',AgentCaptureCompleted:'Capture saved',CaptureProjectionUpdated:'Readable view updated',CaptureProjectionFailed:'Readable view needs attention',TraceReceived:'Conversation added',LibraryBookmarked:'Bookmarked for reuse',LibraryUnbookmarked:'Bookmark removed',LibraryRenamed:'Title updated',LibraryNoteSaved:'Your note saved',TraceDeletionRequested:'Deletion requested'};
 
@@ -82,7 +84,7 @@ export class TraceLibrary {
       const projects=[...new Set(cards.map(c=>c.project).filter(Boolean))].sort();
       const filtered:Document[]=[];
       for(const card of cards){
-        if(query.source&&query.source!=='all'&&!card.source.toLowerCase().includes(String(query.source).toLowerCase()))continue;
+        if(query.source&&query.source!=='all'&&!card.source.toLowerCase().includes(String(query.source).toLowerCase().replace('zai','z.ai')))continue;
         if(query.origin&&query.origin!=='all'&&query.origin!==card.origin)continue;
         if(query.state&&query.state!=='all'&&query.state!==card.state)continue;
         if(query.project&&card.project!==query.project)continue;
@@ -162,7 +164,7 @@ export class TraceLibrary {
       const view=query.view??(query.state==='FAILED'?'attempts':'inventory');ensure(['inventory','attempts'].includes(view),'INVALID_EXPLORER_VIEW');
       const rawRows=traces.map(t=>{
         const existing=attempts.find(a=>a.trace_id===t.trace_id);
-        return existing??{capture_id:null,trace_id:t.trace_id,owner_ref:canonicalHash(t.owner_id).slice(0,16),client:sourceName(t).toLowerCase().includes('codex')?'codex':sourceName(t).toLowerCase().includes('claude')?'claude':'upload',state:'IMPORTED',projection:t.projection?.status??'READY',parts:0,verified_exchanges:0,received_bytes:t.import_preview?.size_bytes??0,created_at:t.created_at,last_activity_at:t.updated_at??t.created_at,last_checkpoint_at:null,error_code:null};
+        return existing??{capture_id:null,trace_id:t.trace_id,owner_ref:canonicalHash(t.owner_id).slice(0,16),client:importedClient(sourceName(t)),state:'IMPORTED',projection:t.projection?.status??'READY',parts:0,verified_exchanges:0,received_bytes:t.import_preview?.size_bytes??0,created_at:t.created_at,last_activity_at:t.updated_at??t.created_at,last_checkpoint_at:null,error_code:null};
       }).sort((a,b)=>b.created_at.localeCompare(a.created_at));
       const rawById=new Map(rawRows.map(r=>[r.trace_id,r]));
       const groups=conversationGroups(traces);

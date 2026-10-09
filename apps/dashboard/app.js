@@ -1,6 +1,6 @@
 import {createOpenRouterUI} from './openrouter-ui.js';
 import {createWalletAuth} from './wallet-auth-ui.js';
-import {createThotUI} from './thot-ui.js';
+import {createThotUI,isClosedUnpaidPurchase} from './thot-ui.js';
 import {bindStakingPreview} from './staking-ui.js';
 import {createThotAnalyticsUI} from './thot-analytics-ui.js';
 import {createMoneyUI} from './money-ui.js';
@@ -29,9 +29,77 @@ let walletAuth=null;
 let privyAuth=null, privyConfig=null, privyLoading=null;
 let earningsTimer=null, earningsRefreshRunning=false, fullRefreshCount=0;
 let earningsUpdatedAt=null, earningsRefreshError=false;
+let purchasesTimer=null,purchasesRefreshing=false,purchasesAttempts=0;
 let signingOut=false, walletLoginAttempt=0;
 const initialView=role=>role==='user'?'vault':['buyer_admin','buyer_member'].includes(role)?'market':'operator';
 const isThotMode=mode=>['thot-anvil','thot-testnet','thot-production'].includes(mode);
+
+// Remember navigation only. Credentials and licensed content never enter browser storage.
+const rememberedViewKey='thot.workspace-view.v1';
+function allowedView(view){
+  return ['market','thot','referrals','leaderboard'].includes(view)||
+    (state.role==='user'&&['vault','earnings','receipts'].includes(view))||
+    (state.role==='operator_security'&&view==='operator')||
+    (state.canExplore&&view==='explorer');
+}
+function rememberView(){
+  if(!state.actor||!allowedView(state.view))return;
+  try{window.sessionStorage?.setItem(rememberedViewKey,JSON.stringify({actor:state.actor.id,role:state.role,view:state.view}));}catch{}
+}
+function restoredView(){
+  try{const saved=JSON.parse(window.sessionStorage?.getItem(rememberedViewKey)??'null');
+    if(saved?.actor===state.actor?.id&&saved?.role===state.role&&allowedView(saved.view))return saved.view;
+  }catch{}
+  return initialView(state.role);
+}
+function forgetView(){try{window.sessionStorage?.removeItem(rememberedViewKey);}catch{}}
+function stopPurchasesRefresh(){clearTimeout(purchasesTimer);purchasesTimer=null;}
+function purchasesVisible(){
+  return !signingOut&&state.loaded&&state.actor&&(state.token||['clerk','wallet_siwe'].includes(authMode))&&state.view==='market'&&!document.hidden&&isThotMode(state.thot?.capabilities.mode);
+}
+function pendingPurchases(){
+  const wallet=state.thot?.wallet?.toLowerCase();
+  return !!wallet&&(state.thot.orders??[]).some(o=>o.buyer?.toLowerCase()===wallet&&[0,1,2].includes(o.receipt?.status)&&!isClosedUnpaidPurchase(o));
+}
+function schedulePurchasesRefresh(){
+  stopPurchasesRefresh();
+  if(!purchasesVisible()||!pendingPurchases()||purchasesAttempts>=12)return;
+  purchasesTimer=setTimeout(async()=>{purchasesTimer=null;try{await refreshPurchases();}finally{schedulePurchasesRefresh();}},5000);
+}
+function editingPurchaseControl(target){
+  const focused=document.activeElement;
+  return target.contains?.(focused)&&(/^(INPUT|SELECT|TEXTAREA)$/.test(focused?.tagName)||focused?.isContentEditable===true);
+}
+function purchaseControlKey(element){
+  if(!element||!['BUTTON','SUMMARY','A'].includes(element.tagName))return null;
+  return JSON.stringify([element.closest?.('[data-purchase-id]')?.dataset.purchaseId??'',element.tagName,element.dataset?.action??'',element.dataset?.id??'',element.getAttribute?.('href')??'',element.tagName==='SUMMARY'?element.textContent.trim():'']);
+}
+function updatePurchaseCards(target){
+  const focused=target.contains?.(document.activeElement)?purchaseControlKey(document.activeElement):null;
+  const expanded=new Set([...target.querySelectorAll('details[open]')].map(detail=>purchaseControlKey(detail.querySelector('summary'))).filter(Boolean));
+  target.innerHTML=thotUI.purchasesHTML();
+  for(const detail of target.querySelectorAll('details'))if(expanded.has(purchaseControlKey(detail.querySelector('summary'))))detail.open=true;
+  if(focused){const replacement=[...target.querySelectorAll('button,summary,a')].find(element=>purchaseControlKey(element)===focused);replacement?.focus({preventScroll:true});}
+}
+async function refreshPurchases(){
+  if(!purchasesVisible()||!pendingPurchases()||purchasesAttempts>=12||purchasesRefreshing||fullRefreshCount||dialog.open)return;
+  // Replacing only purchase cards preserves the contributor form, filters and catalogue.
+  const target=document.querySelector('#thot-buyer-purchases');
+  if(!target||editingPurchaseControl(target))return;
+  purchasesRefreshing=true;purchasesAttempts++;
+  const current=captureScope(),wallet=state.thot.wallet;
+  try{
+    const workspace=await api('/v1/thot/workspace');current();
+    if(!purchasesVisible()||dialog.open||target!==document.querySelector('#thot-buyer-purchases')||editingPurchaseControl(target))return;
+    if(!isThotMode(workspace?.capabilities?.mode)||workspace.wallet?.toLowerCase()!==wallet.toLowerCase())return;
+    state.thot=workspace;updatePurchaseCards(target);
+    const summary=document.querySelector('#wallet-summary');if(summary)summary.innerHTML=thotUI.walletSummaryHTML();
+  }catch(error){if(error.name!=='StaleWorkspaceError'){const note=document.querySelector('#purchases-freshness');if(note)note.textContent='Could not check delivery. Your existing purchase is saved; use Refresh balances to try again.';}}
+  finally{
+    purchasesRefreshing=false;
+    if(purchasesAttempts>=12&&purchasesVisible()&&pendingPurchases()){const note=document.querySelector('#purchases-freshness');if(note)note.textContent='Still processing. Your purchase is saved. Use Refresh balances to check again.';}
+  }
+}
 
 function stopEarningsRefresh() { clearTimeout(earningsTimer); earningsTimer=null; }
 function earningsVisible() {
@@ -81,7 +149,7 @@ function escape(value) {
 }
 const json = value => escape(JSON.stringify(value, null, 2));
 const externalInference=createInferenceUI({state,api,openDialog,dialog,refresh,escape,json,money,badge});
-const thotUI=createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,getProvider:()=>authMode==='wallet_siwe'?walletAuth?.getProvider():window.ethereum});
+const thotUI=createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,download,getProvider:()=>authMode==='wallet_siwe'?walletAuth?.getProvider():window.ethereum});
 const analyticsUI=createThotAnalyticsUI({state,api,escape,toast});
 const moneyUI=createMoneyUI({state,api,openDialog,dialog,refresh,escape,json,toast});
 const mandateEditor=createMandateEditor({api,refresh,openDialog,dialog,toast,state});
@@ -232,10 +300,11 @@ function notice(message) {
   target.innerHTML = `${escape(message)}<button data-action="refresh">Refresh</button><button data-action="dismiss-notice" aria-label="Dismiss message">Dismiss</button>`;
   target.hidden = false;
 }
-function loading() { main.innerHTML = '<div class="loading"><span class="spinner"></span><p>Reading your records…</p></div>'; }
+function clearWalletSummary(){const target=document.querySelector('#wallet-summary');if(target){target.innerHTML='';target.hidden=true;}}
+function loading() { clearWalletSummary();main.innerHTML = '<div class="loading"><span class="spinner"></span><p>Reading your records…</p></div>'; }
 async function session(role) {
   if(authMode!=='development')throw new Error('Your verified identity cannot switch to a development role. Sign out to connect another authorized identity.');
-  stopEarningsRefresh();earningsUpdatedAt=null;earningsRefreshError=false;
+  stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;earningsUpdatedAt=null;earningsRefreshError=false;
   signingOut=false;
   openrouterUI.reset();
   analyticsUI.reset();
@@ -247,13 +316,13 @@ async function session(role) {
   document.querySelector('#role').value = role;
   const result = await api('/v1/dev/session', { method: 'POST', body: { role } });
   state.token = result.token; state.actor = result.actor;state.canExplore=result.permissions?.trace_explorer===true;
-  state.view = initialView(role);
+  state.view = restoredView();
   await refresh();
 }
 async function refresh() {
-  fullRefreshCount++;stopEarningsRefresh();
+  fullRefreshCount++;stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;
   try { return await refreshWorkspace(); }
-  finally { fullRefreshCount--;scheduleEarningsRefresh(); }
+  finally { fullRefreshCount--;scheduleEarningsRefresh();schedulePurchasesRefresh(); }
 }
 async function refreshWorkspace() {
   if (!state.token && !(['clerk','wallet_siwe'].includes(authMode)&&state.actor)) return authMode==='development'?session(state.role):showIdentityLogin();
@@ -398,7 +467,9 @@ function operator() {
   `<section class="panel audit-card"><p class="eyebrow">EXPLICIT LOCAL CONTROLS</p><h2>Work queues & mock finality.</h2><p>Pending jobs perform matching and settlement according to recorded permissions. Simulated burn completion exercises the separate network burn path.</p><div class="operator-actions"><button class="button" data-action="worker">Run pending jobs ↻</button><button class="button secondary" data-action="burn">Simulate burn completion ↗</button><button class="button secondary" data-action="reconciliation">Inspect reconciliation ↗</button></div><p class="legal-note">Compute remains future scope. Live providers, token execution and supported attestations require their configured integrations.</p></section>`;
 }
 function render() {
+  const walletSummary=document.querySelector('#wallet-summary');if(walletSummary){walletSummary.innerHTML=state.loaded&&!signingOut?thotUI.walletSummaryHTML():'';walletSummary.hidden=!walletSummary.innerHTML;}
   if (!state.loaded || !state.actor || (!state.token && !['clerk','wallet_siwe'].includes(authMode)) || signingOut) { stopEarningsRefresh(); return; }
+  rememberView();schedulePurchasesRefresh();
   main.classList.toggle('thot-workspace',(isThotMode(state.thot?.capabilities.mode)&&['thot','market','earnings','vault'].includes(state.view))||(isThotMode(state.thotSampling?.capabilities.mode)&&state.view==='operator'));
   const operationsLink=document.querySelector('#operations-console-link');if(operationsLink)operationsLink.hidden=state.role!=='operator_security';
   const treasuryNav=document.querySelector('[data-view=operator].nav-item');if(treasuryNav)treasuryNav.hidden=!(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer);
@@ -488,7 +559,7 @@ async function runAction(action, button) {
   if(await contributorUI.handle(action,button))return;
   if(await operationsUI.handle(action,button))return;
   if(action==='identity-sign-out'){
-    walletLoginAttempt++;signingOut=true;stopEarningsRefresh();
+    walletLoginAttempt++;signingOut=true;stopEarningsRefresh();stopPurchasesRefresh();forgetView();
     try { await api('/v1/auth/session/revoke',{method:'POST',body:{}}); }
     finally {
       try { if(authMode==='clerk')await clerkAuth?.signOut();else if(authMode==='wallet_siwe'){if(privyAuth)await privyAuth.signOut();else await walletAuth?.signOut();} }
@@ -579,13 +650,13 @@ async function safely(task, button) {
   catch (error) {
     if(error.name==='StaleWorkspaceError')return;
     const target = dialog.open && document.querySelector('#dialog-error');
-    if (target) { target.textContent = error.message; target.hidden = false; target.scrollIntoView({ block: 'nearest' }); }
+    if (target) { target.textContent = Number(error?.code)===4001?'You cancelled the wallet request. Nothing was sent for this step. Continue when you are ready.':error.message; target.hidden = false; target.scrollIntoView({ block: 'nearest' }); }
     else { notice(error.message); if (!state.loaded&&!document.querySelector('#identity-form')) main.innerHTML = `<div class="panel">${empty('The workspace is unavailable.', 'Check the local service, then refresh. No account totals are shown until records can be loaded.', '<button class="button" data-action="refresh">Try again ↻</button>')}</div>`; }
   } finally { if (button?.isConnected) button.disabled = false; }
 }
 document.addEventListener('click', event => {
   const button = event.target.closest('button'); if (!button || button.disabled) return;
-  if (button.dataset.view) { state.view = button.dataset.view; render(); return; }
+  if (button.dataset.view) { state.view = button.dataset.view;purchasesAttempts=0; render(); return; }
   if (button.dataset.action) void safely(() => runAction(button.dataset.action, button), button);
 });
 // The brand returns to the public homepage; app navigation preserves its own state.
@@ -617,10 +688,11 @@ document.addEventListener('submit', event => {
 });
 dialog.addEventListener('close', () => { activePreview = null; activeInference = null; contributorUI.resetPreview(); agentCaptureUI.onDialogClose(); });
 function invalidatePrivateState(){
+  clearWalletSummary();
   analyticsUI.reset();
   state.environmentOverview=null;
   state.thot=null;state.thotSampling=null;state.thotDisputes=null;state.money=null;
-  stopEarningsRefresh();earningsUpdatedAt=null;earningsRefreshError=false;
+  stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;earningsUpdatedAt=null;earningsRefreshError=false;
   openrouterUI.reset();
   agentCaptureUI.authLost();
   robinhoodSetupUI.authLost();
@@ -694,7 +766,7 @@ function showIdentityLogin(message='Use a short-lived access token from your con
       const response=await fetch('/v1/auth/session',{headers:{Authorization:'Bearer '+token,Accept:'application/json'},cache:'no-store',redirect:'error'}).catch(error=>{checkLogin();throw error;});
       checkLogin();
       if(!response.ok)throw new Error('The token could not be verified for an approved thot market account. Obtain a current token from the configured issuer.');
-      const result=await response.json().catch(error=>{checkLogin();throw error;});checkLogin();signingOut=false;state.token=token;state.actor=result.actor;state.role=result.actor.role;state.canExplore=result.permissions?.trace_explorer===true;state.view=initialView(state.role);
+      const result=await response.json().catch(error=>{checkLogin();throw error;});checkLogin();signingOut=false;state.token=token;state.actor=result.actor;state.role=result.actor.role;state.canExplore=result.permissions?.trace_explorer===true;state.view=restoredView();
       document.querySelector('#role').innerHTML=`<option>${escape(state.role.replaceAll('_',' '))}</option>`;
       if(!document.querySelector('[data-action="identity-sign-out"]'))document.querySelector('#role').insertAdjacentHTML('afterend','<button class="button secondary small" data-action="identity-sign-out">Sign out</button>');
       await refresh();
@@ -702,12 +774,13 @@ function showIdentityLogin(message='Use a short-lived access token from your con
   });
 }
 async function acceptClerkSession({actor,permissions}){
+  clearWalletSummary();
   analyticsUI.reset();
   state.thot=null;state.thotSampling=null;state.thotDisputes=null;state.money=null;
-  stopEarningsRefresh();earningsUpdatedAt=null;earningsRefreshError=false;
+  stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;earningsUpdatedAt=null;earningsRefreshError=false;
   signingOut=false;
   contributorUI.reset();state.generation++;state.loaded=false;state.token=null;state.actor=actor;state.role=actor.role;state.canExplore=permissions?.trace_explorer===true;
-  state.view=initialView(state.role);
+  state.view=restoredView();
   if(dialog.open)dialog.close();
   document.querySelector('#role').innerHTML=`<option>${escape(state.role.replaceAll('_',' '))}</option>`;
   document.querySelector('#role').disabled=true;document.querySelector('.local-tools').hidden=true;
@@ -744,7 +817,7 @@ async function startAuthentication(){
 void safely(startAuthentication);
 
 window.addEventListener('hashchange',()=>{void libraryUI.acceptFragment();agentCaptureUI.acceptFragment();robinhoodSetupUI.acceptFragment();});
-document.addEventListener('visibilitychange',scheduleEarningsRefresh);
-window.addEventListener('pagehide',stopEarningsRefresh);
+document.addEventListener('visibilitychange',()=>{scheduleEarningsRefresh();schedulePurchasesRefresh();});
+window.addEventListener('pagehide',()=>{stopEarningsRefresh();stopPurchasesRefresh();});
 
 dialog.addEventListener('cancel',event=>robinhoodSetupUI.onDialogCancel(event));

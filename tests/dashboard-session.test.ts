@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
+// @ts-expect-error Production browser helper intentionally uses JavaScript.
+import {isClosedUnpaidPurchase} from '../apps/dashboard/thot-ui.js';
 
 const applicationSource = await readFile(new URL('../apps/dashboard/app.js', import.meta.url), 'utf8');
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
 // replaced by inert collaborators and only the automatic initial network bootstrap is disabled.
 const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace("import('./privy-auth.bundle.js')", 'globalThis.importPrivyModule()').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
-globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin,
+globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, refreshPurchases, pendingPurchases,
   setAuthMode(value) { authMode = value; }, setClerkAuth(value) { clerkAuth = value; } };
 `;
 function deferred<T = any>() {
@@ -45,20 +47,20 @@ function documentFixture() {
     } });
     return element;
   };
-  for (const selector of ['#main', '#detail-dialog', '#dialog-content', '#dialog-error', '#notice', '#toast', '#role', '.brand', '.environment', '.local-tools']) elements.set(selector, make(selector));
+  for (const selector of ['#wallet-summary', '#main', '#detail-dialog', '#dialog-content', '#dialog-error', '#notice', '#toast', '#role', '.brand', '.environment', '.local-tools']) elements.set(selector, make(selector));
   const document = { querySelector(selector: string) { return elements.get(selector) ?? null; }, querySelectorAll() { return []; }, addEventListener(type:string,handler:(event:any)=>unknown) {documentHandlers.set(type,[...(documentHandlers.get(type)??[]),handler]);},
     dispatch(type:string,event:any){for(const callback of documentHandlers.get(type)??[])callback(event);},
     createElement: (name: string) => make(name), body: make('body') };
   return { document, elements };
 }
-function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any) => Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:()=>Promise<any>; privyTimeoutMs?:number } = {}) {
+function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any) => Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:()=>Promise<any>; privyTimeoutMs?:number; storage?:any } = {}) {
   const dom = documentFixture(), calls: Array<{ url: string; init: any }> = [], timers = new Set<ReturnType<typeof setTimeout>>(), controllers = new Set<AbortController>();
-  const context: any = { bindStakingPreview:()=>()=>{}, window:{addEventListener(){}}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
+  const context: any = { isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
     setTimeout(callback: () => void, duration: number) { const timer = setTimeout(callback, duration===30000?(options.privyTimeoutMs??duration):duration); timers.add(timer); return timer; },
     clearTimeout(timer: ReturnType<typeof setTimeout>) { clearTimeout(timer); timers.delete(timer); },
     fetch(url: string, init: any = {}) { calls.push({ url, init }); return url==='/v1/thot/workspace'?(options.thotTransport?.(url,init)??Promise.resolve(response({capabilities:{mode:'unconfigured'}}))):url==='/v1/money/capabilities'?Promise.resolve(response({mode:'mock'})):transport(url, init); },
     createInferenceUI: () => ({ actionHTML: () => '', historyHTML: () => '', handle: async () => false }),
-    createThotUI:()=>({offersHTML:()=>'<h1>Offers renderer</h1>',earningsHTML:()=>'<h1>Earnings renderer</h1>',tokenHTML:()=>'<h1>THOT renderer</h1>',valuationsHTML:()=>'',samplingHTML:()=>'<h1>Treasury sampler</h1>',action:async()=>false}),
+    createThotUI:()=>({purchasesHTML:()=>'<h2>Updated purchase cards</h2>',walletSummaryHTML:()=>'',offersHTML:()=>'<h1>Offers renderer</h1>',earningsHTML:()=>'<h1>Earnings renderer</h1>',tokenHTML:()=>'<h1>THOT renderer</h1>',valuationsHTML:()=>'',samplingHTML:()=>'<h1>Treasury sampler</h1>',action:async()=>false}),
     createThotAnalyticsUI:()=>({referralsHTML:()=>'<h2>Referral receipts</h2>',portfolioHTML:()=>'',leaderboardHTML:()=>'<h1>Market activity</h1>',ready:async()=>{},handle:async()=>false,onSubmit:async()=>false,reset(){}}),
     createMoneyUI:()=>({active:()=>false,action:async()=>false,decorate(){}}),
     createMandateEditor: () => ({}), createOperationsUI: () => ({ sectionHTML: () => '', handle: async () => false }),
@@ -171,7 +173,9 @@ test('actual sign-out state transition discards a detail response whose JSON par
   const a = dashboard(t, async () => ({ status: 200, ok: true, json() { parsing.resolve(); return json.promise; } }));
   a.driver.setAuthMode('external_jwt');
   const oldAction = a.driver.safely(() => a.driver.runAction('trace', { dataset: { id: 'private-old-trace' } }));
-  await parsing.promise; a.driver.showIdentityLogin('Signed out.'); const loginForm = a.document.querySelector('#identity-form');
+  await parsing.promise; a.document.querySelector('#wallet-summary').innerHTML='PRIVATE-BALANCE';a.document.querySelector('#wallet-summary').hidden=false;
+ a.driver.showIdentityLogin('Signed out.');
+ assert.equal(a.document.querySelector('#wallet-summary').innerHTML,'');assert.equal(a.document.querySelector('#wallet-summary').hidden,true); const loginForm = a.document.querySelector('#identity-form');
   json.resolve({ category: 'general', status: 'AVAILABLE', provenance: { private: 'PRIVATE-TRACE-RECEIPT' }, rights: {} }); await oldAction;
   assert.equal(a.driver.state.token, null); assert.equal(a.driver.state.actor, null);
   assert.equal(a.document.querySelector('#identity-form'), loginForm); assert.equal(a.document.querySelector('#detail-dialog').open, false);
@@ -353,7 +357,9 @@ test('dashboard routes Offers, Earnings and THOT to different renderers',t=>{
 test('sign-out clears THOT balances and sidebar rendering cannot replace the login screen',t=>{
  const a=dashboard(t,async()=>{throw new Error('No requests while signed out');});
  a.driver.state.thot={capabilities:{mode:'thot-anvil'},wallet:'PRIVATE-WALLET',account:{claimable:'123'},orders:[{title:'PRIVATE-SALE'}]};
+ a.document.querySelector('#wallet-summary').innerHTML='PRIVATE-BALANCE';a.document.querySelector('#wallet-summary').hidden=false;
  a.driver.showIdentityLogin('Signed out.');
+ assert.equal(a.document.querySelector('#wallet-summary').innerHTML,'');assert.equal(a.document.querySelector('#wallet-summary').hidden,true);
  assert.equal(a.driver.state.thot,null);
  const login=a.document.querySelector('#main').innerHTML;
  for(const view of ['earnings','thot','market']){a.driver.state.view=view;a.driver.render();assert.equal(a.document.querySelector('#main').innerHTML,login);}
@@ -363,7 +369,9 @@ test('sign-out clears THOT balances and sidebar rendering cannot replace the log
 test('an unsuccessful role switch clears the previous THOT account before loading new records',async t=>{
  const a=dashboard(t,async()=>response({error:'UNAVAILABLE'},503));
  a.driver.state.thot={wallet:'PRIVATE-OLD-WALLET',orders:[{title:'PRIVATE-OLD-SALE'}]};
+ a.document.querySelector('#wallet-summary').innerHTML='PRIVATE-OLD-BALANCE';
  await assert.rejects(a.driver.session('buyer_admin'));
+ assert.equal(a.document.querySelector('#wallet-summary').innerHTML,'');
  assert.equal(a.driver.state.thot,null);assert.equal(a.driver.state.loaded,false);
  a.driver.state.view='thot';a.driver.render();
  assert.doesNotMatch(a.document.querySelector('#main').innerHTML,/PRIVATE-OLD/);
@@ -460,4 +468,81 @@ test('operator workspace failure cannot be swallowed into a successful refresh',
  await assert.rejects(a.driver.session('operator_security'));
  assert.equal(a.driver.state.loaded,false);assert.equal(a.driver.state.thot,null);
  assert.ok(a.calls.every(({url})=>!url.startsWith('/v1/operator/')&&url!=='/v1/thot/sampling'));
+});
+
+function memoryStorage(){const values=new Map<string,string>();return {getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>values.set(key,value),removeItem:(key:string)=>values.delete(key)};}
+test('navigation memory restores only a permitted view for the same actor and role',t=>{
+ const storage=memoryStorage(),a=dashboard(t,async()=>{throw Error('Navigation must not fetch');},{storage});
+ a.driver.state.view='market';a.driver.rememberView();a.driver.state.view='vault';assert.equal(a.driver.restoredView(),'market');
+ a.identity('other-user');assert.equal(a.driver.restoredView(),'vault');
+ a.identity('user-old','buyer_member');assert.equal(a.driver.restoredView(),'market');
+ storage.setItem('thot.workspace-view.v1',JSON.stringify({actor:'user-old',role:'buyer_member',view:'vault'}));assert.equal(a.driver.restoredView(),'market');
+ a.identity();storage.setItem('thot.workspace-view.v1',JSON.stringify({actor:'user-old',role:'user',view:'operator'}));assert.equal(a.driver.restoredView(),'vault');
+ storage.setItem('thot.workspace-view.v1','invalid');assert.equal(a.driver.restoredView(),'vault');
+ a.driver.state.view='earnings';a.driver.rememberView();a.driver.forgetView();assert.equal(a.driver.restoredView(),'vault');
+});
+test('denied browser storage never blocks navigation',t=>{
+ const storage={getItem(){throw Error('blocked');},setItem(){throw Error('blocked');},removeItem(){throw Error('blocked');}};
+ const a=dashboard(t,async()=>response({}),{storage});a.driver.state.view='market';assert.doesNotThrow(()=>a.driver.rememberView());assert.equal(a.driver.restoredView(),'vault');assert.doesNotThrow(()=>a.driver.forgetView());
+});
+const pendingBuyerWorkspace=()=>({capabilities:{mode:'thot-anvil'},wallet:'0x1111',account:{balance:'100'},orders:[{id:'purchase',buyer:'0x1111',receipt:{status:2}}]});
+function purchasePage(a:any){a.driver.state.view='market';a.driver.state.thot=pendingBuyerWorkspace();const target=a.document.createElement('purchases');a.elements.set('#thot-buyer-purchases',target);return target;}
+test('pending buyer refresh reads once and updates only purchase cards without replaying payment',async t=>{
+ const pending=deferred(),a=dashboard(t,async()=>{throw Error('No other endpoint');},{thotTransport:async()=>pending.promise});
+ const target=purchasePage(a);a.document.querySelector('#main').innerHTML='Contributor form input remains here';
+ const checking=a.driver.refreshPurchases();await flush();await a.driver.refreshPurchases();assert.equal(a.calls.length,1);
+ const latest=pendingBuyerWorkspace();latest.orders[0].receipt.status=3;pending.resolve(response(latest));await checking;
+ assert.equal(a.driver.state.thot,latest);assert.equal(target.innerHTML,'<h2>Updated purchase cards</h2>');assert.equal(a.document.querySelector('#main').innerHTML,'Contributor form input remains here');
+ assert.equal(a.calls[0].url,'/v1/thot/workspace');assert.equal(a.calls[0].init.method,'GET');assert.equal(a.driver.pendingPurchases(),false);
+});
+test('pending delivery polling stops after twelve reads and skips dialogs, other views and other buyers',async t=>{
+ const a=dashboard(t,async()=>response({}),{thotTransport:async()=>response(pendingBuyerWorkspace())});purchasePage(a);
+ a.document.querySelector('#detail-dialog').open=true;await a.driver.refreshPurchases();assert.equal(a.calls.length,0);
+ a.document.querySelector('#detail-dialog').open=false;a.driver.state.view='vault';await a.driver.refreshPurchases();assert.equal(a.calls.length,0);
+ a.driver.state.view='market';a.driver.state.thot.orders[0].buyer='other';await a.driver.refreshPurchases();assert.equal(a.calls.length,0);
+ a.driver.state.thot=pendingBuyerWorkspace();for(let i=0;i<15;i++)await a.driver.refreshPurchases();assert.equal(a.calls.length,12);
+});
+test('late purchase refresh cannot overwrite an account switch or an opened dialog',async t=>{
+ for(const change of ['account','dialog']){
+  const pending=deferred(),a=dashboard(t,async()=>response({}),{thotTransport:async()=>pending.promise});const target=purchasePage(a),before=a.driver.state.thot;
+  const checking=a.driver.refreshPurchases();await flush();if(change==='account')a.identity('other-user');else a.document.querySelector('#detail-dialog').open=true;
+  pending.resolve(response({...pendingBuyerWorkspace(),account:{balance:'PRIVATE-OLD-BALANCE'}}));await checking;assert.equal(a.driver.state.thot,before);assert.equal(target.innerHTML,'');
+ }
+});
+
+test('restoring a wallet session reopens its saved page while another wallet starts in its own vault',async t=>{
+ for(const actor of ['returning-user','another-user']){
+  const storage=memoryStorage();storage.setItem('thot.workspace-view.v1',JSON.stringify({actor:'returning-user',role:'user',view:'market'}));
+  const a=dashboard(t,async url=>url==='/v1/auth/capabilities'?response({mode:'wallet_siwe',wallet:{chain_id:31337}}):response([]),{storage,thotTransport:async()=>response({capabilities:{mode:'thot-anvil'}}),walletAuthFactory:config=>({async restore(){await config.onSession({actor:{id:actor,role:'user'}});return true;}})});
+  await a.driver.startAuthentication();assert.equal(a.driver.state.view,actor==='returning-user'?'market':'vault');
+ }
+});
+
+test('focused receipt summaries and delivery buttons do not prevent pending purchase confirmation',async t=>{
+ for(const tagName of ['SUMMARY','BUTTON']){
+  const latest=pendingBuyerWorkspace();latest.orders[0].receipt.status=3;
+  const a=dashboard(t,async()=>response({}),{thotTransport:async()=>response(latest)}),target=purchasePage(a);
+  let restoredFocus=false;
+  const control:any={tagName,textContent:'Purchase receipt',dataset:{action:tagName==='BUTTON'?'thot-delivery':undefined,id:'purchase'},closest:()=>({dataset:{purchaseId:'purchase'}}),focus:()=>{restoredFocus=true;}};
+  const details={open:false,querySelector:()=>control};
+  (a.document as any).activeElement=control;target.contains=()=>true;
+  target.querySelectorAll=(selector:string)=>selector==='details[open]'?[details]:selector==='details'?[details]:[control];
+  await a.driver.refreshPurchases();assert.equal(a.calls.length,1);assert.equal(a.driver.state.thot.orders[0].receipt.status,3);assert.equal(target.innerHTML,'<h2>Updated purchase cards</h2>');assert.equal(restoredFocus,true);assert.equal(details.open,true);
+ }
+});
+test('editable purchase controls still defer automatic card replacement',async t=>{
+ for(const control of [{tagName:'INPUT'},{tagName:'SELECT'},{tagName:'TEXTAREA'},{tagName:'DIV',isContentEditable:true}]){
+  const a=dashboard(t,async()=>{throw Error('Editing must not poll');}),target=purchasePage(a);
+  (a.document as any).activeElement=control;target.contains=()=>true;await a.driver.refreshPurchases();assert.equal(a.calls.length,0);
+ }
+});
+
+test('closed unfunded attempts do not poll; unknown payments and funded purchases still do',async t=>{
+ const a=dashboard(t,async()=>response({}),{thotTransport:async()=>response(pendingBuyerWorkspace())});purchasePage(a);
+ const closed={id:'expired',buyer:'0x1111',job_status:'blocked',last_error:'AUTHORIZATION_UNAVAILABLE',receipt:{status:0}};
+ a.driver.state.thot.orders=[closed];assert.equal(a.driver.pendingPurchases(),false);await a.driver.refreshPurchases();assert.equal(a.calls.length,0);
+ for(const extra of [{job_status:'complete'},{job_status:'awaiting_funding'},{job_status:'blocked',last_error:'AUTOMATION_PENDING'},{receipt:{status:2}}]){
+  a.driver.state.thot.orders=[{...closed,...extra}];assert.equal(a.driver.pendingPurchases(),extra.job_status!=='complete');
+ }
+ a.driver.state.thot.orders=[closed,{id:'funded',buyer:'0x1111',receipt:{status:2}}];await a.driver.refreshPurchases();assert.equal(a.calls.length,1);assert.equal(a.calls[0].init.method,'GET');
 });

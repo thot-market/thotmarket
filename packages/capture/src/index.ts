@@ -3,10 +3,11 @@ import {randomBytes} from 'node:crypto';
 import {canonicalHash} from '../../protocol/src/index.ts';
 import {CAPTURE_REQUEST_BYTES,CAPTURE_RESPONSE_BYTES,CAPTURE_MAX_EXCHANGES} from './limits.ts';
 
-export type CaptureClient='claude'|'codex';
+export type CaptureClient='claude'|'codex'|'zai';
+export interface CaptureInvocation {command:string;args:string[];env:NodeJS.ProcessEnv;privateSettings?:{argumentIndex:number;content:string}}
 export interface ProxyExchange {
   request_encoding?:'identity'|'gzip'|'zstd';request_method?:'POST'|'GET';
-  sequence:number;upstream:'https://api.anthropic.com'|'https://chatgpt.com';path:string;
+  sequence:number;upstream:'https://api.anthropic.com'|'https://chatgpt.com'|'https://api.z.ai';path:string;
   request_body_b64:string;response_body_b64:string;status:number;content_type:string;
   started_at:string;finished_at:string;complete:boolean;commitment:string;
 }
@@ -18,9 +19,9 @@ export interface ProxyCaptureManifest {
  format:'thot.proxy-capture/2';capture_id:string;client:CaptureClient;started_at:string;finished_at:string;parts:{sequence:number;commitment:string}[];root:string;
 }
 const MAX_BODY=4*1024*1024,MAX_SESSION=6*1024*1024;
-const allowedPath=(client:CaptureClient,path:string)=>client==='claude'
-  ? ['/v1/messages','/v1/messages/count_tokens'].includes(path)
-  : ['/backend-api/codex/responses','/backend-api/codex/responses/compact','/backend-api/codex/models'].includes(path);
+const allowedPath=(client:CaptureClient,path:string)=>client==='codex'
+  ? ['/backend-api/codex/responses','/backend-api/codex/responses/compact','/backend-api/codex/models'].includes(path)
+  : ['/v1/messages','/v1/messages/count_tokens'].includes(path);
 const hop=new Set(['connection','proxy-connection','keep-alive','transfer-encoding','upgrade','host','content-length','proxy-authorization','proxy-authenticate','trailer','te','x-thot-recorder-request']);
 async function body(req:IncomingMessage,limit=MAX_BODY){const parts:Buffer[]=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>limit)throw new Error('CAPTURE_REQUEST_TOO_LARGE');parts.push(Buffer.from(part));}return Buffer.concat(parts);}
 
@@ -30,7 +31,10 @@ async function body(req:IncomingMessage,limit=MAX_BODY){const parts:Buffer[]=[];
  */
 export async function startCaptureProxy(options:{client:CaptureClient;captureId:string;transport?:typeof fetch;onActivity?:(count:number)=>void;onRejected?:(path:string,reason:string)=>void;incremental?:boolean;onExchange?:(exchange:ProxyExchange,tag:string)=>void}){
   const exchanges:ProxyExchange[]=[],started_at=new Date().toISOString(),nonce=randomBytes(24).toString('hex');
-  const upstream:ProxyExchange['upstream']=options.client==='claude'?'https://api.anthropic.com':'https://chatgpt.com';
+  const upstream:ProxyExchange['upstream']=options.client==='claude'?'https://api.anthropic.com':options.client==='zai'?'https://api.z.ai':'https://chatgpt.com';
+  // Z.AI serves its Anthropic-compatible API below the host root. The bundle
+  // records the host origin; the Anthropic prefix is routing, not provenance.
+  const relay=options.client==='zai'?upstream+'/api/anthropic':upstream;
   let sequence=0,total=0,active=0,closed=false;
   const summaries:{sequence:number;commitment:string}[]=[];
   const limit=options.incremental?CAPTURE_MAX_EXCHANGES:100;
@@ -66,7 +70,7 @@ export async function startCaptureProxy(options:{client:CaptureClient;captureId:
         for(const [key,value] of Object.entries(req.headers))if(value!==undefined&&!hop.has(key)&&!connectionHeaders.has(key))headers.set(key,Array.isArray(value)?value.join(', '):value);
         // Preserve request bytes and client OAuth/beta/account headers. No reconstructed prompts.
         headers.set('accept-encoding','identity');
-        const response=await (options.transport??fetch)(upstream+path+url.search,{method:req.method,headers,...(req.method==='POST'?{body:new Uint8Array(input)}:{}),redirect:'error',signal:controller.signal});
+        const response=await (options.transport??fetch)(relay+path+url.search,{method:req.method,headers,...(req.method==='POST'?{body:new Uint8Array(input)}:{}),redirect:'error',signal:controller.signal});
         status=response.status;contentType=response.headers.get('content-type')??'application/octet-stream';
         for(const [key,value]of response.headers)if(!hop.has(key)&&!['content-encoding','set-cookie'].includes(key))res.setHeader(key,value);
         res.writeHead(status);res.flushHeaders();
@@ -114,7 +118,7 @@ export async function startCaptureProxy(options:{client:CaptureClient;captureId:
     }};
 }
 
-export function clientInvocation(client:CaptureClient,baseUrl:string,args:string[],environment:NodeJS.ProcessEnv=process.env){
+export function clientInvocation(client:CaptureClient,baseUrl:string,args:string[],environment:NodeJS.ProcessEnv=process.env):CaptureInvocation{
   const env={...environment};
   // Native clients can discover an OS proxy while ignoring its loopback bypass
   // list. Route only this child's local capture bridge directly; preserve the
@@ -124,15 +128,10 @@ export function clientInvocation(client:CaptureClient,baseUrl:string,args:string
       .filter(Boolean).flatMap(value=>value!.split(',')).map(value=>value.trim()).filter(Boolean))].join(',');
     env.NO_PROXY=bypass;env.no_proxy=bypass;
   }
-  if(client==='claude'){
-    if(env.ANTHROPIC_API_KEY||env.ANTHROPIC_AUTH_TOKEN)throw new Error('USE_SUBSCRIPTION_LOGIN_REMOVE_API_OVERRIDE');
-    env.ANTHROPIC_BASE_URL=baseUrl;
-    // This relay forwards unchanged to api.anthropic.com. Preserve the installed
-    // Claude CLI's first-party subscription/context behavior for this child only.
-    env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL='1';
+  if(client==='claude'||client==='zai'){
     // Claude's user settings can contain env.ANTHROPIC_BASE_URL and an auth
-    // token for another gateway. A launch-time settings override takes
-    // precedence over those values. Empty token means use the native login;
+    // token for another gateway, and settings env takes precedence over this
+    // child's environment. A launch-time settings override pins the route;
     // never forward an unrelated gateway credential through this relay.
     const delimiter=args.indexOf('--'),at=delimiter<0?args.length:delimiter;
     const nativeArgs=args.slice(0,at),settingsAt=nativeArgs.findIndex(arg=>arg==='--settings'||arg.startsWith('--settings='));
@@ -148,8 +147,34 @@ export function clientInvocation(client:CaptureClient,baseUrl:string,args:string
     }
     const requestedEnv=requested.env;
     if(requestedEnv!==undefined&&(!requestedEnv||typeof requestedEnv!=='object'||Array.isArray(requestedEnv)))throw new Error('CLAUDE_SETTINGS_ENV_INVALID');
-    if(requestedEnv&&('ANTHROPIC_API_KEY' in requestedEnv||'ANTHROPIC_AUTH_TOKEN' in requestedEnv))throw new Error('USE_SUBSCRIPTION_LOGIN_REMOVE_API_OVERRIDE');
-    const routeSettings=JSON.stringify({...requested,env:{...(requestedEnv as Record<string,unknown>|undefined),ANTHROPIC_BASE_URL:baseUrl,ANTHROPIC_AUTH_TOKEN:''}});
+    if(requestedEnv&&('ANTHROPIC_API_KEY' in requestedEnv||'ANTHROPIC_AUTH_TOKEN' in requestedEnv))throw new Error(client==='claude'?'USE_SUBSCRIPTION_LOGIN_REMOVE_API_OVERRIDE':'ZAI_AUTH_TOKEN_FROM_ENVIRONMENT_ONLY');
+    let token='';
+    if(client==='claude'){
+      if(env.ANTHROPIC_API_KEY||env.ANTHROPIC_AUTH_TOKEN)throw new Error('USE_SUBSCRIPTION_LOGIN_REMOVE_API_OVERRIDE');
+      env.ANTHROPIC_BASE_URL=baseUrl;
+      // This relay forwards unchanged to api.anthropic.com. Preserve the installed
+      // Claude CLI's first-party subscription/context behavior for this child only.
+      env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL='1';
+      // Empty token means use the native login.
+    }else{
+      // Z.AI's Anthropic-compatible gateway runs the same harness with key
+      // auth. The token must come from this child's environment, not from a
+      // saved configuration or login file.
+      if(!env.ANTHROPIC_AUTH_TOKEN)throw new Error('ZAI_AUTH_TOKEN_REQUIRED');
+      if(env.ANTHROPIC_API_KEY)throw new Error('ZAI_API_KEY_NOT_SUPPORTED');
+      token=env.ANTHROPIC_AUTH_TOKEN;
+      env.ANTHROPIC_BASE_URL=baseUrl;
+      // Z.AI is a third-party gateway: the first-party base URL assumption
+      // must not leak from the caller's environment into this child.
+      delete env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL;
+    }
+    const routeSettings=JSON.stringify({...requested,env:{...(requestedEnv as Record<string,unknown>|undefined),ANTHROPIC_BASE_URL:baseUrl,ANTHROPIC_AUTH_TOKEN:token}});
+    if(client==='zai'){
+      // Settings override saved gateway credentials, but the provider secret must
+      // never enter process argv. The terminal owns the short-lived private file.
+      return {command:'claude',args:[...nativeArgs,'--settings','THOT_PRIVATE_SETTINGS_FILE',...args.slice(at)],env,
+        privateSettings:{argumentIndex:nativeArgs.length+1,content:routeSettings}};
+    }
     return {command:'claude',args:[...nativeArgs,'--settings',routeSettings,...args.slice(at)],env};
   }
   // A scoped custom Responses provider preserves ChatGPT auth and uses SSE. Global

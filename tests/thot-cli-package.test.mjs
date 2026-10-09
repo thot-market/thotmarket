@@ -60,6 +60,9 @@ test('reviewed export builds a standalone CLI tarball with runtime verification 
     assert.match(noDefault.stderr,/THOT_PRODUCTION_ORIGIN_UNCONFIGURED/);
     assert.equal(await recorderPolicyFile('https://unused.invalid',{THOT_RECORDER_POLICY_FILE:'/trusted/policy.json'}),'/trusted/policy.json');
     const {clientInvocation}=await import(pathToFileURL(join(installed,'runtime/packages/capture/src/index.js')));
-    for(const client of ['claude','codex'])assert.equal(clientInvocation(client,'https://recorder.invalid',[]).command,client);
+    // The claude path refuses ambient gateway credentials by design, so this
+    // check must not inherit whatever operator environment the machine running
+    // the suite happens to export.
+    for(const client of ['claude','codex'])assert.equal(clientInvocation(client,'https://recorder.invalid',[],{PATH:'/bin'}).command,client);
   }finally{await rm(temporary,{recursive:true,force:true});}
 });

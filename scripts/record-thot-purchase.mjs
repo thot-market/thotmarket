@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, writeFile, rm, copyFile} from 'node:fs/promises';
+import {mkdtemp, mkdir, writeFile, readFile, rm, copyFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -41,7 +41,7 @@ const contexts = [], workerErrors = [];
 const pause = ms => new Promise(r => setTimeout(r, ms));
 const save = () => writeFile(join(output, 'result.json'), JSON.stringify(evidence, null, 2) + '\n', {mode: 0o600});
 async function shot(page, name) {
-  activePage = page; await page.screenshot({path: join(output, name + '.png'), fullPage: true});
+  activePage = page; await page.screenshot({path: join(output, name + '.png'), fullPage: !(await page.locator('#detail-dialog').evaluate(el=>el.open))});
   evidence.screenshots.push(name + '.png'); await pause(500);
 }
 async function waitFor(check, label) {
@@ -60,7 +60,7 @@ try {
     const context = await browser.newContext({viewport: {width: 1360, height: 980}, recordVideo: {dir: output, size: {width: 1360, height: 980}}});
     const run = {context, signer, address: await signer.getAddress(), role, rejectNext: false, holdReceipts: false, sent: []};
     contexts.push(run);
-    await context.exposeBinding('localFixtureWallet', async (_source, {method, params = []}) => {
+    await context.exposeBinding('localFixtureWallet', async (_source, {method, params}) => {
       if (['eth_accounts', 'eth_requestAccounts'].includes(method)) return [run.address];
       if (method === 'eth_chainId') return '0x7a69';
       if (['wallet_switchEthereumChain', 'wallet_addEthereumChain'].includes(method)) return null;
@@ -68,13 +68,14 @@ try {
       if (method === 'eth_signTypedData_v4') {const typed = JSON.parse(params[1]); delete typed.types.EIP712Domain; return signer.signTypedData(typed.domain, typed.types, typed.message);}
       if (method === 'eth_sendTransaction') {
         if (run.rejectNext) {run.rejectNext = false; return {rejected: true};}
+        if(run.waitForWallet) await run.waitForWallet;
         assert.equal(params[0].from.toLowerCase(), run.address.toLowerCase());
         assert([fixture.config.token, fixture.config.market, fixture.config.locks].some(a => a.toLowerCase() === params[0].to.toLowerCase()), 'Unexpected transaction target');
         const response = await signer.sendTransaction(params[0]); run.sent.push(response.hash);
         if (run.holdAfterFunding && params[0].to.toLowerCase() === fixture.config.market.toLowerCase()) run.holdReceipts = true;
         evidence.transactions.push({role, hash: response.hash, to: params[0].to}); return response.hash;
       }
-      if (['eth_blockNumber', 'eth_getBlockByNumber'].includes(method)) return fixture.provider.send(method, params);
+      if (['eth_blockNumber', 'eth_getBlockByNumber', 'eth_getTransactionByHash', 'eth_call'].includes(method)) {assert(Array.isArray(params), 'Hosted RPC requires explicit params arrays');return fixture.provider.send(method, params);}
       if (method === 'eth_getTransactionReceipt') return run.holdReceipts ? null : fixture.provider.send(method, params);
       throw Error('Unexpected wallet method ' + method);
     });
@@ -125,6 +126,12 @@ try {
     await seller.page.locator('[data-action="confirm-research"]').click();
     const response = await imported; assert.equal(response.status(), 200); const trace = await response.json();
     await seller.page.locator('nav [data-view="market"]').click();
+    if(label==='purchase') {
+      await seller.page.reload();
+      await seller.page.locator('nav [data-view="market"].active').waitFor();
+      await seller.page.locator('#thot-trace').waitFor();
+      evidence.checks.push('A contributor returning to Marketplace after a browser reload keeps the selected page.');
+    }
     await seller.page.locator('#thot-trace').selectOption(trace.trace_id);
     const metadataResponse = seller.page.waitForResponse(r => r.url().endsWith('/v1/thot/listings/metadata'));
     await seller.page.locator('[data-action="thot-list-configure"]').click();
@@ -132,6 +139,28 @@ try {
     await seller.page.locator('#thot-title').fill('Synthetic ' + label);
     await seller.page.locator('#thot-price').fill('100'); await seller.page.locator('#thot-list-consent').check();
     await shot(seller.page, label + '-02-listing-commitment');
+    if (label === 'purchase') {
+      const desktop = seller.page.viewportSize();
+      for (const width of [desktop.width, 390]) {
+        await seller.page.setViewportSize({width, height: 844});
+        const layout = await seller.page.locator('.thot-sale-form').evaluate(form => {
+          const title = form.querySelector('#thot-title').getBoundingClientRect();
+          const price = form.querySelector('#thot-price').getBoundingClientRect();
+          const licence = form.querySelector('#thot-license').getBoundingClientRect();
+          const body = form.closest('.dialog-body');
+          return {title:{x:title.x,y:title.y,bottom:title.bottom}, price:{x:price.x,y:price.y}, licenceWidth:licence.width,
+            overflow:body.scrollWidth > body.clientWidth + 1,
+            checked:form.querySelector('#thot-list-consent').checked,
+            optional:form.querySelector('#thot-treasury-consent').checked};
+        });
+        assert.equal(layout.overflow,false); assert.equal(layout.checked,true); assert.equal(layout.optional,false);
+        assert(layout.licenceWidth > 250);
+        if (width === 390) assert(layout.price.y > layout.title.bottom);
+        else assert(Math.abs(layout.title.y-layout.price.y)<2);
+        await shot(seller.page, width === 390 ? 'listing-mobile' : 'listing-desktop');
+      }
+      await seller.page.setViewportSize(desktop);
+    }
     const activated = seller.page.waitForResponse(r => r.url().endsWith('/v1/thot/listings/activate'));
     await seller.page.locator('[data-action="thot-list-confirm"]').click(); const activation = await activated; assert.equal(activation.status(), 200);
     const listing = await activation.json();
@@ -141,8 +170,18 @@ try {
   phase = 'buyer-review'; await buyer.open('market');
   const prepare = buyer.page.waitForResponse(r => r.url().endsWith('/v1/thot/offers/prepare'));
   await buyer.page.locator(`[data-action="thot-buy"][data-id="${listing.id}"]`).click();
-  const preparedResponse = await prepare; assert.equal(preparedResponse.status(), 200); const offer = await preparedResponse.json();
+  const preparedResponse = await prepare; assert.equal(preparedResponse.status(), 200); let offer = await preparedResponse.json();
   await shot(buyer.page, 'purchase-03-buyer-quote');
+  await buyer.page.setViewportSize({width:390,height:844});
+  const checkoutFits=await buyer.page.locator('#detail-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth);
+  assert(checkoutFits,'Mobile checkout must not overflow horizontally');
+  const primaryBounds=await buyer.page.locator('[data-action="thot-send"]').boundingBox();
+  assert(primaryBounds&&primaryBounds.y>=0&&primaryBounds.y+primaryBounds.height<=844,'Mobile primary action stays in the viewport');
+  const headerBounds=await buyer.page.locator('.topbar').boundingBox();
+  const balanceBounds=await buyer.page.locator('.wallet-summary').boundingBox();
+  assert(balanceBounds.y+balanceBounds.height<=headerBounds.y+headerBounds.height,'Mobile balance fits inside header');
+  await shot(buyer.page, 'purchase-03-mobile-quote');
+  await buyer.page.setViewportSize({width:1360,height:980});
   evidence.trace_id = trace.trace_id; evidence.listing_id = listing.id; evidence.offer_id = offer.id;
   evidence.content_commitment = metadata.content_hash; evidence.release_commitment = listing.evidence_hash;
   evidence.quote = {buyer_total: offer.buyer_total, seller_gross: offer.seller_gross};
@@ -153,6 +192,48 @@ try {
   assert.equal(buyer.sent.length, countBefore); evidence.checks.push('Explicit wallet rejection sends no transaction; same reviewed action can retry.');
   const balancesBefore = {};
   for (const [name, signer] of Object.entries({buyer: fixture.buyer, seller: fixture.seller, protocol: fixture.protocol, referrer: fixture.referrer})) balancesBefore[name] = await fixture.token.balanceOf(await signer.getAddress());
+  phase = 'accelerated-approval';
+  await fixture.provider.send('anvil_setAutomine', [false]);
+  let releaseWallet;buyer.waitForWallet=new Promise(resolve=>{releaseWallet=resolve;});
+  await buyer.page.locator('[data-action="thot-send"]').click();
+  await buyer.page.getByText('Waiting for you in your wallet',{exact:true}).waitFor();
+  assert.equal(await buyer.page.locator('[data-action="thot-send"]').textContent(),'Confirm in your wallet…');
+  await shot(buyer.page,'purchase-03-wallet-request');releaseWallet();buyer.waitForWallet=null;
+  await waitFor(() => buyer.sent.length === countBefore + 1, 'pending approval hash');
+  await buyer.page.getByText('Submitted · checking confirmation',{exact:true}).waitFor();
+  await shot(buyer.page,'purchase-03-chain-wait');
+  const originalHash = buyer.sent.at(-1);
+  const original = await fixture.provider.send('eth_getTransactionByHash', [originalHash]);
+  assert.equal(original.to.toLowerCase(), fixture.config.token.toLowerCase());
+  const replacement = await fixture.buyer.sendTransaction({to: original.to, data: original.input, value: BigInt(original.value), nonce: Number(BigInt(original.nonce)), gasLimit: BigInt(original.gas), gasPrice: BigInt(original.gasPrice) * 2n + 1000000000n});
+  await fixture.provider.send('anvil_setAutomine', [true]);
+  await fixture.provider.send('evm_mine', []);
+  await waitFor(() => fixture.provider.send('eth_getTransactionReceipt', [replacement.hash]), 'replacement mined');
+  await buyer.page.evaluate(()=>{for(const key of Object.keys(sessionStorage)){if(!key.startsWith('thot.wallet-recovery.v1:'))continue;const saved=JSON.parse(sessionStorage[key]);delete saved.buyer_total;delete saved.economics;for(const step of saved.steps)delete step.nonce;sessionStorage.setItem(key,JSON.stringify(saved));}});
+  await buyer.open('market');
+  await buyer.page.locator('[data-action="thot-resume-payment"]').click();
+  await buyer.page.getByText('Approval ready',{exact:true}).waitFor();
+  assert.equal(buyer.sent.length,countBefore+1,'Automatic approval recovery must not send a transaction');
+  assert.equal(await buyer.page.locator('#thot-replacement-hash').count(),0,'Approval recovery must not ask for a hash');
+  await shot(buyer.page,'purchase-03-approval-ready');
+  await buyer.open('market');
+  await buyer.page.locator('[data-action="thot-resume-payment"]').click();
+  await buyer.page.getByText('Approval ready',{exact:true}).waitFor();
+  evidence.checks.push('Real accelerated approval recovered automatically from exact-marketplace allowance across reload, without hash entry or any additional approval transaction.');
+  phase = 'expired-review';
+  await fixture.provider.send('evm_increaseTime',[901]);await fixture.provider.send('evm_mine',[]);
+  const beforeExpired=buyer.sent.length;
+  await buyer.page.locator('[data-action="thot-send"]').click();
+  await buyer.page.getByRole('button',{name:'Review a new purchase',exact:true}).waitFor();
+  assert.equal(buyer.sent.length,beforeExpired,'Expired review must not submit payment');
+  await shot(buyer.page,'purchase-03-expired-review');
+  await buyer.page.getByRole('button',{name:'Review a new purchase',exact:true}).click();
+  await waitFor(async()=>!(await buyer.page.locator('#detail-dialog').evaluate(el=>el.open)),'return to offers');
+  const freshResponse=buyer.page.waitForResponse(r=>r.url().endsWith('/v1/thot/offers/prepare'));
+  await buyer.page.locator(`[data-action="thot-buy"][data-id="${listing.id}"]`).click();
+  const fresh=await freshResponse;assert.equal(fresh.status(),200);offer=await fresh.json();evidence.offer_id=offer.id;
+  await buyer.page.getByText('Approval ready',{exact:true}).waitFor();
+  evidence.checks.push('Expired on-chain review blocked before payment; fresh explicit review reused allowance and completed the purchase.');
   phase = 'payment'; buyer.holdAfterFunding = true; await buyer.page.locator('[data-action="thot-send"]').click();
   await waitFor(async () => Number((await fixture.market.offers(offer.id)).status) === 2, 'funded authorized offer');
   const funded = await buyer.api('/v1/thot/workspace'); const receipt = funded.orders.find(o => o.id === offer.id).receipt;
@@ -171,9 +252,19 @@ try {
   assert.equal(buyer.sent.length, sends); startWorker();
   await waitFor(async () => Number((await fixture.market.offers(offer.id)).status) === 3, 'worker delivery');
   assert.equal(buyer.sent.length, sends);
-  await buyer.open('market'); await buyer.page.locator(`[data-action="thot-delivery"][data-id="${offer.id}"]`).click();
+  await buyer.page.getByText('Delivered · dispute window',{exact:true}).waitFor();
+  evidence.checks.push('Pending purchase cards refresh to delivered without a manual page reload or another transaction.');
+  await buyer.page.locator(`[data-action="thot-delivery"][data-id="${offer.id}"]`).click();
   await buyer.page.getByRole('heading', {name: 'Your licensed trace', exact: true}).waitFor();
   await shot(buyer.page, 'purchase-04-licensed-content');
+  const readerViewport = buyer.page.viewportSize();
+  await buyer.page.setViewportSize({width:390,height:844});
+  assert.equal(await buyer.page.locator('.thot-reader-terms').getAttribute('open'),null);
+  assert(await buyer.page.locator('.thot-message-content').first().isVisible());
+  await shot(buyer.page,'reader-mobile');
+  await buyer.page.locator('.thot-reader-terms summary').click();
+  assert(await buyer.page.locator('.thot-release-license').isVisible());
+  await buyer.page.setViewportSize(readerViewport);
   const licensed = await buyer.api('/v1/thot/offers/delivery', {id: offer.id});
   assert(JSON.stringify(licensed.release.content).includes('prefix every cache key with the project identifier'));
   assert.equal(digest(licensed.release.content), metadata.content_hash);
@@ -182,6 +273,14 @@ try {
   assert.equal(licensed.receipt.delivery_hash, listing.evidence_hash);
   assert.equal(digest(licensed.release.license), licensed.receipt.license_hash);
   const reopened = await buyer.api('/v1/thot/offers/delivery', {id: offer.id}); assert.deepEqual(reopened.release, licensed.release);
+  const downloadReady=buyer.page.waitForEvent('download');
+  await buyer.page.locator('[data-action="thot-download-delivery"]').click();
+  const download=await downloadReady;
+  const downloaded=JSON.parse(await readFile(await download.path(),'utf8'));
+  assert.deepEqual(downloaded.release,licensed.release);
+  assert.equal(downloaded.receipt.evidence_hash,licensed.receipt.evidence_hash);
+  assert.equal(downloaded.delivery_hash,licensed.delivery_hash);
+  evidence.checks.push('Downloaded licensed JSON matches the same buyer-scoped release and receipt.');
   await stranger.api('/v1/thot/offers/delivery', {id: offer.id}, 404);
   assert.equal((await buyer.api('/v1/thot/workspace')).orders.filter(o => o.listing_id === listing.id && o.receipt?.status > 0).length, 1);
   evidence.checks.push('Actual buyer token debit matches frozen quote; reload and delayed worker pickup retain one funded purchase.', 'Repeated licensed readback is exact; unfunded and foreign readers denied.');
@@ -221,6 +320,16 @@ try {
   await buyer.open('market');
   await buyer.page.getByText(/Completed & refunded purchases/).click();
   await buyer.page.getByText('Refund paid to buyer wallet', {exact: true}).waitFor();
+  const unpaidAttempts=buyer.page.locator('[data-unpaid-attempts]');
+  assert.equal(await unpaidAttempts.count(),1,'Expired unfunded review is retained separately');
+  assert.equal(await unpaidAttempts.getAttribute('open'),null,'Unpaid attempts start collapsed');
+  assert.equal(await buyer.page.locator('#purchases-freshness').count(),0,'Closed unpaid reviews do not poll delivery');
+  await unpaidAttempts.locator('summary').first().click();
+  const unpaidText=await unpaidAttempts.innerText();
+  assert.match(unpaidText,/No payment was confirmed for this attempt/);
+  assert.doesNotMatch(unpaidText,/AUTHORIZATION_UNAVAILABLE|0\.0000|Payment not yet confirmed/);
+  await unpaidAttempts.locator('summary').first().click();
+  evidence.checks.push('Expired unfunded review is archived as an unpaid attempt, with no zero-value settlement or pending-delivery polling; successful and refunded purchases remain accessible.');
   await shot(buyer.page, 'refund-03-refunded');
   evidence.skips.push('Wallet transport losing a submitted transaction hash is covered by focused UI tests, not this browser recording. This runner suppresses a known-hash receipt then reloads/resumes without rebroadcast.');
   evidence.status = 'PASS'; evidence.completed_at = new Date().toISOString();

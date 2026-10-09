@@ -1,8 +1,9 @@
 import {spawn,execFileSync} from 'node:child_process';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
+import type {CaptureInvocation} from './index.ts';
 
 export type CaptureDisplay={interrupted:boolean;saved:number;pending:number;syncError?:boolean;saveMsP50?:number;saveMsLast?:number;oldestPendingAt?:number;uploadBps?:number};
 export function captureLabel(state:CaptureDisplay){
@@ -28,20 +29,29 @@ export function captureTerminal(){
     state={...state,...next};if(!socket)return;
     try{tmux(['set-option','-g','status-style',state.interrupted?'bg=colour124,fg=white':'bg=colour23,fg=white']);tmux(['set-option','-g','status-format[0]',`#[bold] ${captureLabel(state)} #[default]`]);}catch{/* The child may have just exited. */}
   }
-  return {update,async run(invocation:{command:string;args:string[];env:NodeJS.ProcessEnv},cwd:string){
+  return {update,async run(invocation:CaptureInvocation,cwd:string){
     const interactive=process.stdin.isTTY&&process.stdout.isTTY&&!invocation.args.some(a=>['--print','-p','exec','--help','-h','--version'].includes(a));
-    let dir:string|undefined,child:ReturnType<typeof spawn>|undefined;
+    let dir:string|undefined,settingsDir:string|undefined,child:ReturnType<typeof spawn>|undefined;
+    const args=[...invocation.args];
     env={...invocation.env};delete env.TMUX;
     try{
+      if(invocation.privateSettings){
+        const {argumentIndex,content}=invocation.privateSettings;
+        if(!Number.isInteger(argumentIndex)||argumentIndex<1||args[argumentIndex-1]!=='--settings'||args[argumentIndex]!=='THOT_PRIVATE_SETTINGS_FILE')throw Error('CAPTURE_SETTINGS_INVALID');
+        settingsDir=await mkdtemp(join(tmpdir(),'thot-client-settings-'));
+        const path=join(settingsDir,'settings.json');
+        await writeFile(path,content,{mode:0o600,flag:'wx'});
+        args[argumentIndex]=path;
+      }
       if(interactive){
         process.stdout.write('\x1b[2J\x1b[H');
         dir=await mkdtemp(join(tmpdir(),'thot-terminal-'));socket=join(dir,'tmux.sock');
         const runner=fileURLToPath(new URL('../../../scripts/capture-terminal-child.ts',import.meta.url));
-        tmux(['new-session','-d','-s','capture','-c',cwd,process.execPath,runner,join(dir,'exit.json'),invocation.command,...invocation.args]);
+        tmux(['new-session','-d','-s','capture','-c',cwd,process.execPath,runner,join(dir,'exit.json'),invocation.command,...args]);
         tmux(['set-option','-g','status','on']);tmux(['set-option','-g','status-position','top']);tmux(['set-option','-g','prefix','None']);
         tmux(['set-option','-g','set-titles','on']);tmux(['set-option','-g','set-titles-string','THOT capture']);
         update({});child=spawn('tmux',['-S',socket,'attach-session','-t','capture'],{cwd,env,stdio:'inherit'});
-      }else{process.stderr.write(captureLabel(state)+'\n');child=spawn(invocation.command,invocation.args,{cwd,env:invocation.env,stdio:'inherit',shell:false});}
+      }else{process.stderr.write(captureLabel(state)+'\n');child=spawn(invocation.command,args,{cwd,env:invocation.env,stdio:'inherit',shell:false});}
       const stop=()=>{if(socket){try{tmux(['kill-session','-t','capture']);}catch{}}else child?.kill('SIGTERM');};
       process.on('SIGINT',stop);process.on('SIGTERM',stop);
       let code:number;
@@ -49,6 +59,14 @@ export function captureTerminal(){
       finally{process.off('SIGINT',stop);process.off('SIGTERM',stop);}
       if(dir){try{return JSON.parse(await readFile(join(dir,'exit.json'),'utf8')).code as number;}catch{return code||1;}}
       return code;
-    }finally{if(socket){try{tmux(['kill-server']);}catch{}}socket=undefined;if(dir)await rm(dir,{recursive:true,force:true});}
+    }catch{
+      // child_process errors can include argv or child stderr. Export only a
+      // fixed operational code, never provider configuration or native output.
+      throw Error('CAPTURE_CLIENT_START_FAILED');
+    }finally{
+      if(socket){try{tmux(['kill-server']);}catch{}}socket=undefined;
+      try{if(dir)await rm(dir,{recursive:true,force:true});}
+      finally{if(settingsDir)await rm(settingsDir,{recursive:true,force:true});}
+    }
   }};
 }

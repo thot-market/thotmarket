@@ -21,7 +21,8 @@
     "test:all": "node scripts/run-public-tests.mjs all",
     "check": "pnpm build && pnpm test",
     "test:thot:browser": "node scripts/record-thot-purchase.mjs --economics quoted-cost",
-    "test:thot:browser:percentage": "node scripts/record-thot-purchase.mjs --economics percentage"
+    "test:thot:browser:percentage": "node scripts/record-thot-purchase.mjs --economics percentage",
+    "rc:dry-run": "node scripts/rc-dry-run.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1135.0",

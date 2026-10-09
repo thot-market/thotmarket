@@ -13,18 +13,20 @@ recorder are reached at their native gateway URLs:
 - Recorder (`--recorder-url`): `https://ea21eee02e790a01b776070bb846e5d7e3b98b7a-4321.dstack-base-prod5.phala.network`
 
 There is no automatic default; pass the target explicitly (or save it, below). Capturing and
-saving to your private vault works today. **Marketplace purchases are paused, so nothing here
-implies a sale or payout.** Testnet is a separate explicit opt-in, never a default.
+saving privately do not authorize a sale or guarantee a payout. Check marketplace availability
+in the app before purchasing. Testnet is a separate explicit opt-in, never a default.
 
 ```sh
 # 1. Check local prerequisites (installs nothing, opens no account, makes no model call)
-thot setup codex          # or: thot setup claude
+thot setup codex          # or: thot setup claude, thot setup zai
 
 # 2. From your project, capture a session to the production vault via the production recorder
 thot codex \
   --thot-url https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network \
   --recorder-url https://ea21eee02e790a01b776070bb846e5d7e3b98b7a-4321.dstack-base-prod5.phala.network
 # or: thot claude --thot-url <same app URL> --recorder-url <same recorder URL>
+# or Claude Code on Z.AI (GLM) with key auth — set the token for that child only:
+# ANTHROPIC_AUTH_TOKEN=<Z.AI key> thot zai --thot-url <same app URL> --recorder-url <same recorder URL>
 
 thot --help
 ```

@@ -5,7 +5,8 @@ import {canonicalHash} from '../../../protocol/src/canonical.ts';
 import type {CaptureTiming} from '../timing.ts';
 import {CAPTURE_REQUEST_BYTES} from '../limits.ts';
 import {verifyRecorder,verifySeal,type RecorderPolicy} from './attestation.ts';
-export async function startTeeCapture(options:{client:'codex'|'claude';captureId:string;uploadToken:string;policy:RecorderPolicy;onTiming?:CaptureTiming;onPart?:(part:any)=>Promise<void>;onCheckpoint?:(checkpoint:any)=>Promise<void>;onState?:(state:'recording'|'interrupted',detail?:string)=>void},verifyIdentity:(attestation:any,policy:RecorderPolicy)=>Promise<unknown>=verifyRecorder,transport:typeof fetch=fetch){
+import type {CaptureClient} from '../index.ts';
+export async function startTeeCapture(options:{client:CaptureClient;captureId:string;uploadToken:string;policy:RecorderPolicy;onTiming?:CaptureTiming;onPart?:(part:any)=>Promise<void>;onCheckpoint?:(checkpoint:any)=>Promise<void>;onState?:(state:'recording'|'interrupted',detail?:string)=>void},verifyIdentity:(attestation:any,policy:RecorderPolicy)=>Promise<unknown>=verifyRecorder,transport:typeof fetch=fetch){
  const timing=options.onTiming??(()=>{});let requestSequence=0;
  const origin=new URL(options.policy.url);if(origin.protocol!=='https:'||origin.pathname!=='/')throw Error('INVALID_RECORDER_URL');
  const attRes=await transport(origin.origin+'/attestation',{redirect:'error',signal:AbortSignal.timeout(30_000)});if(!attRes.ok)throw Error('RECORDER_UNAVAILABLE');

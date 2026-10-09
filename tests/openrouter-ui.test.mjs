@@ -1,3 +1,4 @@
+import {renderOpenRouterUsage} from '../apps/dashboard/openrouter-usage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -35,9 +36,9 @@ function fixture(overrides = {}) {
     if (overrides.status) return overrides.status(path, options); return structuredClone(status);
   };
   const escape = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-  const context = { location: { origin: 'https://thot.example.test' }, navigator: { clipboard: { async writeText(value) { clipboard.push(value); } } }, Date, Error, console: { log() { throw Error('credentials must never be logged'); } }, globalThis: {} };
+  const context = { renderOpenRouterUsage, location: { origin: 'https://thot.example.test' }, navigator: { clipboard: { async writeText(value) { clipboard.push(value); } } }, Date, Error, console: { log() { throw Error('credentials must never be logged'); } }, globalThis: {} };
   for (const storage of ['localStorage', 'sessionStorage']) Object.defineProperty(context, storage, { get() { throw Error('credentials must never enter browser persistence'); } });
-  runInNewContext(source.replace('export function createOpenRouterUI', 'function createOpenRouterUI') + '\nglobalThis.factory = createOpenRouterUI;', context);
+  runInNewContext(source.replace(/^import .*;\r?\n/gm,'').replace('export function createOpenRouterUI', 'function createOpenRouterUI') + '\nglobalThis.factory = createOpenRouterUI;', context);
   const ui = context.globalThis.factory({ state, api, openDialog, dialog, escape, toast: value => messages.push(value), refresh: async () => {}, getProvider:()=>overrides.provider });
   const form = () => fields.get('#openrouter-connect-form');
   const fill = () => { fields.get('#openrouter-api-key').value = 'sk-or-provider_private_fixture'; fields.get('#openrouter-recording-consent').checked = true; return form(); };
@@ -212,4 +213,15 @@ test('wallet revocation rejects a transaction targeting any other market operati
  a.state.thot={wallet,capabilities:{stream_sales:true,chain_id:31337,market}};
  await a.ui.handle('openrouter-open');await assert.rejects(a.ui.handle('openrouter-chain-revoke',{dataset:{id:'stream:one'}}),/does not match this THOT market/);
  assert.equal(walletCalls.length,0);
+});
+
+
+test('usage view reads existing reports without invoking connection or wallet writes',async()=>{
+ const a=fixture();a.status.requests=[{model:'synthetic/model',status:'COMPLETED',created_at:'2026-10-07T00:00:00Z',usage:{prompt_tokens:123,completion_tokens:45,total_tokens:168,cost:0.0123}}];
+ await a.ui.handle('openrouter-usage');assert.equal(a.dialogs.at(-1).title,'Model usage & cost');assert.match(a.dialogs.at(-1).html,/123/);assert.match(a.dialogs.at(-1).html,/0.0123/);assert.deepEqual(a.calls.map(c=>c.path),['/v1/contributor/openrouter']);assert.ok(a.calls.every(c=>!c.options.method));
+ assert.doesNotMatch(a.dialogs.at(-1).html,/openrouter-api-key|openrouter-proxy/);
+});
+
+test('usage response for an old identity cannot replace the current dialog',async()=>{
+ let resolve;const pending=new Promise(r=>resolve=r);const a=fixture({status:()=>pending});const request=a.ui.handle('openrouter-usage');a.state.actor={id:'other'};a.state.generation++;resolve({requests:[{model:'private-model',usage:{cost:1}}]});await assert.rejects(request,/account changed/);assert.equal(a.dialogs.length,0);
 });

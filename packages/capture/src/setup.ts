@@ -45,13 +45,19 @@ export async function probe(command:string,args:string[],cwd?:string) {
   });
 }
 export type SetupCheck={id:string;label:string;ok:boolean;next:string};
-export async function readiness(target:'codex'|'claude'|'robinhood') {
+export async function readiness(target:'codex'|'claude'|'zai'|'robinhood') {
   const qvl=await executable(process.env.TV_DCAP_QVL??'dcap-qvl');
   const python=await executable(process.env.THOT_CAPTURE_PYTHON??process.env.THOT_CAPTURE_PYTHON??'python3');
   const checks:SetupCheck[]=[{id:'node',label:'Node 24 or later',ok:Number(process.versions.node.split('.')[0])>=24,next:'Install Node 24 or later, then rerun this command.'}];
   if(target!=='robinhood') {
-    const client=await executable(target);
+    const client=await executable(target==='zai'?'claude':target);
     checks.push({id:'client',label:target==='codex'?'Codex installed':'Claude Code installed',ok:!!client,next:`Install ${target==='codex'?'Codex':'Claude Code'}, then rerun this command.`});
+  }
+  if(target==='zai') {
+    // The Z.AI key is passed per child through the environment; no global
+    // configuration or login file is read or changed for this check.
+    const token=process.env.ANTHROPIC_AUTH_TOKEN;
+    checks.push({id:'zai-token',label:'Z.AI token in ANTHROPIC_AUTH_TOKEN',ok:typeof token==='string'&&token.length>0,next:'Set ANTHROPIC_AUTH_TOKEN to your Z.AI API token for this command (for example in a wrapper script), then rerun this command.'});
   }
   const pythonOK=!!python&&await probe(python,['-c',target==='robinhood'?'import browser_capture':'import json, ssl'],target==='robinhood'?fileURLToPath(new URL('../../../trace-vault/',import.meta.url)):undefined);
   checks.push({id:'python',label:target==='robinhood'?'Python account verifier dependencies':'Python 3',ok:pythonOK,next:target==='robinhood'?'Install Python 3 with cryptography and certifi. See the first-time setup guide.':'Install Python 3, then rerun this command.'});

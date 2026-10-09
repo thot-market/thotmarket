@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import {readiness} from '../packages/capture/src/setup.ts';
 const target=process.argv[2];
-if(!['codex','claude','robinhood'].includes(target)){
-  console.log('Usage: thot-setup codex|claude|robinhood\n\nChecks local prerequisites without opening accounts, reading login files, or making model calls.');process.exit(target==='--help'?0:1);
+if(!['codex','claude','zai','robinhood'].includes(target)){
+  console.log('Usage: thot-setup codex|claude|zai|robinhood\n\nChecks local prerequisites without opening accounts, reading login files, or making model calls.');process.exit(target==='--help'?0:1);
 }
-const result=await readiness(target as 'codex'|'claude'|'robinhood');
+const result=await readiness(target as 'codex'|'claude'|'zai'|'robinhood');
 for(const check of result.checks)console.log(`${check.ok?'✓':'✕'} ${check.label}`);
 const missing=result.checks.find(c=>!c.ok);
 if(missing){console.log('\nNext: '+missing.next);process.exitCode=1;}

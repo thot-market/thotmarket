@@ -1,5 +1,6 @@
 import { canonicalJson } from '../../protocol/src/index.ts';
 import { ensure, type Document } from '../../storage/src/index.ts';
+import type { CaptureClient } from '../../capture/src/index.ts';
 
 const plain=(v:unknown):v is Document=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const bounded=(v:unknown,code:string)=>{ensure(typeof v==='string'&&Buffer.byteLength(v)<=8_000_000,code);return v;};
@@ -115,19 +116,19 @@ function codex(request:Document,responseBytes:Buffer,issues?:Document[]) {
   ensure(turns.some(t=>t.role==='assistant'),'EMPTY_PROXY_RESPONSE');return {turns,context_turn_count};
 }
 
-export function normalizeProxyExchange(client:'codex'|'claude',requestBytes:Buffer,responseBytes:Buffer) {
-  const request=json(requestBytes,'INVALID_PROXY_REQUEST');return {turns:(client==='claude'?claude(request,responseBytes):codex(request,responseBytes)).turns};
+export function normalizeProxyExchange(client:CaptureClient,requestBytes:Buffer,responseBytes:Buffer) {
+  const request=json(requestBytes,'INVALID_PROXY_REQUEST');return {turns:(client==='codex'?codex(request,responseBytes):claude(request,responseBytes)).turns};
 }
 
 /** Preserve readable portions without guessing the meaning of unfamiliar blocks. */
-export function projectProxyExchange(client:'codex'|'claude',requestBytes:Buffer,responseBytes:Buffer){
+export function projectProxyExchange(client:CaptureClient,requestBytes:Buffer,responseBytes:Buffer){
   const issues:Document[]=[],request=json(requestBytes,'INVALID_PROXY_REQUEST');
-  const result=client==='claude'?claude(request,responseBytes,issues):codex(request,responseBytes,issues);
+  const result=client==='codex'?codex(request,responseBytes,issues):claude(request,responseBytes,issues);
   return {...result,issues};
 }
 
 /** Requested aliases are not evidence of the model that returned a completion. */
-export function proxyModelIdentity(client:'codex'|'claude',requestBytes:Buffer,responseBytes:Buffer){
+export function proxyModelIdentity(client:CaptureClient,requestBytes:Buffer,responseBytes:Buffer){
   const request=json(requestBytes,'INVALID_PROXY_REQUEST');
   const safe=(value:unknown):string|null=>typeof value==='string'&&value.length>0&&value.length<=200&&!/[\u0000-\u001f\u007f]/.test(value)?value:null;
   let returned:string|null=null;

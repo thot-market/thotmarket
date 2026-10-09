@@ -250,7 +250,131 @@ body{background:var(--paper)}
 .operations-heading { display: block; margin-bottom: 1.5rem; }
 .operations-heading h1 { margin: .25rem 0 .75rem; }
 .operations-heading > p { max-width: 70ch; }
+.thot-section-nav { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; padding: 1rem 0; margin-bottom: 2rem; border-block: 1px solid var(--line); }
+.thot-section-nav a { display: inline-flex; align-items: center; gap: .6rem; min-height: 44px; color: var(--navy); text-underline-offset: .25rem; font-size: .875rem; }
+.thot-section-nav span { font-variant-numeric: tabular-nums; color: var(--muted); }
+#thot-purchases, #thot-available, #thot-history { scroll-margin-top: 1.5rem; }
+.thot-listings { border-top: 1px solid var(--line); margin-bottom: 2rem; }
+.thot-listing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(14rem, .45fr); gap: 2rem; padding: 1.75rem 0; border-bottom: 1px solid var(--line); }
+.thot-listing h3 { margin: 0 0 .75rem; font-size: 1.125rem; line-height: 1.4; overflow-wrap: anywhere; }
+.thot-listing p { max-width: 65ch; line-height: 1.65; }
+.thot-listing-body, .thot-listing-purchase { min-width: 0; overflow-wrap: anywhere; }
+.thot-listing-purchase { display: flex; flex-direction: column; align-items: flex-start; gap: .6rem; }
+.thot-listing-purchase p { margin: 0; }
+.thot-listing-price { font-size: 1.25rem; color: var(--navy); font-variant-numeric: tabular-nums; }
+.thot-listing-purchase .button { width: 100%; margin: 0; }
+.thot-listing-purchase details { width: 100%; margin: .25rem 0; }
+.thot-governance .content-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.thot-governance .panel .button { display: block; }
+.thot-governance-queue { margin: 2rem 0 2.5rem; }
+.thot-operation-list { border-top: 1px solid var(--line); }
+.thot-operation { padding: 1.5rem 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.thot-operation-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .75rem; }
+.thot-operation-heading h3 { margin: 0; font-size: 1.125rem; }
+.thot-operation .button { margin: .5rem .5rem .5rem 0; }
+.thot-operation p { max-width: 70ch; overflow-wrap: anywhere; line-height: 1.65; }
+.thot-governance-settings { margin: 1rem 0 2.5rem; border-block: 1px solid var(--line); }
+.thot-governance-settings > summary { padding: 1.25rem .25rem; font-weight: 600; color: var(--navy); }
+.thot-governance-settings > summary span { display: block; font-size: .8125rem; font-weight: 400; color: var(--muted); margin: .5rem 0 0 1rem; }
+.thot-workspace summary { cursor: pointer; min-height: 44px; padding-block: .65rem; line-height: 1.5; }
+.thot-workspace summary:focus-visible { outline: 3px solid var(--olive); outline-offset: 3px; }
+.thot-workspace textarea { display: block; width: 100%; min-height: 7rem; padding: .75rem; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: .5rem; resize: vertical; }
+.thot-empty { padding: 1.5rem 0; color: var(--muted); line-height: 1.65; }
+.thot-workspace .cards > *, .thot-workspace .content-grid > * { min-width: 0; }
+@media (max-width: 680px) {
+  .thot-governance .content-grid { grid-template-columns: minmax(0, 1fr); }
+  .thot-listing { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .thot-listing-purchase { padding: 1rem; background: var(--surface); border-radius: .5rem; }
+  .thot-operation .button { display: block; width: 100%; margin-inline: 0; }
+  .thot-section-nav { gap: .5rem 1rem; }
+}
 .environment-cards .meta-pair { font-size: .9rem; }
 .environment-cards > .panel { padding: 1.25rem; overflow: visible; }
 .environment-cards .meta-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .environment-cards .meta-pair > * { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+
+/* Shared presentation for analytics and treasury; no transaction behavior. */
+.analytics-workspace > .panel, .analytics-workspace.panel { padding: 24px; margin-bottom: 20px; }
+.analytics-workspace > .section-head { align-items: flex-start; margin-bottom: 24px; }
+.analytics-workspace h1 { font-size: clamp(28px, 3vw, 42px); line-height: 1.15; margin: 8px 0 12px; }
+.analytics-workspace .section-head p { font-size: 14px; line-height: 1.6; }
+.analytics-workspace .panel > h2, .analytics-workspace .panel > h3 { margin-top: 0; }
+.analytics-workspace .panel p { font-size: 14px; line-height: 1.7; max-width: 75ch; }
+.analytics-workspace .panel .legal-note { font-size: 12px; }
+.analytics-workspace .library-toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+.analytics-empty { padding: 22px 0; }
+.analytics-empty h2 { font-size: 22px; margin: 0 0 8px; }
+.analytics-empty p { margin: 0; color: var(--muted); }
+.analytics-method { border-top: 1px solid var(--line); padding-top: 16px; margin-top: 16px; }
+.analytics-workspace summary, .thot-workspace summary { cursor: pointer; font-size: 14px; line-height: 1.6; }
+.analytics-workspace .check { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; margin: 20px 0; }
+.analytics-workspace .check input { flex: 0 0 auto; margin: 4px 0 0; width: 18px; height: 18px; accent-color: var(--navy); }
+.analytics-workspace .field { max-width: 480px; margin-bottom: 20px; }
+.thot-workspace .metric { min-width: 0; }
+.thot-workspace .metric strong .thot-metric-number { overflow-wrap: normal; font-variant-numeric: tabular-nums; font-size: clamp(18px, 1.9vw, 28px); }
+.thot-workspace .thot-metric-unit { display: block; font: 500 13px/1.5 sans-serif; color: var(--muted); margin-top: 4px; }
+.thot-workspace .panel textarea { display: block; width: 100%; max-width: 640px; min-height: 110px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; line-height: 1.6; resize: vertical; margin-bottom: 20px; }
+.thot-workspace .panel > p { font-size: 14px; line-height: 1.7; max-width: 80ch; }
+.thot-workspace .thot-filters { max-width: none; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 8px 24px; }
+.thot-workspace .thot-filters > div { min-width: 0; }
+.thot-workspace .thot-filters input { max-width: none; font-size: 14px; font-variant-numeric: tabular-nums; }
+@media(max-width: 900px) { .thot-workspace > .metrics { grid-template-columns: 1fr; } }
+@media(max-width: 680px) {
+ .analytics-workspace > .panel, .analytics-workspace.panel { padding: 18px; }
+ .analytics-workspace > .section-head { flex-wrap: wrap; }
+ .analytics-workspace .library-toolbar .button { flex: 1; white-space: normal; }
+ .thot-workspace .thot-filters { grid-template-columns: 1fr; }
+}
+
+/* Keep operational pages compact inside the desktop app shell. */
+.thot-workspace > .section-head { align-items: flex-start; margin-bottom: 20px; }
+.thot-workspace > .section-head h1 { font-size: clamp(28px, 2.5vw, 36px); line-height: 1.15; letter-spacing: -.7px; margin: 6px 0 12px; }
+.thot-workspace > .section-head > div { flex: 1; min-width: 240px; }
+.thot-workspace > .section-head p { font-size: 14px; line-height: 1.6; margin-bottom: 0; }
+.thot-workspace .panel h2 { font-size: 22px; line-height: 1.3; margin-bottom: 12px; }
+.thot-workspace .metric { padding: 20px; }
+.thot-workspace .metric strong { margin: 10px 0 0; line-height: 1.2; }
+.thot-workspace .metric p { margin-bottom: 0; }
+.thot-workspace .panel label { margin-top: 16px; }
+.thot-workspace .panel input, .thot-workspace .panel select { min-height: 44px; }
+@media (min-width: 901px) { .thot-workspace > .section-head { flex-wrap: nowrap; } }
+
+/* Wallet context stays visible while the user reviews a payment. */
+.wallet-summary{display:flex;align-items:center;gap:18px;margin-left:auto;padding:6px 14px;border:1px solid var(--line,#d9decd);border-radius:12px;background:var(--paper,#fffdf4)}
+.wallet-summary[hidden]{display:none}
+.wallet-summary>span,.wallet-summary-identity{display:flex;flex-direction:column;gap:2px}
+.wallet-summary small,.checkout-summary small{font-size:12px;color:#627057;display:block}
+.wallet-summary strong{font-size:16px}.wallet-summary-identity{font-size:13px}
+.checkout-summary{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:18px;border-radius:12px;background:#edf1e5;margin-bottom:20px}
+.checkout-summary strong{font-size:22px}.wallet-progress{list-style:none;padding:0;display:grid;gap:10px;margin:20px 0}
+.wallet-progress li{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid #d9decd;border-radius:10px}
+.wallet-progress li.current{border-color:#627c40;background:#f0f3e9}.wallet-progress li.complete{color:#376033}
+.wallet-progress li span{font-size:13px}.wallet-replacement{margin:14px 0}.wallet-replacement input{width:100%;box-sizing:border-box;margin:8px 0}
+@media(max-width:760px){.topbar{flex-wrap:wrap;gap:10px}.wallet-summary{order:3;width:100%;margin:0;justify-content:space-between}.checkout-summary{grid-template-columns:1fr}.wallet-progress li{flex-direction:column;gap:4px}}
+
+/* Keep the next checkout action visible, including narrow wallet browsers. */
+#detail-dialog:has([data-wallet-progress]){overflow:hidden}
+#detail-dialog:has([data-wallet-progress]) #dialog-content{display:flex;flex-direction:column;max-height:calc(90dvh - 2px)}
+#detail-dialog:has([data-wallet-progress]) .dialog-head,#detail-dialog:has([data-wallet-progress]) .dialog-footer{flex-shrink:0}
+#detail-dialog:has([data-wallet-progress]) .dialog-body{overflow:auto;min-height:0}
+.checkout-status{padding:12px 14px;border-radius:10px;background:#edf2e6;font-size:14px;line-height:1.6}
+.wallet-transaction code{display:block;overflow-wrap:anywhere;font-size:12px;padding:12px 0}
+.wallet-replacement input{min-height:44px;padding:10px;border:1px solid #cdd5c7;border-radius:8px;font:13px ui-monospace,monospace;background:#fffef9;color:var(--ink)}
+.wallet-progress li strong{font-size:14px}.wallet-progress li.complete strong::before{content:'✓ ';color:#376033}
+@media(max-width:600px){#detail-dialog:has([data-wallet-progress]) .dialog-head h2{font-size:24px}#detail-dialog:has([data-wallet-progress]) .dialog-footer .button{width:100%;white-space:normal}#detail-dialog:has([data-wallet-progress]) .dialog-body{padding:18px}.checkout-summary{gap:12px}.checkout-summary strong{font-size:24px}.wallet-progress li{padding:12px}}
+
+@media(max-width:760px){.topbar{height:auto;min-height:81px;padding-top:12px;padding-bottom:12px}.wallet-summary>span{min-width:0}.wallet-summary strong{overflow-wrap:anywhere}.wallet-summary-identity{flex-shrink:0}}
+
+/* Sale preparation: explicit fields and independent consent controls. */
+.thot-sale-form{display:grid;gap:20px;min-width:0}.thot-sale-form p{margin:0}.thot-sale-intro{color:var(--muted);font-size:14px}.thot-sale-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(130px,1fr);gap:20px}.thot-sale-field{display:grid;gap:8px;min-width:0}.thot-sale-field>label{font-weight:600}.thot-sale-field label span{font-weight:400}.thot-sale-form input:not([type=checkbox]),.thot-sale-form textarea,.thot-sale-form select{display:block;width:100%;min-width:0;border:1px solid #bac5b1;border-radius:9px;background:#fffdf7;color:#202a21;padding:12px 14px;line-height:1.5;min-height:46px}.thot-sale-form textarea{resize:vertical;min-height:130px}.thot-field-help{font-size:13px;line-height:1.55;color:#5d6958}.thot-sale-estimate{padding:14px 16px;background:#edf1e5;border-radius:9px;font-size:14px;line-height:1.6}.thot-consent{display:flex;align-items:flex-start;gap:12px;line-height:1.55;cursor:pointer}.thot-consent input[type=checkbox]{flex:0 0 auto;width:19px;height:19px;margin:3px 0 0;accent-color:#263f22}.thot-sale-optional{border-top:1px solid #d7ddcd;padding-top:18px;display:grid;gap:8px}.thot-sale-optional>p{padding-left:31px}.thot-sale-details,.thot-reader-terms{border-top:1px solid #d7ddcd;padding-top:14px;overflow-wrap:anywhere}.thot-sale-details summary,.thot-reader-terms summary{cursor:pointer;font-weight:550;padding:4px 0}.thot-sale-details p{margin-top:12px;font-size:14px;line-height:1.6}.thot-reader-terms{margin-bottom:18px}.thot-reader-terms .thot-release-license{margin-top:14px}@media(max-width:600px){.thot-sale-fields{grid-template-columns:minmax(0,1fr);gap:16px}.thot-sale-form{gap:18px}.thot-sale-form input:not([type=checkbox]),.thot-sale-form textarea{font-size:16px}}
+#detail-dialog:has(.thot-sale-form){overflow:hidden}
+#detail-dialog:has(.thot-sale-form) #dialog-content{display:flex;flex-direction:column;max-height:calc(90dvh - 2px)}
+#detail-dialog:has(.thot-sale-form) .dialog-head,#detail-dialog:has(.thot-sale-form) .dialog-footer{flex-shrink:0}
+#detail-dialog:has(.thot-sale-form) .dialog-body{overflow:auto;min-height:0}
+@media(max-width:600px){#detail-dialog:has(.thot-sale-form) .dialog-body{padding:18px}#detail-dialog:has(.thot-sale-form) .dialog-head h2{font-size:24px}#detail-dialog:has(.thot-sale-form) .dialog-footer .button{width:100%;white-space:normal}}
+
+.thot-sale-form #thot-price-share{padding:14px 16px}
+/* Read-only provider usage; cards remain readable on narrow screens. */
+.connection-actions{display:flex;gap:10px;flex-wrap:wrap}.openrouter-usage{display:grid;gap:20px;min-width:0}.openrouter-usage p{margin:0;line-height:1.6}.usage-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.usage-summary>div{border:1px solid #d5ddcd;border-radius:12px;padding:16px;background:#eef2e7;min-width:0}.usage-summary strong{display:block;font-size:23px;line-height:1.4;overflow-wrap:anywhere}.usage-summary small,.usage-scope,.usage-missing{font-size:13px;color:#5d6958}.usage-request-list{display:grid;gap:12px}.usage-request{border:1px solid #d5ddcd;border-radius:12px;padding:16px;min-width:0}.usage-request-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;overflow-wrap:anywhere}.usage-request-head h3{margin:0;font-size:16px}.usage-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 0}.usage-values>div{min-width:0;overflow-wrap:anywhere}.usage-label,.usage-coverage{display:block}.usage-label{font-size:13px;color:#5d6958}.usage-values strong{display:block;margin-top:3px;font-size:16px}.usage-request-model small{display:block;font-size:12px;color:#5d6958}.usage-request-head p{font-size:13px;color:#5d6958}.usage-status{font-size:12px;color:#385c33}.openrouter-usage .usage-metric.usage-missing{margin-top:0}.openrouter-usage .usage-missing{margin-top:10px}.openrouter-usage h3{margin-bottom:0}#detail-dialog:has(.openrouter-usage){overflow:hidden}#detail-dialog:has(.openrouter-usage) #dialog-content{display:flex;flex-direction:column;max-height:calc(90dvh - 2px)}#detail-dialog:has(.openrouter-usage) .dialog-head,#detail-dialog:has(.openrouter-usage) .dialog-footer{flex-shrink:0}#detail-dialog:has(.openrouter-usage) .dialog-body{overflow:auto;min-height:0}@media(max-width:600px){.usage-summary{grid-template-columns:minmax(0,1fr)}.usage-summary>div{padding:12px 14px}.usage-summary strong{font-size:22px}.usage-values{grid-template-columns:repeat(2,minmax(0,1fr))}#detail-dialog:has(.openrouter-usage) .dialog-body{padding:18px}#detail-dialog:has(.openrouter-usage) .dialog-head h2{font-size:24px}}
+
+.openrouter-usage details summary{cursor:pointer}.openrouter-usage details p{margin-top:8px}

@@ -25,7 +25,7 @@ function fixture(t,{concurrent=true,role='buyer_admin',isOwner=true,reserveBuyer
 test('concurrent Treasury exposes separate budgets and lifecycle controls without legacy campaign controls',t=>{
  const f=fixture(t),html=f.ui.samplingHTML();
  assert.match(html,/Create an acquisition campaign/);assert.match(html,/value="50000000"/);assert.match(html,/value="90"/);
- assert.match(html,/Several campaigns can run at once/);assert.match(html,/Unspent allowance carries forward/);assert.match(html,/no independent-demand match/);
+ assert.match(html,/Several campaigns can run at once/);assert.match(html,/Unspent allowance carries forward/);assert.match(html,/You choose which traces to buy/);
  assert.match(html,/thot-gov-pause_campaign" data-id="1"/);assert.match(html,/thot-gov-resume_campaign" data-id="2"/);
  assert.match(html,/thot-gov-expire_campaign" data-id="4"/);assert.doesNotMatch(html,/thot-gov-(?:pause|resume|cancel)_campaign" data-id="5"/);
  assert.doesNotMatch(html,/thot-gov-start_campaign|thot-gov-queue_campaign|Successor reserve|5000.*Total budget/);

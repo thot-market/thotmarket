@@ -63,7 +63,7 @@ export class PrivacyIntegrations implements PrivacyFacade {
       const source=bundle as Document;
       ensure(Object.keys(source).every(k=>['format','text'].includes(k))&&typeof source.text==='string','INVALID_HISTORY_BUNDLE');
       const parsed=parseCodingSessionJsonl(source.text);
-      importedModels=parsed.model_history;importedModel={source:parsed.source.format,requested_model:null,returned_model:null,claimed_model:parsed.model_history.at(-1)?.claimed_model??null,provider_name:null,capture_status:'IMPORTED_UNVERIFIED',evidence:'user_supplied'};
+      importedModels=parsed.model_history;importedModel={source:parsed.source.format,requested_model:null,returned_model:null,claimed_model:parsed.model_history.at(-1)?.claimed_model??null,provider_name:null,...(parsed.source.upstream?{upstream:parsed.source.upstream}:{}),capture_status:'IMPORTED_UNVERIFIED',evidence:'user_supplied'};
       const now=this.clock().toISOString();
       result={trace:parsed.trace,normalizedReceipt:{schema_version:'trace.provenance/1' as const,receipt_id:uuidv7(),trace_id:traceId,path:'legacy_import' as const,confidence_tier:'P0_OPERATOR' as const,
         temporal:{observed_start:now,observed_end:now},commitments:{raw_trace_hash:canonicalHash(parsed.trace),source_bundle_hash:canonicalHash(bundle)},

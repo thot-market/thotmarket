@@ -144,7 +144,7 @@ export async function createTeeRecorder(options:{authorize:(capture:any)=>Promis
         try{
           body=await json(req);
           const input=body.value,key=channelKey(channel.privateKey,input.peer),v=decrypt(key,input.data,'open:'+input.nonce);
-          if(!/^[a-zA-Z0-9-]{16,80}$/.test(v.capture_id)||!['codex','claude'].includes(v.client)||typeof v.upload_token!=='string')throw Error('INVALID_SESSION');
+          if(!/^[a-zA-Z0-9-]{16,80}$/.test(v.capture_id)||!['codex','claude','zai'].includes(v.client)||typeof v.upload_token!=='string')throw Error('INVALID_SESSION');
           const requestedCaptureId:string=v.capture_id;captureId=requestedCaptureId;
           if(captures.has(requestedCaptureId))throw Error('CAPTURE_AUTHORIZATION_REJECTED');
           // Reserve the capture identity across authorization and proxy startup.

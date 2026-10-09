@@ -35,4 +35,8 @@ COPY deploy/thot-config.cvm.json deploy/thot-config.trade-candidate.example.json
 RUN cd trace-vault && python3 -c "import robinhood_link" && /usr/local/bin/dcap-qvl --help >/dev/null && mkdir -m 0700 /data
 ENV THOT_BIND=0.0.0.0 THOT_DATA_DIR=/data THOT_ROBINHOOD_CONFIG_FILE=/app/deploy/thot-config.cvm.json PYTHONDONTWRITEBYTECODE=1
 EXPOSE 4318
-CMD ["sh","-c","node scripts/cvm-prestart.ts && exec node apps/api/server.ts"]
+# The cold prestart snapshot is an explicit, env-gated migration step: the
+# script asserts THOT_CVM_PRE_MIGRATION_SNAPSHOT=true when run directly, so an
+# ungated invocation here would abort boot (and, with restart: unless-stopped,
+# crash-loop) before the API server ever starts.
+CMD ["sh","-c","if [ \"$THOT_CVM_PRE_MIGRATION_SNAPSHOT\" = true ]; then node scripts/cvm-prestart.ts || exit 1; fi; exec node apps/api/server.ts"]

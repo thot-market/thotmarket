@@ -39,7 +39,7 @@ export async function projectCapture(service:ThotService,captureId:string,root:s
     const descriptors=multipart?bundle.parts:bundle.exchanges;
     for(const descriptor of descriptors.slice(through)){
       const part=await exchange(capture,descriptor,multipart,stage.open);
-      if(!part.complete||part.status<200||part.status>=300||new URL(part.upstream+part.path).pathname!==(bundle.client==='claude'?'/v1/messages':'/backend-api/codex/responses'))continue;
+      if(!part.complete||part.status<200||part.status>=300||new URL(part.upstream+part.path).pathname!==(bundle.client==='codex'?'/backend-api/codex/responses':'/v1/messages'))continue;
       try{
         const request=requestBytes(part),parsed=JSON.parse(request.toString());
         const nativeKey=nativeConversationKey(capture.owner_id,bundle.client,parsed);if(nativeKey)nativeKeys.add(nativeKey);

@@ -18,10 +18,10 @@ import {captureTiming} from '../packages/capture/src/timing.ts';
 const argv=process.argv.slice(2);
 const timing=captureTiming();timing.emit('helper_started');
 if(argv.includes('--help')||argv.includes('-h')){
-  console.log('Usage: thot-capture codex|claude [--thot-url URL] [--recorder-url URL] [--reference-policy FILE] [--require-reference] [--project DIR] [-- CLI arguments]\n       thot-capture --retry CAPTURE_ID\n       thot-capture --export CAPTURE_ID --output NEW_DIRECTORY\n       thot-capture --disconnect codex|claude\n\nUses your existing CLI login. Thot opens your browser once to connect this tool. Returning captures reuse it.\nWork normally; signed checkpoints save privately while you work. Encrypted local copies are kept after saving.\nExport writes private plaintext files for independent inspection. Keep them private.\nUse --local-retention until-saved to reclaim local bodies after successful save; default: keep.\nA visible bar shows what is saved and what is pending locally.\nAPI selection: --thot-url, THOT_URL, saved configuration. No production default is configured yet.\nRecorder selection: reviewed reference policy or explicit --recorder-url / THOT_RECORDER_URL. Strict reference checks use --require-reference.');
+  console.log('Usage: thot-capture codex|claude|zai [--thot-url URL] [--recorder-url URL] [--reference-policy FILE] [--require-reference] [--project DIR] [-- CLI arguments]\n       thot-capture --retry CAPTURE_ID\n       thot-capture --export CAPTURE_ID --output NEW_DIRECTORY\n       thot-capture --disconnect codex|claude|zai\n\nUses your existing CLI login. Thot opens your browser once to connect this tool. Returning captures reuse it.\nzai runs Claude Code against Z.AI with key auth: set ANTHROPIC_AUTH_TOKEN for that child.\nWork normally; signed checkpoints save privately while you work. Encrypted local copies are kept after saving.\nExport writes private plaintext files for independent inspection. Keep them private.\nUse --local-retention until-saved to reclaim local bodies after successful save; default: keep.\nA visible bar shows what is saved and what is pending locally.\nAPI selection: --thot-url, THOT_URL, saved configuration. No production default is configured yet.\nRecorder selection: reviewed reference policy or explicit --recorder-url / THOT_RECORDER_URL. Strict reference checks use --require-reference.');
   process.exit(0);
 }
-if(['codex','claude'].includes(argv[0]))argv.splice(0,1,'--client',argv[0]);
+if(['codex','claude','zai'].includes(argv[0]))argv.splice(0,1,'--client',argv[0]);
 const split=argv.indexOf('--'),flags=split<0?argv:argv.slice(0,split),clientArgs=split<0?[]:argv.slice(split+1);
 const requireReference=flags.includes('--require-reference');
 if(requireReference)flags.splice(flags.indexOf('--require-reference'),1);
@@ -44,7 +44,7 @@ if(exportId){
   const result=await exportLocalCapture(join(stateRoot,exportId),resolve(params.get('--output')!),collateral);
   process.stdout.write('Private plaintext export: '+result.directory+'\nVerify independently: node '+JSON.stringify(join(result.directory,'verify.mjs'))+'\nHardware attestation is included when available; the basic verifier checks integrity and signatures only.\n');
 }else if(disconnect){
-  if(!['codex','claude'].includes(disconnect))throw Error('Choose codex or claude to disconnect.');
+  if(!['codex','claude','zai'].includes(disconnect))throw Error('Choose codex, claude or zai to disconnect.');
   const origin=await selectedOrigin();
   await disconnectCapture(connectionRoot,origin,disconnect as CaptureClient);process.stdout.write('This tool is disconnected from Thot. Saved conversations remain in your vault. New automatic listings are stopped; use Connections to confirm wallet revocation of prepared unfunded offers.\n');
 }else if(retry){
@@ -54,7 +54,7 @@ if(exportId){
   const sync=await captureSync(pending,dir);
   try{if(final)savedMessage(pending.origin,await sync.finish(pending));else{await sync.flush();process.stdout.write('Last signed checkpoint saved. The interrupted interval after it is not claimed as captured.\n'+pending.origin+'\n');}}finally{sync.close();}
 }else{
-  const client=params.get('--client') as CaptureClient;if(!['codex','claude'].includes(client))throw new Error('Choose --client codex or --client claude.');
+  const client=params.get('--client') as CaptureClient;if(!['codex','claude','zai'].includes(client))throw new Error('Choose --client codex, --client claude or --client zai.');
   const origin=await selectedOrigin(),project=resolve(params.get('--project')??process.cwd());
   if(!(await lstat(project)).isDirectory())throw new Error('CAPTURE_PROJECT_NOT_DIRECTORY');
   if(process.stdin.isTTY&&process.stdout.isTTY&&!await executable('tmux')){console.error('Install tmux to show the persistent Thot capture bar, then run this command again.');process.exit(1);}
@@ -103,7 +103,7 @@ if(exportId){
     sync.close();
     console.error('\nCapture did not start. '+(messages[code]??'The recorder connection or verification failed.')+'\nYour coding tool was not started. No model credentials were sent.\nError: '+(/^[A-Z0-9_]{1,80}$/.test(code)?code:'CAPTURE_CONNECTION_FAILED'));process.exit(1);
   }
-  process.stderr.write((assessment?.hardware==='verified'&&assessment.references==='matched'?'Independently checked recorder.':'Service-trust recorder; independent workload verification was not completed.')+' Starting '+client+' with your existing login.\n');
+  process.stderr.write((assessment?.hardware==='verified'&&assessment.references==='matched'?'Independently checked recorder.':'Service-trust recorder; independent workload verification was not completed.')+' Starting '+(client==='zai'?'Claude Code with your Z.AI key':client+' with your existing login')+'.\n');
   let heartbeatPending=false;
   const heartbeat=setInterval(()=>{if(heartbeatPending)return;heartbeatPending=true;void capturePost(connection,'heartbeat',{},'heartbeat-'+Date.now()).catch(()=>{}).finally(()=>{heartbeatPending=false;});},20000).unref();
   let exitCode=1;

@@ -24,8 +24,9 @@ release. Saving privately and authorizing a sale are separate actions.
 
 Open the **[production app](https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network)**
 or read the [tutorial](https://thot.market/tutorial). The production deployment uses
-Robinhood chain 4663. Capture and private saving are available; **marketplace
-purchases remain paused**. These instructions do not imply a sale or payout.
+Robinhood chain 4663. Marketplace purchases use THOT on Robinhood mainnet.
+The app reports current marketplace availability; capturing or listing a trace
+does not guarantee a sale or payout.
 The [project introduction](https://thot.market/read) explains the motivation; the
 [whitepaper](https://thot.market/whitepaper) covers the market design.
 

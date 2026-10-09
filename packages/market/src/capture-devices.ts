@@ -17,7 +17,7 @@ export class CaptureDevices {
   async create(actor:Actor,input:Document,trusted:{salePolicyId?:string}={}){
     ensure(actor.role==='user','FORBIDDEN',403);
     ensure(Object.keys(input).every(k=>['client','device_name','save_privately'].includes(k))&&typeof input.save_privately==='boolean'&&input.save_privately===!trusted.salePolicyId,'INVALID_DEVICE_CONNECTION');
-    ensure(['codex','claude'].includes(input.client),'INVALID_AGENT_CAPTURE_CLIENT');
+    ensure(['codex','claude','zai'].includes(input.client),'INVALID_AGENT_CAPTURE_CLIENT');
     ensure(typeof input.device_name==='string'&&input.device_name.length>=1&&input.device_name.length<=80&&!/[\x00-\x1f\x7f]/.test(input.device_name),'INVALID_DEVICE_NAME');
     const id=uuidv7(),token=randomBytes(32).toString('base64url'),at=this.service.now(),expires=this.service.future(30*86400);
     await this.service.db.transaction(async tx=>{

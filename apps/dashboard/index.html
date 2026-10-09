@@ -31,7 +31,7 @@
       <details class="local-tools"><summary>Developer tools</summary><button data-action="worker">Run pending jobs <span>↻</span></button><button data-action="burn">Simulate burn completion <span>↗</span></button><small>Simulated funding and chain execution.<br>No real tokens or payments.</small></details>
     </aside>
     <div class="workspace">
-      <header class="topbar"><div class="environment"><span class="status-dot"></span>Demo workspace</div><div class="session-control"><label for="role">View as</label><select id="role"><option value="user">Contributor</option><option value="buyer_admin">Buyer</option><option value="operator_security">Operator</option></select><button class="icon-button" data-action="refresh" aria-label="Refresh current view">↻</button></div></header>
+      <header class="topbar"><div class="environment"><span class="status-dot"></span>Demo workspace</div><div id="wallet-summary" class="wallet-summary" aria-label="Connected wallet" hidden></div><div class="session-control"><label for="role">View as</label><select id="role"><option value="user">Contributor</option><option value="buyer_admin">Buyer</option><option value="operator_security">Operator</option></select><button class="icon-button" data-action="refresh" aria-label="Refresh current view">↻</button></div></header>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
       <main id="main" tabindex="-1"><div class="loading"><span class="spinner"></span><p>Opening your workspace…</p></div></main>
       <footer class="page-footer"><span>thot market · Private traces, deliberate releases.</span><span><a href="/">Home</a> <a href="/read">Read</a> <a href="/mechanism">Mechanism</a></span></footer>

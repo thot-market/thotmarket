@@ -154,7 +154,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         if(asset){chargeRate('public');res.writeHead(200,{'Content-Type':asset.contentType});res.end(req.method==='HEAD'?undefined:asset.body);return;}
       }
       if(req.method==='GET'&&route==='/v1/public/launch-config'){chargeRate('public');reply(200,publicLaunchConfig(options.launch));return;}
-      if(req.method==='GET'&&['/app','/app/','/ops','/ops/','/operator-app.js','/operator.css','/style.css','/app.js','/money-ui.js','/thot-ui.js','/staking-ui.js','/staking.css','/thot-analytics-ui.js','/mandate-editor.js','/inference-ui.js','/operations-ui.js','/contributor-ui.js','/clerk-auth-ui.js','/wallet-auth-ui.js','/privy-auth.bundle.js','/privy-auth-state.js','/openrouter-ui.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js','/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started','/getting-started.js'].includes(route)) {
+      if(req.method==='GET'&&['/app','/app/','/ops','/ops/','/operator-app.js','/operator.css','/style.css','/app.js','/money-ui.js','/thot-ui.js','/staking-ui.js','/staking.css','/thot-analytics-ui.js','/mandate-editor.js','/inference-ui.js','/operations-ui.js','/contributor-ui.js','/clerk-auth-ui.js','/wallet-auth-ui.js','/privy-auth.bundle.js','/privy-auth-state.js','/openrouter-ui.js','/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js','/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started','/getting-started.js'].includes(route)) {
         chargeRate('public');
         const name=route==='/app'||route==='/app/'?'index.html':route==='/ops'||route==='/ops/'?'operator.html':route==='/getting-started'?'getting-started.html':route.slice(1);
         const file=await readFile(new URL('../dashboard/'+name,import.meta.url));
@@ -352,7 +352,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='prepare-sale')result=await app.portfolio.prepareSale(actor,key,segments[3]!,body);
       else if(req.method==='POST'&&route==='/v1/contributor/capture-devices'){
         const {sale_policy_id,sale_policy_signature,rights_confirmed,model_output_licensed,...connection}=body;
-        ensure(['codex','claude'].includes(connection.client)&&typeof connection.device_name==='string'&&connection.device_name.length>=1&&connection.device_name.length<=80&&!/[\x00-\x1f\x7f]/.test(connection.device_name),'INVALID_CAPTURE_DEVICE');
+        ensure(['codex','claude','zai'].includes(connection.client)&&typeof connection.device_name==='string'&&connection.device_name.length>=1&&connection.device_name.length<=80&&!/[\x00-\x1f\x7f]/.test(connection.device_name),'INVALID_CAPTURE_DEVICE');
         ensure(Object.keys(connection).every(k=>['client','device_name','save_privately'].includes(k)),'INVALID_CAPTURE_DEVICE');
         connection.save_privately??=true;
         ensure(typeof connection.save_privately==='boolean','INVALID_DEVICE_CONNECTION');

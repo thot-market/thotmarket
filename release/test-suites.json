@@ -16,8 +16,12 @@
         "tests/vault-quotas.test.ts",
         "tests/http-resource-guards.test.ts",
         "tests/api-admission.test.ts",
+        "tests/log-hygiene.test.ts",
         "tests/recorder-authorization.test.ts",
         "tests/recorder-assessment.test.ts",
+        "tests/capture-proxy.test.ts",
+        "tests/capture-terminal-credentials.test.ts",
+        "tests/zai-capture.test.ts",
         "tests/capture-durability.test.ts",
         "tests/staged-storage.test.ts",
         "tests/staged-storage-postgres.test.ts",
@@ -29,8 +33,11 @@
         "tests/delivery-links.test.ts",
         "tests/worker-lifecycle.test.ts",
         "tests/dashboard-session.test.ts",
+        "tests/openrouter-ui.test.mjs",
+        "tests/openrouter-usage.test.mjs",
         "tests/thot-trade-evidence-ui.test.mjs",
         "tests/thot-ui.test.mjs",
+        "tests/wallet-replacement.test.mjs",
         "tests/thot-purchase-status.test.ts",
         "tests/thot-valuations.test.ts",
         "tests/staking-ui.test.mjs",
@@ -71,7 +78,8 @@
         "contracts/test/thot-staking-pool.test.mjs",
         "contracts/test/thot-treasury.test.mjs",
         "contracts/test/thot-percentage-fees.test.mjs",
-        "contracts/test/thot-holder-rewards.test.mjs"
+        "contracts/test/thot-holder-rewards.test.mjs",
+        "tests/private-anvil-mining.integration.mjs"
       ]
     },
     "evidence": {
@@ -125,10 +133,12 @@
       "node": [
         "tests/private-image-bootstrap.test.mjs",
         "tests/private-image-package.test.mjs",
+        "tests/private-anvil-automine.test.mjs",
         "tests/thot-build-snapshot.test.mjs",
         "tests/cvm-image-provenance.test.mjs",
         "tests/thot-cli-package.test.mjs",
         "tests/public-runtime-scope.test.mjs",
+        "tests/public-source-export.test.mjs",
         "tests/public-site-inputs.test.ts"
       ]
     }

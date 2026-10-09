@@ -34,6 +34,9 @@ test('capture fragment accepts only a loopback nonce callback and clears it imme
   const calls:any[]=[];
   assert.deepEqual(parseAgentCaptureFragment(location,{state:{x:1},replaceState(...args:any[]){calls.push(args);location.hash='';}} as any),{callback,client:'codex'});
   assert.deepEqual(calls,[[{x:1},'','/vault?from=cli']]);
+  // A Z.AI (Claude Code on GLM) helper connects through the same pairing flow.
+  const zai:any={hash:'#thot='+encode({callback,client:'zai'}),pathname:'/vault',search:''};
+  assert.deepEqual(parseAgentCaptureFragment(zai,{state:null,replaceState(){zai.hash='';}} as any),{callback,client:'zai'});
 });
 
 test('capture callback validation rejects alternate hosts and URL decorations', () => {
