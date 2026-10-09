@@ -27,7 +27,10 @@ pnpm build
 Contracts/browser tests require Anvil 1.7.1 on PATH (or `THOT_ANVIL_PATH`). Money
 fixtures are forced to `local-v2`; no upstream fork, funded wallet or hosted chain
 is selected. Browser tests require Chromium/Chrome via the absolute
-`THOT_E2E_BROWSER` path, plus Xvfb and ffmpeg on Linux. They use synthetic accounts. The current THOT journeys run sequentially with
+`THOT_E2E_BROWSER` path, plus Xvfb and system ffmpeg on Linux. Install Playwright's
+version-matched recording executable with `pnpm exec playwright-core install ffmpeg`
+as well; system ffmpeg alone does not satisfy Playwright's `recordVideo` option.
+They use synthetic accounts. The current THOT journeys run sequentially with
 quoted-cost and percentage-fee fixtures. To run just one, use
 `pnpm test:thot:browser` or `pnpm test:thot:browser:percentage`. See
 [the local purchase demo](docs/local-purchase-demo.md) for the evidence format and
