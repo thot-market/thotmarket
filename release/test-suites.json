@@ -116,7 +116,8 @@
       ],
       "node": [
         "tests/e2e/anvil-money.browser.mjs",
-        "tests/privy-auth-bridge.test.mjs"
+        "tests/privy-auth-bridge.test.mjs",
+        "tests/privy-download-browser.test.mjs"
       ],
       "node_commands": [
         [
@@ -141,7 +142,8 @@
         "tests/thot-cli-package.test.mjs",
         "tests/public-runtime-scope.test.mjs",
         "tests/public-source-export.test.mjs",
-        "tests/public-site-inputs.test.ts"
+        "tests/public-site-inputs.test.ts",
+        "tests/privy-auth-build.test.mjs"
       ]
     }
   }

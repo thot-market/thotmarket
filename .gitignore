@@ -33,3 +33,5 @@ coverage/
 contracts/artifacts/
 *.log
 apps/dashboard/privy-auth.bundle.js
+apps/dashboard/privy-auth-chunks/
+apps/dashboard/privy-auth.assets.json

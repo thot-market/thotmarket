@@ -706,29 +706,60 @@ async function loadPrivyAuth() {
   if(privyAuth)return privyAuth;
   if(privyLoading)return privyLoading;
   if(!privyConfig)throw new Error('Email wallet login is not configured.');
-  let candidate=null,expired=false,timer,downloaded=false;
+  if(privyImportRetry>9999)throw new Error('Sign-in could not load. Refresh the page to try again.');
+  const attemptNamespace=privyImportRetry;
+  let candidate=null,expired=false;
+  const withinDeadline=async(work,message)=>{
+    let timer;
+    try {
+      const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(new Error(message));},30000);});
+      return await Promise.race([work,timeout]);
+    } finally {clearTimeout(timer);}
+  };
+  const downloadModule=()=>new Promise((resolve,reject)=>{
+    let finished=false,idleTimer,hardTimer,observer;
+    const clean=()=>{clearTimeout(idleTimer);clearTimeout(hardTimer);observer?.disconnect();};
+    const fail=error=>{if(finished)return;finished=true;clean();reject(error);};
+    const timedOut=()=>fail(new Error('Sign-in download timed out. Check your connection and try again.'));
+    const progress=()=>{clearTimeout(idleTimer);idleTimer=setTimeout(timedOut,30000);};
+    progress();hardTimer=setTimeout(timedOut,90000);
+    // Completed chunks prove this download is advancing. Ignore historical or
+    // unrelated resources, and keep an absolute ceiling even with progress.
+    if(typeof window.PerformanceObserver==='function'){
+      try {
+        const startedAt=window.performance.now(),prefix=`/privy-auth/v1/${attemptNamespace}/`,origin=window.location.origin;
+        observer=new window.PerformanceObserver(list=>{
+          if(finished||expired)return;
+          const advancing=list.getEntries().some(entry=>{
+            if(entry.entryType!=='resource'||entry.initiatorType!=='script'||entry.startTime<startedAt)return false;
+            try {const url=new URL(entry.name);return url.origin===origin&&url.pathname.startsWith(prefix)&&url.pathname.endsWith('.js');}catch{return false;}
+          });
+          if(advancing)progress();
+        });
+        observer.observe({type:'resource'});
+      }catch{observer?.disconnect();observer=null;}
+    }
+    // Browsers retain pending and failed imports, including nested chunks.
+    // A fresh path gives every relative import a new URL on explicit retry.
+    import(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`).then(module=>{
+      if(finished)return;finished=true;clean();resolve(module);
+    },()=>fail(new Error('Sign-in could not download. Check your connection and try again.')));
+  });
   const run=(async()=>{
     try {
-      const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(new Error(downloaded?'The sign-in service is taking too long to respond. Please try again.':'Sign-in download timed out. Check your connection and try again.'));},30000);});
-      const initialized=(async()=>{
-        // Browsers retain failed module imports. A new URL lets an explicit retry
-        // recover after a network failure without reloading the whole workspace.
-        let module;
-        try {module=await (privyImportRetry?import(`./privy-auth.bundle.js?retry=${privyImportRetry}`):import('./privy-auth.bundle.js'));}
-        catch {privyImportRetry++;throw new Error('Sign-in could not download. Check your connection and try again.');}
-        if(expired)throw new Error('Email wallet loading expired.');
-        downloaded=true;
-        if(privyLoginBusy)setPrivyLoginPhase('Connecting to sign-in…');
-        const {createPrivyAuth}=module;
-        candidate=createPrivyAuth({window,document,config:privyConfig,walletAuth,onError:error=>{if(privyAuth===candidate){privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);}}});
-        await candidate.initialize();
-        if(expired)throw new Error('Email wallet loading expired.');
-        return candidate;
-      })();
-      const ready=await Promise.race([initialized,timeout]);
-      privyAuth=ready;ready.mount(document.querySelector('#privy-wallet-choices'));return ready;
-    } catch(error) {expired=true;candidate?.destroy();throw error;}
-    finally {clearTimeout(timer);}
+      const {createPrivyAuth}=await downloadModule();
+      if(expired)throw new Error('Email wallet loading expired.');
+      if(privyLoginBusy)setPrivyLoginPhase('Connecting to sign-in…');
+      candidate=createPrivyAuth({window,document,config:privyConfig,walletAuth,onError:error=>{if(privyAuth===candidate){privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);}}});
+      // Download time must not consume the authentication service's budget.
+      await withinDeadline(candidate.initialize(),'The sign-in service is taking too long to respond. Please try again.');
+      if(expired)throw new Error('Email wallet loading expired.');
+      privyAuth=candidate;candidate.mount(document.querySelector('#privy-wallet-choices'));return candidate;
+    } catch(error) {
+      expired=true;
+      if(privyImportRetry===attemptNamespace)privyImportRetry=attemptNamespace+1;
+      candidate?.destroy();throw error;
+    }
   })();
   privyLoading=run;
   try{return await run;}finally{if(privyLoading===run)privyLoading=null;}
@@ -744,12 +775,19 @@ function setPrivyLoginPhase(message){
 async function openPrivyLogin(){
   if(privyLoginBusy)return;
   const attempt=++walletLoginAttempt;signingOut=false;
+  let openingAuth=null;
   privyLoginBusy=true;privyLoginRetry=false;setPrivyLoginPhase(privyAuth?'Opening sign-in…':'Loading secure sign-in…');
   // An anonymous restore may redisplay this login while the SDK loads. It is
   // still the same user action; another login, logout or accepted account is not.
   const current=()=>{if(attempt!==walletLoginAttempt||state.actor||signingOut||authMode!=='wallet_siwe')throw staleWorkspace();};
-  try {const auth=await loadPrivyAuth();current();setPrivyLoginPhase('Opening sign-in…');auth.mount(document.querySelector('#privy-wallet-choices'));await auth.login();}
-  catch(error){current();privyLoginBusy=false;privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);}
+  try {const auth=await loadPrivyAuth();current();openingAuth=auth;setPrivyLoginPhase('Opening sign-in…');auth.mount(document.querySelector('#privy-wallet-choices'));await auth.login();}
+  catch(error){
+    current();
+    // A failed initial dialog can retain a rejected lazy chunk inside the SDK.
+    // Rebuild that graph on retry; ordinary login cancellation keeps the SDK.
+    if(error?.code==='PRIVY_LOGIN_OPEN_FAILED'&&privyAuth===openingAuth){privyAuth=null;openingAuth?.destroy();privyImportRetry++;}
+    privyLoginBusy=false;privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);
+  }
   finally {privyLoginBusy=false;setPrivyLoginPhase('');}
 }
 function showIdentityLogin(message='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'){

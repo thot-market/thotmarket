@@ -15,12 +15,43 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
   const publicConfig = validatePrivyConfig(config);
   const chain = {...chains[publicConfig.chainId], rpcUrls:{default:{http:[publicConfig.rpcUrl]}}};
   const providerConfig = {appId: publicConfig.appId, ...(publicConfig.clientId ? {clientId: publicConfig.clientId} : {})};
-  let current = null, target = null, root = null, destroyed = false, generation = 0, selectedAddress = null, signing = false;
+  let current = null, target = null, root = null, destroyed = false, generation = 0, selectedAddress = null, signing = false, loginOpening = null;
   let readyResolve, readyReject, renderTick = () => {}, openRequested = false, loginAttempt = false, loginAddress = null, priorUser, modalWasOpen = false;
   const initialized = new Promise((resolve, reject) => {readyResolve = resolve; readyReject = reject;});
   const timer = window.setTimeout(() => readyReject(new Error('Privy did not load. Check the connection and try again.')), 30000);
   const host = document.createElement('div'); host.id = 'privy-auth-root'; document.body.appendChild(host);
   const fail = error => onError(error instanceof Error ? error : new Error('Privy sign-in could not complete.'));
+  function settleLoginOpening(error) {loginOpening?.(error);}
+  function waitForLoginModal(epoch) {
+    return new Promise((resolve, reject) => {
+      const browser = document.defaultView ?? window;
+      let observer, deadline, done = false;
+      const finish = error => {
+        if(done)return;done=true;window.clearTimeout(deadline);observer?.disconnect();
+        if(loginOpening===finish)loginOpening=null;
+        error ? reject(error) : resolve();
+      };
+      loginOpening=finish;
+      const check = () => {
+        if(destroyed||epoch!==generation||!loginAttempt||current?.authenticated)return finish();
+        // Privy 3.42 opens its dialog shell before importing the landing screen.
+        // Wait for a usable control, not the shell, heading, spinner or close icon.
+        const content=document.querySelector('#privy-modal-content');
+        for(const control of content?.querySelectorAll('input:not([type="hidden"]),button')??[]){
+          if(control.disabled||control.getAttribute('aria-disabled')==='true'||control.closest('[hidden],[aria-hidden="true"]')||!control.getClientRects().length)continue;
+          const style=browser.getComputedStyle(control);
+          if(style.display==='none'||style.visibility==='hidden')continue;
+          if(control.tagName==='INPUT'&&!control.readOnly||control.tagName==='BUTTON'&&control.textContent.trim())return finish();
+        }
+      };
+      observer=new browser.MutationObserver(check);
+      observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','readonly','hidden','style','class','aria-hidden','aria-disabled']});
+      deadline=window.setTimeout(()=>{
+        const error=new Error('Sign-in options could not load. Please try again.');error.code='PRIVY_LOGIN_OPEN_FAILED';finish(error);
+      },30000);
+      check();
+    });
+  }
   const walletWaiters = new Set();
   const notifyWalletWaiters = () => {for (const check of [...walletWaiters]) check();};
   function waitForWallets(epoch, userId) {
@@ -33,7 +64,7 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
       walletWaiters.add(check); check();
     });
   }
-  const changed = () => {generation++; selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; void walletAuth.signOut().catch(fail);};
+  const changed = () => {generation++; settleLoginOpening(); selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; void walletAuth.signOut().catch(fail);};
 
   async function useWallet(address) {
     if (signing || destroyed || !current?.ready || !current.walletsReady || !current.authenticated) return false;
@@ -55,16 +86,17 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
   function Bridge() {
     const auth = usePrivy(), walletState = useWallets(), modal = useModalStatus(), [, tick] = useState(0);
     const {createWallet} = useCreateWallet();
-    const {login} = useLogin({onComplete: ({loginAccount}) => {if (!loginAttempt || destroyed) return; loginAddress = loginAccount?.type === 'wallet' && loginAccount.chainType === 'ethereum' ? loginAccount.address : null; openRequested = true; tick(n => n + 1);}, onError: () => {openRequested = false; loginAttempt = false; fail(new Error('Privy login was cancelled or could not complete.'));}});
+    const {login} = useLogin({onComplete: ({loginAccount}) => {if (!loginAttempt || destroyed) return; loginAddress = loginAccount?.type === 'wallet' && loginAccount.chainType === 'ethereum' ? loginAccount.address : null; openRequested = true; tick(n => n + 1);}, onError: () => {openRequested = false; loginAttempt = false; settleLoginOpening(); fail(new Error('Privy login was cancelled or could not complete.'));}});
     renderTick = () => {if (!destroyed) tick(n => n + 1);};
     useEffect(() => {
       current = {...auth, wallets: walletState.wallets, walletsReady: walletState.ready, login};
+      if(auth.ready&&auth.authenticated)settleLoginOpening();
       if (auth.ready) {
         const identity = auth.authenticated ? auth.user?.id : null;
         if (priorUser != null && priorUser !== identity) changed();
         priorUser = identity;
       }
-      if (modalWasOpen && !modal.isOpen && !auth.authenticated) {loginAttempt = false; openRequested = false;}
+      if (modalWasOpen && !modal.isOpen && !auth.authenticated) {loginAttempt = false; openRequested = false; settleLoginOpening();}
       modalWasOpen = modal.isOpen;
       notifyWalletWaiters();
       if (!auth.ready) return;
@@ -108,7 +140,16 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
       if (!current?.ready || current.authenticated && !current.walletsReady || destroyed) throw new Error('Wallet login is still loading.');
       if (loginAttempt || signing) return;
       loginAttempt = true;
-      try {await walletAuth.signOut(); if (destroyed) return; loginAddress = null; openRequested = true; if (current.authenticated) renderTick(); else current.login({loginMethods: ['email', 'wallet'], walletChainType: 'ethereum-only'});}
+      try {
+        await walletAuth.signOut(); if (destroyed) return; loginAddress = null; openRequested = true;
+        if (current.authenticated) renderTick();
+        else {
+          const opening=waitForLoginModal(generation);
+          try {current.login({loginMethods: ['email', 'wallet'], walletChainType: 'ethereum-only'});}
+          catch(error){settleLoginOpening();throw error;}
+          await opening;
+        }
+      }
       catch (error) {loginAttempt = false; openRequested = false; throw error;}
     },
     async providers(address) {
@@ -123,7 +164,7 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
       if (destroyed || epoch !== generation || current?.user?.id !== userId) return [];
       selectedAddress = wallet.address.toLowerCase(); return [provider];
     },
-    async signOut() {generation++; selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; await walletAuth.signOut(); await current?.logout(); renderTick();},
-    destroy() {destroyed = true; generation++; notifyWalletWaiters(); window.clearTimeout(timer); root?.unmount(); host.remove(); current = null;}
+    async signOut() {generation++; settleLoginOpening(); selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; await walletAuth.signOut(); await current?.logout(); renderTick();},
+    destroy() {destroyed = true; generation++; settleLoginOpening(); notifyWalletWaiters(); window.clearTimeout(timer); root?.unmount(); host.remove(); current = null;}
   };
 }

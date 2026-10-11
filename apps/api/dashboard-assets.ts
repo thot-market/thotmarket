@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
-import {open} from 'node:fs/promises';
+import {open,lstat} from 'node:fs/promises';
+import {constants as fsConstants} from 'node:fs';
 import {promisify} from 'node:util';
 import {brotliCompress, constants, gzip} from 'node:zlib';
 import {DomainError} from '../../packages/storage/src/index.ts';
@@ -10,7 +11,7 @@ const routes=new Set([
   '/operator-app.js','/operator.css','/style.css','/app.js','/money-ui.js','/thot-ui.js',
   '/staking-ui.js','/staking.css','/thot-analytics-ui.js','/mandate-editor.js',
   '/inference-ui.js','/operations-ui.js','/contributor-ui.js','/clerk-auth-ui.js',
-  '/wallet-auth-ui.js','/privy-auth.bundle.js','/privy-auth-state.js','/openrouter-ui.js',
+  '/wallet-auth-ui.js','/privy-auth-state.js','/openrouter-ui.js',
   '/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js',
   '/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started.js',
 ]);
@@ -19,7 +20,15 @@ const maxFileBytes=16*1024*1024,maxSourceBytes=32*1024*1024,compressionOverhead=
 type Encoding='br'|'gzip'|'identity';
 type Representation={body:Buffer;etag:string;encoding:Encoding;contentType:string};
 type Asset={identity:Representation;compressed:Map<Encoding,Promise<Representation>>};
-export const isDashboardAssetRoute=(route:string)=>routes.has(route);
+const generatedFile=/^(?:privy-auth\.bundle\.js|privy-auth-chunks\/[A-Z0-9]{8}\.js)$/;
+function canonicalRoute(route:string):string|null {
+  if(routes.has(route))return route;
+  const match=route.match(/^\/privy-auth\/v1\/(?:0|[1-9][0-9]{0,3})\/(.+)$/);
+  const file=match?.[1]??route.slice(1);
+  return route.startsWith('/')&&generatedFile.test(file)?'/'+file:null;
+}
+export const isDashboardAssetRoute=(route:string)=>canonicalRoute(route)!==null;
+type ManifestAsset={path:string;bytes:number;sha256:string};
 
 function encodingFor(header:string|undefined):Encoding|null {
   if(!header?.trim())return 'identity';
@@ -49,30 +58,56 @@ export function matchesAssetEtag(header:string|undefined,etag:string):boolean {
   return header?.trim()==='*'||Boolean(header?.split(',').some(value=>value.trim().replace(/^W\//,'')===etag));
 }
 
-/** One immutable image's asset cache; restarting the server picks up a release.
- * At most the fixed route set and 32 MiB of source are retained. Each async
- * encoding is shared across concurrent requests and bounded by source + 64 KiB;
- * all three representations together remain below 100 MiB. */
+/** One immutable image's asset cache; restarting picks up a release. The fixed
+ * routes plus at most 512 manifest-listed chunks share a 32 MiB source budget.
+ * Retry namespaces all use the canonical cache key. Each async encoding is
+ * shared and bounded by source + 64 KiB; all representations stay below 170 MiB. */
 export function createDashboardAssets(directory=new URL('../dashboard/',import.meta.url)) {
   const cached=new Map<string,Promise<Asset>>();let sourceBytes=0;
+  let manifest:Promise<Map<string,ManifestAsset>>|null=null;
+  async function generatedAssets():Promise<Map<string,ManifestAsset>> {
+    if(!manifest)manifest=(async()=>{
+      const handle=await open(new URL('privy-auth.assets.json',directory),fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);
+      try{
+        const stat=await handle.stat();
+        if(!stat.isFile()||stat.size>128*1024)throw new Error('manifest limit');
+        const bytes=Buffer.alloc(stat.size+1);let read=0;
+        while(read<bytes.length){const part=await handle.read(bytes,read,bytes.length-read,null);if(!part.bytesRead)break;read+=part.bytesRead;}
+        if(read!==stat.size)throw new Error('manifest changed');
+        const value=JSON.parse(bytes.subarray(0,read).toString('utf8'));
+        if(value?.format!=='thot.privy-assets/1'||!Array.isArray(value.assets)||value.assets.length<1||value.assets.length>512)throw new Error('manifest format');
+        const entries=new Map<string,ManifestAsset>();let total=0;
+        for(const asset of value.assets){
+          if(!asset||typeof asset.path!=='string'||!generatedFile.test(asset.path)||entries.has('/'+asset.path)||
+            !Number.isSafeInteger(asset.bytes)||asset.bytes<0||asset.bytes>maxFileBytes||typeof asset.sha256!=='string'||!/^[a-f0-9]{64}$/.test(asset.sha256))throw new Error('manifest asset');
+          total+=asset.bytes;if(total>maxSourceBytes)throw new Error('manifest byte limit');entries.set('/'+asset.path,asset);
+        }
+        if(!entries.has('/privy-auth.bundle.js'))throw new Error('manifest entry');return entries;
+      }finally{await handle.close();}
+    })().catch(()=>{manifest=null;throw new DomainError('DASHBOARD_ASSET_UNAVAILABLE',503);});
+    return manifest;
+  }
   const representation=(route:string,body:Buffer,encoding:Encoding):Representation=>({
     body,encoding,etag:'"'+createHash('sha256').update(body).digest('hex')+'"',
     contentType:route.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8',
   });
-  async function load(route:string):Promise<Asset>{
+  async function load(route:string,expected?:ManifestAsset):Promise<Asset>{
     let reserved=0;
     try{
-      const file=await open(new URL(route.slice(1),directory),'r');
+      if(route.startsWith('/privy-auth-chunks/')){
+        const parent=await lstat(new URL('privy-auth-chunks',directory));if(!parent.isDirectory()||parent.isSymbolicLink())throw new Error('asset directory');
+      }
+      const file=await open(new URL(route.slice(1),directory),fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);
       try{
         const stat=await file.stat();
-        if(!stat.isFile()||stat.size>maxFileBytes||sourceBytes+stat.size>maxSourceBytes)throw new Error('asset limit');
+        if(!stat.isFile()||stat.size>maxFileBytes||sourceBytes+stat.size>maxSourceBytes||expected&&stat.size!==expected.bytes)throw new Error('asset limit');
         sourceBytes+=stat.size;reserved=stat.size;
         // Bound even an accidentally growing development file before retaining
         // it; deployed image inputs do not change during a process's lifetime.
         const body=Buffer.alloc(stat.size+1);
         let bytes=0;
         while(bytes<body.length){const read=await file.read(body,bytes,body.length-bytes,null);if(!read.bytesRead)break;bytes+=read.bytesRead;}
-        if(bytes!==stat.size)throw new Error('asset changed');
+        if(bytes!==stat.size||expected&&createHash('sha256').update(body.subarray(0,bytes)).digest('hex')!==expected.sha256)throw new Error('asset changed');
         return {identity:representation(route,body.subarray(0,bytes),'identity'),compressed:new Map()};
       }finally{await file.close();}
     }catch{
@@ -81,11 +116,15 @@ export function createDashboardAssets(directory=new URL('../dashboard/',import.m
     }
   }
   return async(route:string,acceptEncoding:string|undefined):Promise<Representation>=>{
-    if(!routes.has(route))throw new DomainError('NOT_FOUND',404);
+    const canonical=canonicalRoute(route);
+    if(!canonical)throw new DomainError('NOT_FOUND',404);
+    let expected:ManifestAsset|undefined;
+    if(!routes.has(canonical)){expected=(await generatedAssets()).get(canonical);if(!expected)throw new DomainError('NOT_FOUND',404);}
+    route=canonical;
     const encoding=encodingFor(acceptEncoding);
     if(!encoding)throw new DomainError('ASSET_ENCODING_NOT_ACCEPTABLE',406);
     let pending=cached.get(route);
-    if(!pending){pending=load(route).catch(error=>{cached.delete(route);throw error;});cached.set(route,pending);}
+    if(!pending){pending=load(route,expected).catch(error=>{cached.delete(route);throw error;});cached.set(route,pending);}
     const asset=await pending;
     if(encoding==='identity')return asset.identity;
     let compressed=asset.compressed.get(encoding);

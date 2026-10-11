@@ -9,7 +9,7 @@ import {isClosedUnpaidPurchase} from '../apps/dashboard/thot-ui.js';
 const applicationSource = await readFile(new URL('../apps/dashboard/app.js', import.meta.url), 'utf8');
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
 // replaced by inert collaborators and only the automatic initial network bootstrap is disabled.
-const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace("import('./privy-auth.bundle.js')", "globalThis.importPrivyModule('./privy-auth.bundle.js')").replace('import(`./privy-auth.bundle.js?retry=${privyImportRetry}`)', 'globalThis.importPrivyModule(`./privy-auth.bundle.js?retry=${privyImportRetry}`)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
+const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace('import(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)', 'globalThis.importPrivyModule(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
 globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, refreshPurchases, pendingPurchases,
   setAuthMode(value) { authMode = value; }, setClerkAuth(value) { clerkAuth = value; } };
 `;
@@ -20,6 +20,19 @@ function deferred<T = any>() {
 const response = (value: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => value });
 const stale = (error: any) => error?.name === 'StaleWorkspaceError';
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+
+function resourceObserverFixture() {
+  const observers:Array<any>=[];
+  class Observer {
+    active=false;
+    callback:(list:any)=>void;
+    constructor(callback:(list:any)=>void){this.callback=callback;observers.push(this);}
+    observe(options:any){assert.equal(options.type,'resource');assert.equal(options.buffered,undefined);this.active=true;}
+    disconnect(){this.active=false;}
+  }
+  return {Observer,active:()=>observers.filter(observer=>observer.active).length,
+    emit(patch:Record<string,unknown>={}){const entry={entryType:'resource',initiatorType:'script',startTime:101,name:'https://workspace.example.test/privy-auth/v1/0/privy-auth-chunks/shared.js',...patch};for(const observer of observers)if(observer.active)observer.callback({getEntries:()=>[entry]});}};
+}
 
 function documentFixture() {
   const documentHandlers=new Map<string,Array<(event:any)=>unknown>>();
@@ -53,10 +66,10 @@ function documentFixture() {
     createElement: (name: string) => make(name), body: make('body') };
   return { document, elements };
 }
-function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any) => Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:(url?:string)=>Promise<any>; privyTimeoutMs?:number; storage?:any } = {}) {
+function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any)=>Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:(url?:string)=>Promise<any>; privyTimeoutMs?:number; privyResourceObserver?:any; storage?:any } = {}) {
   const dom = documentFixture(), calls: Array<{ url: string; init: any }> = [], timers = new Set<ReturnType<typeof setTimeout>>(), controllers = new Set<AbortController>();
-  const context: any = { isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
-    setTimeout(callback: () => void, duration: number) { const timer = setTimeout(callback, duration===30000?(options.privyTimeoutMs??duration):duration); timers.add(timer); return timer; },
+  const context: any = { isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage,PerformanceObserver:options.privyResourceObserver,performance:{now:()=>100},location:{origin:'https://workspace.example.test'}}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
+    setTimeout(callback: () => void, duration: number) { const delay=options.privyTimeoutMs===undefined?duration:duration===30000?options.privyTimeoutMs:duration===90000?options.privyTimeoutMs*3:duration;const timer = setTimeout(callback, delay); timers.add(timer); return timer; },
     clearTimeout(timer: ReturnType<typeof setTimeout>) { clearTimeout(timer); timers.delete(timer); },
     fetch(url: string, init: any = {}) { calls.push({ url, init }); return url==='/v1/thot/workspace'?(options.thotTransport?.(url,init)??Promise.resolve(response({capabilities:{mode:'unconfigured'}}))):url==='/v1/money/capabilities'?Promise.resolve(response({mode:'mock'})):transport(url, init); },
     createInferenceUI: () => ({ actionHTML: () => '', historyHTML: () => '', handle: async () => false }),
@@ -408,7 +421,7 @@ test('dashboard renders one Privy sign-in action before restore and leaves the S
   await a.driver.startAuthentication();assert.equal(restores,1);assert.equal(imports,0);assert.equal(a.driver.state.actor,null);
 });
 
-test('slow Privy bundle download times out without replacing the sign-in action or accepting late completion',async t=>{
+test('without resource observation a slow Privy download times out without accepting late completion',async t=>{
   const download=deferred();let created=0;
   const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:10,importPrivyModule:()=>download.promise,walletAuthFactory:()=>({async restore(){return false;}})});
   await a.driver.startAuthentication();const html=a.document.querySelector('#main').innerHTML;
@@ -416,11 +429,80 @@ test('slow Privy bundle download times out without replacing the sign-in action 
   download.resolve({createPrivyAuth(){created++;return {};}});await flush();assert.equal(created,0,'a timed-out import never mounts an SDK instance');assert.equal(a.driver.state.actor,null);
 });
 
+test('completed resources in the current download extend only the idle budget and clean up on success',async t=>{
+  const resources=resourceObserverFixture(),download=deferred();let created=0;
+  const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:60,privyResourceObserver:resources.Observer,importPrivyModule:()=>download.promise,walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();const pending=a.driver.loadPrivyAuth();
+  assert.equal(resources.active(),1);
+  const interval=setInterval(()=>resources.emit(),25);t.after(()=>clearInterval(interval));
+  await new Promise(resolve=>setTimeout(resolve,100));
+  download.resolve({createPrivyAuth(){created++;return {async initialize(){},mount(){},destroy(){}};}});
+  await pending;clearInterval(interval);
+  assert.equal(created,1);assert.equal(resources.active(),0);
+});
+
+for(const [description,patch] of Object.entries({
+  'old attempt':{name:'https://workspace.example.test/privy-auth/v1/0/privy-auth-chunks/shared.js'},
+  'another origin':{name:'https://other.example.test/privy-auth/v1/1/privy-auth-chunks/shared.js'},
+  'another namespace':{name:'https://workspace.example.test/privy-auth/v1/10/privy-auth-chunks/shared.js'},
+  'non-script resource':{initiatorType:'fetch'},
+  'historical resource':{startTime:99},
+}))test(`${description} cannot extend a newer download's idle deadline`,async t=>{
+  const resources=resourceObserverFixture();let imports=0;
+  const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:60,privyResourceObserver:resources.Observer,importPrivyModule:()=>++imports===1?Promise.reject(new Error('first request failed')):new Promise(()=>{}),walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await assert.rejects(a.driver.loadPrivyAuth(),/could not download/);
+  assert.equal(resources.active(),0);
+  const pending=a.driver.loadPrivyAuth().then(()=> 'unexpected success',(error:Error)=>error.message);
+  const emit=setTimeout(()=>resources.emit({name:'https://workspace.example.test/privy-auth/v1/1/privy-auth-chunks/shared.js',...patch}),30);t.after(()=>clearTimeout(emit));
+  const result=await Promise.race([pending,new Promise(resolve=>setTimeout(()=>resolve('idle deadline was incorrectly extended'),75))]);
+  assert.match(String(result),/download timed out/);assert.equal(resources.active(),0);
+});
+
+test('download progress cannot extend the hard ceiling and observer disconnects after timeout',async t=>{
+  const resources=resourceObserverFixture();
+  const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:60,privyResourceObserver:resources.Observer,importPrivyModule:()=>new Promise(()=>{}),walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();const pending=a.driver.loadPrivyAuth().then(()=> 'unexpected success',(error:Error)=>error.message);
+  const interval=setInterval(()=>resources.emit(),25);t.after(()=>clearInterval(interval));
+  const result=await Promise.race([pending,new Promise(resolve=>setTimeout(()=>resolve('hard ceiling was incorrectly extended'),210))]);
+  clearInterval(interval);assert.match(String(result),/download timed out/);assert.equal(resources.active(),0);
+});
+
+test('an unsupported resource observer retains the ordinary download deadline',async t=>{
+  let disconnected=0;
+  class UnsupportedObserver{observe(){throw new Error('unsupported resource observation');}disconnect(){disconnected++;}}
+  const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:10,privyResourceObserver:UnsupportedObserver,importPrivyModule:()=>new Promise(()=>{}),walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await assert.rejects(a.driver.loadPrivyAuth(),/download timed out/);assert.equal(disconnected,1);
+});
+
 test('Privy readiness is bounded after download and failure allows a fresh retry',async t=>{
   const readiness=deferred();let imports=0,destroyed=0,logins=0;
   const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:10,importPrivyModule:async()=>{imports++;return {createPrivyAuth:()=>({initialize:()=>imports===1?readiness.promise:Promise.resolve(),mount(){},destroy(){destroyed++;},async login(){logins++;}})};},walletAuthFactory:()=>({async restore(){return false;}})});
   await a.driver.startAuthentication();await assert.rejects(a.driver.loadPrivyAuth(),/service is taking too long/);assert.equal(destroyed,1);
   await a.driver.openPrivyLogin();assert.equal(imports,2);assert.equal(logins,1);readiness.resolve(null);await flush();assert.equal(logins,1);
+});
+
+test('a near-deadline download gives authentication readiness a separate full budget',async t=>{
+  let created=0,logins=0;
+  const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:80,importPrivyModule:async()=>{
+    await new Promise(resolve=>setTimeout(resolve,55));
+    return {createPrivyAuth(){created++;return {initialize:()=>new Promise(resolve=>setTimeout(resolve,55)),mount(){},destroy(){},async login(){logins++;}};}};
+  },walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await a.driver.openPrivyLogin();
+  assert.equal(created,1);assert.equal(logins,1);assert.doesNotMatch(a.document.querySelector('#main').innerHTML,/timed out|taking too long/);
+});
+
+for(const lateResult of ['resolve','reject'] as const)test(`timed-out module ${lateResult} cannot mount a provider or change the newer retry namespace`,async t=>{
+  const first=deferred(),second=deferred(),urls:Array<string|undefined>=[];let created=0,mounted=0;
+  const module={createPrivyAuth(){created++;return {async initialize(){},mount(){mounted++;},destroy(){}};}};
+  const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:40,importPrivyModule:url=>{urls.push(url);return urls.length===1?first.promise:urls.length===2?second.promise:Promise.resolve(module);},walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await assert.rejects(a.driver.loadPrivyAuth(),/download timed out/);
+  const retry=a.driver.loadPrivyAuth(),failedRetry=assert.rejects(retry,/could not download/);
+  first[lateResult](lateResult==='resolve'?module:new Error('late network failure'));await flush();
+  assert.equal(created,0);assert.equal(mounted,0);
+  second.reject(new Error('retry network failure'));await failedRetry;
+  await a.driver.loadPrivyAuth();
+  assert.deepEqual(urls,[0,1,2].map(n=>`./privy-auth/v1/${n}/privy-auth.bundle.js`));
+  assert.equal(created,1);assert.equal(mounted,1);
 });
 
 test('an account switch during lazy Privy loading cannot open login over the new workspace',async t=>{
@@ -461,13 +543,37 @@ test('sign-in immediately announces progress and remains single-flight across an
   ready.resolve(null);await login;assert.equal(logins,1);assert.equal(button.disabled,false);assert.equal(button['aria-busy'],'false');
 });
 
-test('retry after a failed module request uses a fresh module URL and opens sign-in once',async t=>{
+test('retry after a failed module request uses a fresh graph namespace and opens sign-in once',async t=>{
   const urls:Array<string|undefined>=[];let logins=0;
   const a=dashboard(t,async()=>response(walletCapability),{importPrivyModule:async url=>{urls.push(url);if(urls.length===1)throw Error('network unavailable');return {createPrivyAuth:()=>({async initialize(){},mount(){},destroy(){},async login(){logins++;}})};},walletAuthFactory:()=>({async restore(){return false;}})});
   await a.driver.startAuthentication();await a.driver.openPrivyLogin();
   assert.match(a.document.querySelector('#main').innerHTML,/could not download/);
   await a.driver.openPrivyLogin();
-  assert.deepEqual(urls,['./privy-auth.bundle.js','./privy-auth.bundle.js?retry=1']);assert.equal(logins,1);assert.equal(a.driver.state.actor,null);
+  assert.deepEqual(urls,['./privy-auth/v1/0/privy-auth.bundle.js','./privy-auth/v1/1/privy-auth.bundle.js']);assert.equal(logins,1);assert.equal(a.driver.state.actor,null);
+});
+
+test('an initial dialog loading failure destroys its SDK and retries the full graph',async t=>{
+  const urls:Array<string|undefined>=[];let destroyed=0,logins=0;
+  const a=dashboard(t,async()=>response(walletCapability),{importPrivyModule:async url=>{urls.push(url);return {createPrivyAuth:()=>({async initialize(){},mount(){},destroy(){destroyed++;},async login(){if(++logins===1)throw Object.assign(new Error('Sign-in did not open. Please try again.'),{code:'PRIVY_LOGIN_OPEN_FAILED'});}})};},walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await a.driver.openPrivyLogin();
+  assert.equal(destroyed,1);assert.match(a.document.querySelector('#main').innerHTML,/Sign-in did not open/);
+  await a.driver.openPrivyLogin();
+  assert.deepEqual(urls,['./privy-auth/v1/0/privy-auth.bundle.js','./privy-auth/v1/1/privy-auth.bundle.js']);assert.equal(logins,2);assert.equal(destroyed,1);
+});
+
+test('ordinary login cancellation keeps the ready SDK for the next sign-in',async t=>{
+  let imports=0,destroyed=0,logins=0;
+  const a=dashboard(t,async()=>response(walletCapability),{importPrivyModule:async()=>{imports++;return {createPrivyAuth:()=>({async initialize(){},mount(){},destroy(){destroyed++;},async login(){if(++logins===1)throw new Error('Privy login was cancelled.');}})};},walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await a.driver.openPrivyLogin();await a.driver.openPrivyLogin();
+  assert.equal(imports,1);assert.equal(destroyed,0);assert.equal(logins,2);
+});
+
+test('late modal loading failure cannot destroy the authenticated workspace',async t=>{
+  const opening=deferred();let destroyed=0;
+  const a=dashboard(t,async()=>response(walletCapability),{importPrivyModule:async()=>({createPrivyAuth:()=>({async initialize(){},mount(){},destroy(){destroyed++;},login:()=>opening.promise})}),walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();const pending=a.driver.openPrivyLogin(),rejected=assert.rejects(pending,stale);await flush();
+  a.identity('new-wallet');opening.reject(Object.assign(new Error('Sign-in did not open.'),{code:'PRIVY_LOGIN_OPEN_FAILED'}));
+  await rejected;assert.equal(destroyed,0);assert.equal(a.driver.state.actor.id,'new-wallet');
 });
 
 test('a login SDK error raised before login returns remains visible with an enabled retry',async t=>{

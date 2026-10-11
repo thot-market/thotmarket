@@ -1,8 +1,9 @@
 import test,{type TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {request,type IncomingHttpHeaders} from 'node:http';
-import {mkdtemp,readFile,rm,truncate,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,rename,rm,symlink,truncate,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
+import {createHash} from 'node:crypto';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {brotliDecompressSync,gunzipSync} from 'node:zlib';
@@ -152,4 +153,72 @@ test('asset failures are retryable and the finite source cache has a hard byte b
   assert.equal((await assets('/style.css','identity')).body.length,16*1024*1024);
   await writeFile(join(directory,'getting-started.js'),'one more byte budget');
   await assert.rejects(assets('/getting-started.js','identity'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+});
+
+async function generatedFixture(t:TestContext){
+  const directory=await mkdtemp(join(tmpdir(),'thot-generated-assets-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  await mkdir(join(directory,'privy-auth-chunks'));
+  const bodies=new Map([['privy-auth.bundle.js',Buffer.from('import "./privy-auth-chunks/ABCDEFGH.js";export const fixture=true;')],['privy-auth-chunks/ABCDEFGH.js',Buffer.from('export const chunk="synthetic public SDK code";')]]);
+  const manifest={format:'thot.privy-assets/1',assets:[...bodies].map(([path,body])=>({path,bytes:body.length,sha256:createHash('sha256').update(body).digest('hex')}))};
+  for(const [path,body]of bodies)await writeFile(join(directory,path),body);
+  const save=()=>writeFile(join(directory,'privy-auth.assets.json'),JSON.stringify(manifest));await save();
+  return {directory,bodies,manifest,save,assets:()=>createDashboardAssets(pathToFileURL(directory+'/'))};
+}
+
+test('retry namespaces and legacy routes share the exact manifest-bound asset and one canonical cache entry',async t=>{
+  const fixture=await generatedFixture(t),assets=fixture.assets();
+  for(const [file,body] of fixture.bodies){
+    const original=await assets('/'+file,'br');assert.deepEqual(brotliDecompressSync(original.body),body);
+    for(const attempt of [0,1,17,9999])assert.strictEqual(await assets(`/privy-auth/v1/${attempt}/${file}`,'br'),original);
+  }
+  for(const route of ['/privy-auth/v1/10000/privy-auth.bundle.js','/privy-auth/v1/01/privy-auth.bundle.js','/privy-auth/v1/-1/privy-auth.bundle.js','/privy-auth/v1/0/../app.js','/privy-auth/v1/0/%2e%2e/app.js','/privy-auth/v1/0/privy-auth.assets.json','/privy-auth/v1/0/privy-auth-entry.js','/privy-auth/v1/0/privy-auth-chunks/UNKNOWN1.js','/privy-auth/v1/0/privy-auth-chunks/ABCDEFGH.js.map','/privy-auth/v1/0/private.js'])await assert.rejects(assets(route,'br'),{code:'NOT_FOUND'},route);
+});
+
+test('manifest membership, digest, sizes, symlinks and finite limits fail closed before caching generated code',async t=>{
+  const fixture=await generatedFixture(t),entry=fixture.manifest.assets[0]!;
+  await writeFile(join(fixture.directory,'privy-auth.bundle.js'),'x'.repeat(entry.bytes));
+  await assert.rejects(fixture.assets()('/privy-auth.bundle.js','br'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+  await writeFile(join(fixture.directory,'privy-auth.bundle.js'),fixture.bodies.get('privy-auth.bundle.js')!);
+  await rm(join(fixture.directory,'privy-auth-chunks/ABCDEFGH.js'));
+  await assert.rejects(fixture.assets()('/privy-auth-chunks/ABCDEFGH.js','br'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+  await symlink(join(fixture.directory,'privy-auth.bundle.js'),join(fixture.directory,'privy-auth-chunks/ABCDEFGH.js'));
+  await assert.rejects(fixture.assets()('/privy-auth-chunks/ABCDEFGH.js','br'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+  await rm(join(fixture.directory,'privy-auth-chunks/ABCDEFGH.js'));
+  await writeFile(join(fixture.directory,'privy-auth-chunks/ABCDEFGH.js'),fixture.bodies.get('privy-auth-chunks/ABCDEFGH.js')!);
+  await rename(join(fixture.directory,'privy-auth-chunks'),join(fixture.directory,'elsewhere'));
+  await symlink(join(fixture.directory,'elsewhere'),join(fixture.directory,'privy-auth-chunks'));
+  await assert.rejects(fixture.assets()('/privy-auth-chunks/ABCDEFGH.js','br'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+  await rm(join(fixture.directory,'privy-auth-chunks'));
+  await rename(join(fixture.directory,'elsewhere'),join(fixture.directory,'privy-auth-chunks'));
+  const original=structuredClone(fixture.manifest.assets);
+  for(const assets of [[{...entry,path:'../private.js'}],[entry,entry],Array.from({length:513},()=>entry),[{...entry,bytes:16*1024*1024+1}],[{...entry,sha256:'invalid'}],[{...entry,bytes:16*1024*1024},{...entry,path:'privy-auth-chunks/ABCDEFGH.js',bytes:16*1024*1024},{...entry,path:'privy-auth-chunks/ABCDEFGI.js',bytes:1}]]){
+    fixture.manifest.assets=assets;await fixture.save();await assert.rejects(fixture.assets()('/privy-auth.bundle.js','br'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+  }
+  fixture.manifest.assets=original;await fixture.save();
+  const manifestPath=join(fixture.directory,'privy-auth.assets.json');
+  await writeFile(manifestPath,' '.repeat(128*1024+1));
+  await assert.rejects(fixture.assets()('/privy-auth.bundle.js','br'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+  await rm(manifestPath);
+  const assets=fixture.assets();await assert.rejects(assets('/privy-auth.bundle.js','br'),{code:'DASHBOARD_ASSET_UNAVAILABLE'});
+  await fixture.save();assert.ok((await assets('/privy-auth.bundle.js','br')).body.length,'missing build may recover without a poisoned cache');
+});
+
+test('packaged chunks preserve real HTTP compression, namespace revalidation, origin denial and admission',async t=>{
+  const manifest=JSON.parse(await readFile(new URL('../apps/dashboard/privy-auth.assets.json',import.meta.url),'utf8'));
+  const file=manifest.assets.find((asset:{path:string})=>asset.path.startsWith('privy-auth-chunks/')).path;
+  const call=await fixture(t),route='/privy-auth/v1/0/'+file;
+  const first=await call(route,{'Accept-Encoding':'br'});assert.equal(first.status,200);
+  assert.equal(first.headers['cache-control'],'private, no-cache');assert.equal(first.headers['content-encoding'],'br');
+  assert.deepEqual(brotliDecompressSync(first.body),await readFile(new URL('../apps/dashboard/'+file,import.meta.url)));
+  const headers={'Accept-Encoding':'br','If-None-Match':first.headers.etag!};
+  const next=await call('/privy-auth/v1/9999/'+file,headers);assert.equal(next.status,304);assert.equal(next.body.length,0);
+  for(const denial of [{Host:'attacker.invalid'},{Origin:'https://attacker.invalid'},{'Sec-Fetch-Site':'cross-site'}] as Record<string,string>[]){
+    const denied=await call(route,{...headers,...denial});assert.equal(denied.status,403);assert.equal(denied.headers['cache-control'],'no-store');assert.equal(denied.headers.etag,undefined);
+  }
+  const limited=await fixture(t,new ApiAdmission({limits:{public_requests:2}}));
+  assert.equal((await limited(route)).status,200);assert.equal((await limited('/privy-auth/v1/1/'+file)).status,200);
+  assert.equal((await limited('/privy-auth/v1/2/'+file)).status,429);
+  for(const path of ['/privy-auth.assets.json','/privy-auth/v1/0/privy-auth.assets.json','/privy-auth/v1/0/privy-auth-chunks/UNKNOWN1.js','/privy-auth/v1/0/private.js']){
+    const denied=await call(path,headers);assert.ok([401,404].includes(denied.status),path);assert.equal(denied.headers['cache-control'],'no-store');assert.equal(denied.headers.etag,undefined);
+  }
 });

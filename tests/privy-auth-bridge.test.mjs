@@ -16,13 +16,18 @@ const provider={fixture:true};
 const wallet={address,walletClientType:'privy',switchChain:async()=>{calls.switchChain++;},getEthereumProvider:async()=>{calls.provider++;return provider;}};
 const user={id:'synthetic-a',linkedAccounts:[{type:'wallet',chainType:'ethereum',address}]};
 let snapshot={auth:{ready:false,authenticated:false,user:null,logout:async()=>{},linkWallet(){}},wallet:{ready:false,wallets:[]},modal:{isOpen:false}};
-let loginHooks, controller;
-const sdk={subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},getSnapshot:()=>snapshot,setLoginHooks:value=>{loginHooks=value;},login:()=>{calls.login++;},createWallet:async()=>{calls.createWallet++;}};
+let loginHooks, controller, modalBehavior='ready';
+function modalContent(kind){
+ let content=document.querySelector('#privy-modal-content');
+ if(!content){content=document.createElement('div');content.id='privy-modal-content';document.body.appendChild(content);}
+ content.innerHTML=kind==='ready'?'<input type="email" placeholder="Email"><button disabled>Submit</button>':kind==='wallet'?'<button>Continue with a wallet</button>':kind==='disabled'?'<input type="email" disabled><button disabled>Continue</button>':kind==='hidden'?'<input type="email" hidden><button style="display:none">Continue</button>':'<p>Loading</p><button aria-label="Close"><svg></svg></button>';
+}
+const sdk={subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},getSnapshot:()=>snapshot,setLoginHooks:value=>{loginHooks=value;},login:()=>{calls.login++;modalContent(modalBehavior);},createWallet:async()=>{calls.createWallet++;}};
 globalThis.__sdk=sdk;
-let initialized='pending',providers='idle',errors=[];
+let initialized='pending',providers='idle',opening='idle',errors=[];
 function setState(patch){snapshot={auth:{...snapshot.auth,...(patch.ready===undefined?{}:{ready:patch.ready}),...(patch.authenticated===undefined?{}:{authenticated:patch.authenticated,user:patch.authenticated?user:null}),...(patch.otherUser?{user:{...user,id:'synthetic-b',linkedAccounts:[{type:'wallet',chainType:'ethereum',address:other}]}}:{})},wallet:{ready:patch.walletsReady??snapshot.wallet.ready,wallets:patch.hasWallet===undefined?snapshot.wallet.wallets:patch.hasWallet?[wallet]:[]},modal:{isOpen:patch.modalOpen??snapshot.modal.isOpen}};for(const listener of listeners)listener();}
 const target=document.querySelector('#choices');
-window.fixture={calls,errors,setState,async start({deadline=5000,...state}={}){setState(state);controller=createPrivyAuth({document,window:{setTimeout:(callback,ms)=>window.setTimeout(callback,ms===30000?deadline:ms),clearTimeout:window.clearTimeout.bind(window)},config:{app_id:'syntheticprivyapplication123456',chain_id:31337,rpc_url:'https://rpc.example.test'},walletAuth:{async signOut(){calls.signOut++;},async signInProvider(){calls.signIn++;return true;}},onError:error=>errors.push(error.message)});controller.mount(target);controller.initialize().then(()=>{initialized='ready';},error=>{initialized=error.message;});},login:()=>controller.login(),destroy:()=>controller.destroy(),complete:()=>loginHooks.onComplete({loginAccount:{type:'email'}}),get status(){return{initialized,providers,calls:{...calls},errors:[...errors]};},providers(){providers='pending';controller.providers(address).then(value=>{providers=value.length;},error=>{providers=error.message;});}};
+window.fixture={calls,errors,setState,async start({deadline=5000,modal='ready',...state}={}){modalBehavior=modal;setState(state);controller=createPrivyAuth({document,window:{setTimeout:(callback,ms)=>window.setTimeout(callback,ms===30000?deadline:ms),clearTimeout:window.clearTimeout.bind(window)},config:{app_id:'syntheticprivyapplication123456',chain_id:31337,rpc_url:'https://rpc.example.test'},walletAuth:{async signOut(){calls.signOut++;},async signInProvider(){calls.signIn++;return true;}},onError:error=>errors.push(error.message)});controller.mount(target);controller.initialize().then(()=>{initialized='ready';},error=>{initialized=error.message;});},modalContent,beginLogin(){opening='pending';controller.login().then(()=>{opening='resolved';},error=>{opening={message:error.message,code:error.code};});},login:()=>controller.login(),destroy:()=>controller.destroy(),complete:()=>loginHooks.onComplete({loginAccount:{type:'email'}}),get status(){return{initialized,providers,opening,calls:{...calls},errors:[...errors]};},providers(){providers='pending';controller.providers(address).then(value=>{providers=value.length;},error=>{providers=error.message;});}};
 `;
 const mockSdk = `
 import React, {useSyncExternalStore} from 'react';
@@ -127,4 +132,44 @@ test('wallet readiness after initialized login has its own bounded provider-rest
   await page.waitForFunction(()=>typeof window.fixture.status.providers==='string'&&window.fixture.status.providers.includes('still loading'));
   await page.evaluate(()=>window.fixture.setState({walletsReady:true}));
   assert.equal((await status(page)).calls.provider,0);assert.equal((await status(page)).calls.signIn,0);
+});
+
+for(const modal of ['loading','disabled','hidden'])test(`initial ${modal} modal does not resolve as a usable sign-in form and has a recoverable opening deadline`,async t=>{
+  const page=await pageFor(t,{ready:true,modal,deadline:120});
+  await page.waitForFunction(()=>window.fixture.status.initialized==='ready');
+  await page.evaluate(()=>window.fixture.beginLogin());
+  await page.waitForFunction(()=>window.fixture.status.opening?.code==='PRIVY_LOGIN_OPEN_FAILED');
+  const result=await status(page);assert.match(result.opening.message,/Sign-in options could not load/);
+  assert.equal(result.calls.login,1);assert.equal(result.calls.signIn,0);assert.equal(result.calls.provider,0);
+});
+
+for(const controls of ['ready','wallet'])test(`opening waits for visible usable ${controls} controls, then stops timing the user's login`,async t=>{
+  const page=await pageFor(t,{ready:true,modal:'loading',deadline:300});
+  await page.waitForFunction(()=>window.fixture.status.initialized==='ready');
+  await page.evaluate(()=>window.fixture.beginLogin());await page.waitForTimeout(25);
+  assert.equal((await status(page)).opening,'pending');
+  await page.evaluate(controls=>window.fixture.modalContent(controls),controls);
+  await page.waitForFunction(()=>window.fixture.status.opening==='resolved');
+  await page.waitForTimeout(350);
+  assert.equal((await status(page)).opening,'resolved');assert.deepEqual((await status(page)).errors,[]);
+  assert.equal((await status(page)).calls.signIn,0);
+});
+
+for(const ending of ['cancel','destroy'])test(`${ending} while modal code is loading settles and cleans up the opening waiter without a load error`,async t=>{
+  const page=await pageFor(t,{ready:true,modal:'loading',deadline:200});
+  await page.waitForFunction(()=>window.fixture.status.initialized==='ready');
+  await page.evaluate(()=>{window.fixture.setState({modalOpen:true});window.fixture.beginLogin();});
+  await page.waitForTimeout(25);assert.equal((await status(page)).opening,'pending');
+  await page.evaluate(ending=>ending==='destroy'?window.fixture.destroy():window.fixture.setState({modalOpen:false}),ending);
+  await page.waitForFunction(()=>window.fixture.status.opening==='resolved');
+  await page.waitForTimeout(250);assert.deepEqual((await status(page)).errors,[]);
+  assert.equal((await status(page)).calls.signIn,0);
+});
+
+test('already authenticated wallet selection is independent of the anonymous modal deadline',async t=>{
+  const page=await pageFor(t,{ready:true,authenticated:true,walletsReady:true,hasWallet:true,modal:'loading',deadline:100});
+  await page.waitForFunction(()=>window.fixture.status.initialized==='ready');
+  await page.evaluate(()=>window.fixture.beginLogin());
+  await page.waitForFunction(()=>window.fixture.status.opening==='resolved'&&window.fixture.status.calls.signIn===1);
+  assert.equal((await status(page)).calls.login,0);assert.deepEqual((await status(page)).errors,[]);
 });
