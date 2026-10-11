@@ -289,6 +289,12 @@ try {
   await assert.rejects(fixture.market.finalize(offer.id));
   assert.equal(await fixture.token.balanceOf(seller.address), balancesBefore.seller);
   evidence.dispute_seconds = Number(await fixture.market.DISPUTE_WINDOW());
+  // Settlement and refund are a second chapter. Start it after the actors' first
+  // real 60-second request window, before payout readback can consume its budget.
+  // Chain time acceleration does not advance the HTTP actor limiter's clock.
+  const pacingStartedAt = Date.now();
+  while (Date.now() < actorsReadyAt + 65000) await pause(Math.min(30000, actorsReadyAt + 65000 - Date.now()));
+  evidence.pacing = {chapter: 'settlement-and-refund', minimum_actor_age_ms: 65000, waited_ms: Date.now() - pacingStartedAt};
   phase = 'local-payout'; await fixture.advance(evidence.dispute_seconds + 1); startWorker();
   await waitFor(async () => await fixture.token.balanceOf(seller.address) === balancesBefore.seller + BigInt(receipt.seller_amount), 'actual seller payout');
   await worker.close(); worker = undefined;
@@ -306,8 +312,6 @@ try {
   evidence.payout_transaction = completed.payout_transaction; evidence.checks.push('Early payout denied; local-only accelerated deadline yields mined payout and exact beneficiary balance deltas; repeated worker cycle cannot pay twice.');
   await seller.open('earnings'); await shot(seller.page, 'purchase-06-seller-paid');
   phase = 'refund';
-  // Pace the second chapter under the unchanged 180-request/60-mutation actor limits.
-  while (Date.now() < actorsReadyAt + 65000) await pause(Math.min(30000, actorsReadyAt + 65000 - Date.now()));
   const refundListing = (await enroll('refund')).listing;
   const refundOffer = await buyer.api('/v1/thot/offers/prepare', {listing_id: refundListing.id});
   const refundBalance = await fixture.token.balanceOf(buyer.address);
