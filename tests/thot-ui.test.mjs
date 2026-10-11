@@ -875,3 +875,85 @@ test('only confirmed unavailable unfunded attempts are archived without zero set
  assert.match(open,/Unknown payment/);assert.match(open,/Funded purchase/);assert.match(open,/purchases-freshness/);assert.doesNotMatch(open,/Expired &lt;attempt&gt;|Closed attempt/);
  assert.match(ui.offersHTML(),/Your purchases <span>2<\/span>/);
 });
+
+for(const operation of ['buy','reserve-buy'])test(`${operation} review identifies the prepared seller with a full address before signing`,async t=>{
+ const f=fixture(t,()=>{throw Error('Displaying seller must not contact wallet');},()=>({id:hash(91),seller:other,transactions,buyer_total:atoms(1)}));
+ await f.ui.action('thot-'+operation,{dataset:{id:'listing-one'}});
+ const html=f.dialogs.at(-1)[2];
+ assert.match(html,/Seller wallet/);
+ assert.match(html,new RegExp('<code[^>]*class="thot-seller-address"[^>]*>'+other+'<\\/code>'));
+ assert.match(html,new RegExp('data-action="thot-copy-seller-wallet"[^>]*data-id="'+other+'"'));
+ assert.match(html,/aria-label="Copy seller wallet address"/);
+ assert.equal(f.requests.length,0);
+ assert.deepEqual(f.calls[0].options.body,{listing_id:'listing-one',...(operation==='reserve-buy'?{funding_source:'reserve'}:{})});
+});
+
+test('listings and buyer purchase cards expose the seller wallet instead of the buyer or transaction target',()=>{
+ const {state,ui}=viewFixture();
+ const seller='0x1234567890abcdef1234567890abcdef12345678';
+ state.thot.listings[0].seller=seller;
+ state.thot.orders=[{id:'my-purchase',title:'Purchased trace',seller,buyer:owner,gross:atoms(1),receipt:{status:3,seller,seller_amount:atoms(1),referral_amount:'0'}}];
+ const listing=ui.offersHTML().match(/<article class="thot-listing">[\s\S]*?<\/article>/)?.[0];
+ assert(listing);
+ for(const html of [listing,ui.purchasesHTML()]){
+  assert.match(html,new RegExp('<code[^>]*class="thot-seller-address"[^>]*>'+seller+'<\\/code>'));
+  assert.match(html,new RegExp('data-action="thot-copy-seller-wallet"[^>]*data-id="'+seller+'"'));
+  assert.doesNotMatch(html,new RegExp('data-action="thot-copy-seller-wallet"[^>]*data-id="(?:'+owner+'|'+other+')"'));
+ }
+});
+
+test('purchase recovery preserves its seller after reload and a click on another listing',async t=>{
+ const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ const first=fixture(t,()=>{throw Error('No wallet request expected');},()=>({id:hash(92),seller:other,transactions,buyer_total:atoms(1)}),{recoveryStorage:storage});
+ await first.ui.action('thot-buy',{dataset:{id:'original-listing'}});
+ const key=[...data.keys()][0],saved=JSON.parse(data.get(key));
+ assert.equal(saved.seller,other);saved.steps[0].hash=hash(93);data.set(key,JSON.stringify(saved));
+ const replacementSeller='0xabcdefabcdefabcdefabcdefabcdefabcdefabcd';
+ const second=fixture(t,()=>{throw Error('No wallet request expected');},()=>{throw Error('Pending purchase must not prepare another listing');},{recoveryStorage:storage});
+ second.state.thot.listings=[{id:'new-listing',seller:replacementSeller}];
+ await second.ui.action('thot-buy',{dataset:{id:'new-listing'}});
+ assert.equal(second.dialogs.at(-1)[0],'Continue your purchase');
+ assert.match(second.dialogs.at(-1)[2],new RegExp('data-action="thot-copy-seller-wallet"[^>]*data-id="'+other+'"'));
+ assert.doesNotMatch(second.dialogs.at(-1)[2],new RegExp(replacementSeller));
+ assert.equal(JSON.parse(data.get(key)).seller,other);
+ assert.equal(second.calls.length,0);assert.equal(second.requests.length,0);
+ assert.equal(JSON.parse(data.get(key)).steps[0].hash,hash(93));
+});
+
+for(const legacyTotal of [true,false])test(`legacy purchase recovery without seller ${legacyTotal?'with':'without'} total shows unavailable and never borrows a new listing`,async t=>{
+ const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ const first=fixture(t,()=>{},()=>({id:hash(94),seller:other,transactions,buyer_total:atoms(1)}),{recoveryStorage:storage});
+ await first.ui.action('thot-buy',{dataset:{id:'original-listing'}});
+ const key=[...data.keys()][0],saved=JSON.parse(data.get(key));
+ delete saved.seller;if(!legacyTotal)delete saved.buyer_total;saved.steps[0].hash=hash(95);data.set(key,JSON.stringify(saved));
+ const second=fixture(t,()=>{throw Error('No wallet request expected');},()=>{throw Error('No fresh preparation expected');},{recoveryStorage:storage});
+ second.state.thot.listings=[{id:'new-listing',seller:other}];
+ await second.ui.action('thot-buy',{dataset:{id:'new-listing'}});
+ const html=second.dialogs.at(-1)[2];assert.match(html,/Seller wallet unavailable/);assert.doesNotMatch(html,/thot-copy-seller-wallet/);
+ assert.equal(second.calls.length,0);assert.equal(second.requests.length,0);
+ assert.equal(JSON.parse(data.get(key)).steps[0].hash,hash(95));
+});
+
+test('copy seller wallet copies the exact address and reports success without API or wallet requests',async t=>{
+ const copied=[],pause=deferred();
+ const f=fixture(t,()=>{throw Error('Copy must not access wallet');},()=>{throw Error('Copy must not call API');},{copyText:async text=>{copied.push(text);await pause.promise;}});
+ const copying=f.ui.action('thot-copy-seller-wallet',{dataset:{id:other},disabled:false});
+ assert.deepEqual(copied,[other]);assert.deepEqual(f.notices,[]);
+ pause.resolve();await copying;
+ assert.deepEqual(f.notices,['Seller wallet copied.']);assert.equal(f.requests.length,0);assert.equal(f.calls.length,0);
+});
+
+test('unavailable clipboard gives manual copy guidance without leaking the clipboard error',async t=>{
+ const f=fixture(t,()=>{throw Error('Copy must not access wallet');},()=>{throw Error('Copy must not call API');},{copyText:async()=>{throw Error('PRIVATE_CLIPBOARD_DIAGNOSTIC');}});
+ await assert.rejects(f.ui.action('thot-copy-seller-wallet',{dataset:{id:other},disabled:false}),{message:'Could not copy. Select and copy the seller address shown above.'});
+ assert.deepEqual(f.notices,[]);assert.equal(f.requests.length,0);assert.equal(f.calls.length,0);
+});
+
+for(const invalid of [undefined,'0x1234','0x'+'0'.repeat(40),'<img src=x onerror=alert(1)>',other+'extra'])test(`invalid seller ${invalid===undefined?'missing':invalid==='0x1234'?'short':invalid==='0x'+'0'.repeat(40)?'zero address':invalid.startsWith('<')?'markup':'trailing data'} is unavailable and cannot be copied`,async t=>{
+ const copied=[];
+ const f=fixture(t,()=>{throw Error('No wallet request expected');},()=>({id:hash(96),seller:invalid,transactions,buyer_total:atoms(1)}),{copyText:async text=>copied.push(text)});
+ await f.ui.action('thot-buy',{dataset:{id:'invalid-seller-listing'}});
+ const html=f.dialogs.at(-1)[2];assert.match(html,/Seller wallet unavailable/);assert.doesNotMatch(html,/thot-copy-seller-wallet|<img/);
+ const callsBefore=f.calls.length;await assert.rejects(f.ui.action('thot-copy-seller-wallet',{dataset:{id:invalid},disabled:false}));
+ assert.deepEqual(copied,[]);assert.equal(f.requests.length,0);assert.equal(f.calls.length,callsBefore);
+});

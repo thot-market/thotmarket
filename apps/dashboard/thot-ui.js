@@ -60,7 +60,7 @@ export async function purchaseApprovalReady({request,expected,from,token,market,
  return BigInt(approved)>=amount&&BigInt(latest)>=amount;
 }
 // Contributors sign explicit enrollment terms; only the reserve worker moves its own funds.
-export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,download,getProvider=()=>globalThis.window?.ethereum,recoveryStorage=globalThis.window?.sessionStorage}) {
+export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,download,getProvider=()=>globalThis.window?.ethereum,recoveryStorage=globalThis.window?.sessionStorage,copyText=text=>globalThis.navigator.clipboard.writeText(text)}) {
  let pending=null,listingMetadata=null,listingScope=null,listingEnrollment=null,samplingPreview=null,samplingScope=null,reserveSelection=null,inFlight=false;
  const recoveries=new Map();
  const fmt=value=>{const n=BigInt(value??0),base=10n**18n;return `${(n/base).toLocaleString()}.${String(n%base).padStart(18,'0').slice(0,4)} THOT`;};
@@ -86,6 +86,11 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  const traceTitle=t=>t.title??state.traceLibrary?.items?.find(item=>item.trace_id===t.trace_id)?.title??t.trace_id;
  const status=['Unfunded','Funded · awaiting your consent','Accepted · delivery pending','Delivered · dispute window','Disputed · payout held','Finalized','Refunded · buyer allocation'];
  const button=(name,label,id='',disabled=false,primary=false)=>`<button ${disabled?'disabled aria-disabled="true"':''} class="button${primary?'':' secondary'}" data-action="thot-${name}" data-id="${escape(id)}">${label}</button>`;
+ const walletAddress=value=>typeof value==='string'&&/^0x[0-9a-f]{40}$/i.test(value)&&!/^0x0{40}$/i.test(value);
+ function sellerWalletHTML(seller){
+  if(!walletAddress(seller))return '<div class="thot-seller-wallet"><span class="thot-seller-label">Seller wallet unavailable</span></div>';
+  return `<div class="thot-seller-wallet"><div><span class="thot-seller-label">Seller wallet</span><code class="thot-seller-address">${escape(seller)}</code></div><button type="button" class="thot-copy-wallet" data-action="thot-copy-seller-wallet" data-id="${escape(seller)}" aria-label="Copy seller wallet address">Copy</button></div>`;
+ }
  const scope=()=>{const actor=state.actor?.id,g=state.generation,p=getProvider();return ()=>{if(p!==getProvider())throw Error('Your wallet provider changed. Review this action again.');if(actor!==state.actor?.id||g!==state.generation){const e=Error('Your account changed. Review this action again.');e.name='StaleWorkspaceError';throw e;}};};
  async function checkNetwork(){
   if(!getProvider()?.request)throw Error('Open this app in a browser with an Ethereum wallet to link an account or sign. '+networkName()+(production()?' uses real THOT.':' uses test assets only.'));
@@ -98,8 +103,8 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  const storageKey=key=>'thot.wallet-recovery.v1:'+key;
  function saveRecovery(operation){
   if(!recoveryStorage)return;
-  const {key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics}=operation;
-  recoveryStorage.setItem(storageKey(key),JSON.stringify({version:1,key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics}));
+  const {key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics,seller}=operation;
+  recoveryStorage.setItem(storageKey(key),JSON.stringify({version:1,key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics,seller}));
  }
  function savedRecovery(key){
   if(recoveries.has(key))return recoveries.get(key);
@@ -238,7 +243,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
   saveRecovery(pending);
   const current=scope(),operation=pending;pending.current=()=>{current();if(recoveryKey(operator,operation.exit===true)!==key)throw Error('The linked wallet or chain changed. Review this action again.');};
   const progress=pending.steps.map(step=>({transaction:step.transaction,hash:step.hash,status:step.confirmed?'confirmed':step.reverted?'reverted':step.uncertain?'submission unknown':step.hash?'pending':'not submitted'}));
-  openDialog(title,networkName()+(production()?' · THOT':' · test THOT')+' · review before signing',`${extra}<div data-wallet-progress>${progressHTML(pending)}</div><details><summary>Terms and transaction details</summary><p>${escape(pending.notice??'Your wallet will submit the displayed action. Contract state is authoritative.')}</p><pre class="json-view">${json(progress)}</pre></details>`,button('send',actionLabel(pending),'',false,true));
+  openDialog(title,networkName()+(production()?' · THOT':' · test THOT')+' · review before signing',`${pending.purchase?sellerWalletHTML(pending.seller):''}${extra}<div data-wallet-progress>${progressHTML(pending)}</div><details><summary>Terms and transaction details</summary><p>${escape(pending.notice??'Your wallet will submit the displayed action. Contract state is authoritative.')}</p><pre class="json-view">${json(progress)}</pre></details>`,button('send',actionLabel(pending),'',false,true));
   if(pending.purchase)void refreshPurchaseApproval(pending);
  }
  function holderBenefitsHTML(){
@@ -304,7 +309,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
   const r=o.receipt,seller=sameWallet(o.seller,state.thot.wallet),buyer=sameWallet(o.buyer,state.thot.wallet);
   const refundPaid=r.status===6&&/^0x[0-9a-f]{64}$/i.test(o.refund_transaction??'');
   const label=r.status===0?'Payment not yet confirmed':r.status===5?(o.payout_transaction?'Payout transaction confirmed':'Finalized · payout pending'):refundPaid?'Refund paid to buyer wallet':r.status===1?(seller?'Funded · awaiting your consent':'Funded · awaiting seller consent'):status[r.status];
-  return `<article class="panel thot-order" data-purchase-id="${escape(o.id)}"><span class="pill">${escape(label)}</span><h3>${escape(o.title)}</h3><p>${seller?'Your sale':'Your purchase'}${r.status===6?' · refunded':` · seller price ${escape(fmt(r.seller_gross??o.seller_gross??o.gross))}`}</p>${r.status===6?'':`<p>${r.economics?'Service fee '+escape(fmt(r.economics.service_fee)):'Buyer surcharge '+escape(fmt(r.buyer_surcharge??o.buyer_surcharge??0))} · total escrow ${escape(fmt(r.buyer_total??o.buyer_total??o.gross))}. Seller receives ${escape(fmt(r.seller_amount))}. Referral ${escape(fmt(r.referral_amount))}.</p>`}
+  return `<article class="panel thot-order" data-purchase-id="${escape(o.id)}"><span class="pill">${escape(label)}</span><h3>${escape(o.title)}</h3>${buyer?sellerWalletHTML(o.seller):''}<p>${seller?'Your sale':'Your purchase'}${r.status===6?' · refunded':` · seller price ${escape(fmt(r.seller_gross??o.seller_gross??o.gross))}`}</p>${r.status===6?'':`<p>${r.economics?'Service fee '+escape(fmt(r.economics.service_fee)):'Buyer surcharge '+escape(fmt(r.buyer_surcharge??o.buyer_surcharge??0))} · total escrow ${escape(fmt(r.buyer_total??o.buyer_total??o.gross))}. Seller receives ${escape(fmt(r.seller_amount))}. Referral ${escape(fmt(r.referral_amount))}.</p>`}
    ${r.status===1&&seller?button('review','Review exact release',o.id):''}
    ${[2,3,4,5].includes(r.status)&&buyer?button('delivery','Open licensed release',o.id):''}
    ${r.status===1&&buyer?button('cancelOffer','Cancel funded offer',o.id):''}
@@ -314,7 +319,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  }
  function listingCard(l){
   const w=state.thot;
-  return `<article class="thot-listing"><div class="thot-listing-body"><h3>${escape(l.title)}</h3><p>${escape(l.workflow)} · ${escape(l.turn_count)} turns · ${escape(l.provenance)}</p>${modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}</div><div class="thot-listing-purchase"><p class="eyebrow">Listed price</p><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong><p class="legal-note">Review the exact total before signing.</p><details><summary>License</summary><p>${escape(l.license)}</p></details>${w.wallet&&!sameWallet(l.seller,w.wallet)?button('assay','Check workflow & length',l.id)+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):'')+(purchasesPaused()?'':button('buy','Buy this trace',l.id,false,true)):''}${sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
+  return `<article class="thot-listing"><div class="thot-listing-body"><h3>${escape(l.title)}</h3>${sellerWalletHTML(l.seller)}<p>${escape(l.workflow)} · ${escape(l.turn_count)} turns · ${escape(l.provenance)}</p>${modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}</div><div class="thot-listing-purchase"><p class="eyebrow">Listed price</p><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong><p class="legal-note">Review the exact total before signing.</p><details><summary>License</summary><p>${escape(l.license)}</p></details>${w.wallet&&!sameWallet(l.seller,w.wallet)?button('assay','Check workflow & length',l.id)+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):'')+(purchasesPaused()?'':button('buy','Buy this trace',l.id,false,true)):''}${sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
  }
  function purchasesHTML(){
   const w=state.thot,orders=(w.orders??[]).filter(o=>sameWallet(o.buyer,w.wallet));
@@ -500,6 +505,11 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  async function action(name,element){
   if(!name.startsWith('thot-'))return false;
   const op=name.slice(5),id=element.dataset.id,current=scope();
+  if(op==='copy-seller-wallet'){
+   if(!walletAddress(id))throw Error('Seller wallet unavailable.');
+   try{await copyText(id);}catch{throw Error('Could not copy. Select and copy the seller address shown above.');}
+   current();toast('Seller wallet copied.');return true;
+  }
   if(op.startsWith('gov-')){
    let action=op.slice(4),body={action,id};
    const campaignActions=['create_campaign','bind_market','pause_campaign','resume_campaign','cancel_campaign','expire_campaign'];
