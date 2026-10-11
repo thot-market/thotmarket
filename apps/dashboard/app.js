@@ -27,6 +27,7 @@ let authMode='development';
 let clerkAuth=null;
 let walletAuth=null;
 let privyAuth=null, privyConfig=null, privyLoading=null;
+let privyLoginPhase='', privyLoginBusy=false, privyLoginRetry=false, privyImportRetry=0;
 let earningsTimer=null, earningsRefreshRunning=false, fullRefreshCount=0;
 let earningsUpdatedAt=null, earningsRefreshError=false;
 let purchasesTimer=null,purchasesRefreshing=false,purchasesAttempts=0;
@@ -705,14 +706,21 @@ async function loadPrivyAuth() {
   if(privyAuth)return privyAuth;
   if(privyLoading)return privyLoading;
   if(!privyConfig)throw new Error('Email wallet login is not configured.');
-  let candidate=null,expired=false,timer;
+  let candidate=null,expired=false,timer,downloaded=false;
   const run=(async()=>{
     try {
-      const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(new Error('Sign in took too long to load. Please try again.'));},30000);});
+      const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;reject(new Error(downloaded?'The sign-in service is taking too long to respond. Please try again.':'Sign-in download timed out. Check your connection and try again.'));},30000);});
       const initialized=(async()=>{
-        const {createPrivyAuth}=await import('./privy-auth.bundle.js');
+        // Browsers retain failed module imports. A new URL lets an explicit retry
+        // recover after a network failure without reloading the whole workspace.
+        let module;
+        try {module=await (privyImportRetry?import(`./privy-auth.bundle.js?retry=${privyImportRetry}`):import('./privy-auth.bundle.js'));}
+        catch {privyImportRetry++;throw new Error('Sign-in could not download. Check your connection and try again.');}
         if(expired)throw new Error('Email wallet loading expired.');
-        candidate=createPrivyAuth({window,document,config:privyConfig,walletAuth,onError:error=>{if(privyAuth===candidate)showIdentityLogin(error.message);}});
+        downloaded=true;
+        if(privyLoginBusy)setPrivyLoginPhase('Connecting to sign-in…');
+        const {createPrivyAuth}=module;
+        candidate=createPrivyAuth({window,document,config:privyConfig,walletAuth,onError:error=>{if(privyAuth===candidate){privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);}}});
         await candidate.initialize();
         if(expired)throw new Error('Email wallet loading expired.');
         return candidate;
@@ -725,13 +733,24 @@ async function loadPrivyAuth() {
   privyLoading=run;
   try{return await run;}finally{if(privyLoading===run)privyLoading=null;}
 }
+function setPrivyLoginPhase(message){
+  privyLoginPhase=message;
+  if(state.actor||authMode!=='wallet_siwe')return;
+  const button=main.querySelector('[data-privy-login]'),status=main.querySelector('#privy-login-status');
+  if(button){button.disabled=privyLoginBusy;button.textContent=privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in';button.setAttribute('aria-busy',String(privyLoginBusy));}
+  if(status&&message){status.textContent=message;status.hidden=false;}
+  else if(status&&!privyLoginRetry){status.textContent='';status.hidden=true;}
+}
 async function openPrivyLogin(){
+  if(privyLoginBusy)return;
   const attempt=++walletLoginAttempt;signingOut=false;
+  privyLoginBusy=true;privyLoginRetry=false;setPrivyLoginPhase(privyAuth?'Opening sign-in…':'Loading secure sign-in…');
   // An anonymous restore may redisplay this login while the SDK loads. It is
   // still the same user action; another login, logout or accepted account is not.
   const current=()=>{if(attempt!==walletLoginAttempt||state.actor||signingOut||authMode!=='wallet_siwe')throw staleWorkspace();};
-  try {const auth=await loadPrivyAuth();current();auth.mount(document.querySelector('#privy-wallet-choices'));await auth.login();}
-  catch(error){current();showIdentityLogin(error.message);}
+  try {const auth=await loadPrivyAuth();current();setPrivyLoginPhase('Opening sign-in…');auth.mount(document.querySelector('#privy-wallet-choices'));await auth.login();}
+  catch(error){current();privyLoginBusy=false;privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);}
+  finally {privyLoginBusy=false;setPrivyLoginPhase('');}
 }
 function showIdentityLogin(message='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'){
   const operationsLink=document.querySelector('#operations-console-link');if(operationsLink)operationsLink.hidden=true;
@@ -742,11 +761,12 @@ function showIdentityLogin(message='Use a short-lived access token from your con
   if(authMode==='wallet_siwe'){
     if(privyConfig){
       const feedback=['Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.','Connect your EVM wallet to continue.','Connect your wallet to continue.'].includes(message)?'':message;
-      main.innerHTML=`<section class="page-heading"><div><p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Your work. Your wallet.</h1></div></section><section aria-label="Sign in"><button class="button" data-privy-login>Sign in</button>${feedback?`<p role="status">${escape(feedback)}</p>`:''}<div id="privy-wallet-choices"></div></section>`;
+      const status=privyLoginPhase||feedback;
+      main.innerHTML=`<section class="page-heading"><div><p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Your work. Your wallet.</h1></div></section><section aria-label="Sign in"><button class="button" data-privy-login${privyLoginBusy?' disabled aria-busy="true"':''}>${privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in'}</button><p id="privy-login-status" role="status" aria-live="polite"${status?'':' hidden'}>${escape(status)}</p><div id="privy-wallet-choices"></div></section>`;
     }else{
       main.innerHTML=heading('YOUR PRIVATE WORKSPACE','Sign in with your wallet.',message==='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'?'Connect an EVM wallet and sign a one-time login message.':message)+`<section class="panel audit-card"><h2>Your wallet is your account.</h2><p>Sign-in does not approve a token transfer or authorize a trace sale.</p><div class="actions"><button class="button secondary" data-wallet-login="metamask">MetaMask</button><button class="button secondary" data-wallet-login="phantom">Phantom · EVM</button><button class="button secondary" data-wallet-login="injected">Other EVM wallet</button></div></section>`;
     }
-    const privyButton=main.querySelector('[data-privy-login]');if(privyButton)privyButton.addEventListener('click',()=>void safely(openPrivyLogin,privyButton));
+    const privyButton=main.querySelector('[data-privy-login]');if(privyButton)privyButton.addEventListener('click',()=>void safely(openPrivyLogin));
     privyAuth?.mount(document.querySelector('#privy-wallet-choices'));
     for(const button of main.querySelectorAll('[data-wallet-login]'))button.addEventListener('click',()=>{walletLoginAttempt++;signingOut=false;void safely(()=>walletAuth?.signIn(button.dataset.walletLogin),button);});return;
   }

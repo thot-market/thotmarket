@@ -23,6 +23,7 @@ import { AuthAccessStore, ExternalAuth, ClerkAuth, WalletAuth, walletAuthOrigins
 import { OperationalControls } from '../../packages/market/src/operational-controls.ts';
 import { InferenceReconciliation, type BillingReconciliationConfig } from '../../packages/market/src/inference-reconciliation.ts';
 import {ApiAdmission} from './admission.ts';
+import {createDashboardAssets,isDashboardAssetRoute,matchesAssetEtag} from './dashboard-assets.ts';
 import {OperatorActivity} from './operator-activity.ts';
 import {OperatorFleet} from './operator-fleet.ts';
 import {operatorProduct} from './operator-product.ts';
@@ -97,6 +98,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
   const demoOffers=app.service.config.development&&(options.enableDemoOffers??!externalAuth);
   const access=externalAuth?.access??new AuthAccessStore(app.db,'thot:development',sessionNow);
   const admission=options.admission??new ApiAdmission({clock:sessionNow});
+  const dashboardAssets=createDashboardAssets();
   const handle=async(req:IncomingMessage,res:ServerResponse)=>{
     const started=Date.now(),requestId=randomUUID();let route='unknown',rateConsumed=false,phase:'handling'|'response_serialization'='handling';
     let releaseBody:undefined|(()=>void),releaseRequest:undefined|(()=>void),releaseAuth:undefined|(()=>void),releaseVerified:undefined|(()=>void);
@@ -154,7 +156,20 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         if(asset){chargeRate('public');res.writeHead(200,{'Content-Type':asset.contentType});res.end(req.method==='HEAD'?undefined:asset.body);return;}
       }
       if(req.method==='GET'&&route==='/v1/public/launch-config'){chargeRate('public');reply(200,publicLaunchConfig(options.launch));return;}
-      if(req.method==='GET'&&['/app','/app/','/ops','/ops/','/operator-app.js','/operator.css','/style.css','/app.js','/money-ui.js','/thot-ui.js','/staking-ui.js','/staking.css','/thot-analytics-ui.js','/mandate-editor.js','/inference-ui.js','/operations-ui.js','/contributor-ui.js','/clerk-auth-ui.js','/wallet-auth-ui.js','/privy-auth.bundle.js','/privy-auth-state.js','/openrouter-ui.js','/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js','/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started','/getting-started.js'].includes(route)) {
+      if((req.method==='GET'||req.method==='HEAD')&&isDashboardAssetRoute(route)){
+        chargeRate('public');
+        res.setHeader('Vary','Accept-Encoding');
+        const asset=await dashboardAssets(route,req.headers['accept-encoding']);
+        // The same URLs can change between releases. Always revalidate, and do
+        // not let a shared cache turn a protected site's gate into a bypass.
+        res.setHeader('Cache-Control','private, no-cache');res.setHeader('ETag',asset.etag);
+        res.setHeader('Content-Type',asset.contentType);
+        if(asset.encoding!=='identity')res.setHeader('Content-Encoding',asset.encoding);
+        if(matchesAssetEtag(req.headers['if-none-match'],asset.etag)){res.writeHead(304);res.end();return;}
+        res.setHeader('Content-Length',asset.body.length);
+        res.writeHead(200);res.end(req.method==='HEAD'?undefined:asset.body);return;
+      }
+      if(req.method==='GET'&&['/app','/app/','/ops','/ops/','/getting-started'].includes(route)) {
         chargeRate('public');
         const name=route==='/app'||route==='/app/'?'index.html':route==='/ops'||route==='/ops/'?'operator.html':route==='/getting-started'?'getting-started.html':route.slice(1);
         const file=await readFile(new URL('../dashboard/'+name,import.meta.url));

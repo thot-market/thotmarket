@@ -21,6 +21,18 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
   const timer = window.setTimeout(() => readyReject(new Error('Privy did not load. Check the connection and try again.')), 30000);
   const host = document.createElement('div'); host.id = 'privy-auth-root'; document.body.appendChild(host);
   const fail = error => onError(error instanceof Error ? error : new Error('Privy sign-in could not complete.'));
+  const walletWaiters = new Set();
+  const notifyWalletWaiters = () => {for (const check of [...walletWaiters]) check();};
+  function waitForWallets(epoch, userId) {
+    return new Promise((resolve, reject) => {
+      const finish = error => {window.clearTimeout(deadline); walletWaiters.delete(check); error ? reject(error) : resolve();};
+      const check = () => {
+        if (destroyed || epoch !== generation || current?.ready && (!current.authenticated || current.user?.id !== userId || current.walletsReady)) finish();
+      };
+      const deadline = window.setTimeout(() => finish(new Error('Your wallets are still loading. Please try sign-in again.')), 30000);
+      walletWaiters.add(check); check();
+    });
+  }
   const changed = () => {generation++; selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; void walletAuth.signOut().catch(fail);};
 
   async function useWallet(address) {
@@ -54,8 +66,12 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
       }
       if (modalWasOpen && !modal.isOpen && !auth.authenticated) {loginAttempt = false; openRequested = false;}
       modalWasOpen = modal.isOpen;
-      if (!auth.ready || !walletState.ready) return;
-      window.clearTimeout(timer); readyResolve();
+      notifyWalletWaiters();
+      if (!auth.ready) return;
+      // Opening anonymous login needs authentication readiness, not connected wallets.
+      // Wallet restore/selection still waits for the separate wallet readiness gate.
+      if (!auth.authenticated || walletState.ready) {window.clearTimeout(timer); readyResolve();}
+      if (!walletState.ready) return;
       if (selectedAddress && !eligiblePrivyWallets(auth.user, walletState.wallets).some(w => w.address.toLowerCase() === selectedAddress)) changed();
       if (openRequested && auth.authenticated && !signing) {
         try {const selected = selectPrivyWallet(auth.user, walletState.wallets, loginAddress); if (selected) void useWallet(selected.address);}
@@ -63,7 +79,7 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
       }
     });
     const choices = eligiblePrivyWallets(auth.user, walletState.wallets);
-    if (!target || !openRequested || !auth.authenticated || choices.length === 1) return null;
+    if (!target || !openRequested || !auth.authenticated || !walletState.ready || choices.length === 1) return null;
     if (choices.length === 0) return createPortal(React.createElement('div', {className: 'privy-wallet-choice'},
       React.createElement('p', null, 'Your email is connected. Connect your existing wallet to open its trace library, or create a wallet for a new workspace.'),
       React.createElement('button', {className: 'button secondary', onClick: () => auth.linkWallet({walletChainType: 'ethereum-only'})}, 'Connect existing wallet'),
@@ -89,7 +105,7 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
     initialize: () => initialized,
     mount(element) {target = element; renderTick();},
     async login() {
-      if (!current?.ready || !current.walletsReady || destroyed) throw new Error('Wallet login is still loading.');
+      if (!current?.ready || current.authenticated && !current.walletsReady || destroyed) throw new Error('Wallet login is still loading.');
       if (loginAttempt || signing) return;
       loginAttempt = true;
       try {await walletAuth.signOut(); if (destroyed) return; loginAddress = null; openRequested = true; if (current.authenticated) renderTick(); else current.login({loginMethods: ['email', 'wallet'], walletChainType: 'ethereum-only'});}
@@ -98,13 +114,16 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
     async providers(address) {
       await initialized;
       if (!current?.authenticated) return [];
-      const epoch = generation, userId = current.user?.id, wallet = eligiblePrivyWallets(current.user, current.wallets).find(w => w.address.toLowerCase() === address?.toLowerCase());
+      const epoch = generation, userId = current.user?.id;
+      await waitForWallets(epoch, userId);
+      if (destroyed || epoch !== generation || !current?.authenticated || current.user?.id !== userId) return [];
+      const wallet = eligiblePrivyWallets(current.user, current.wallets).find(w => w.address.toLowerCase() === address?.toLowerCase());
       if (!wallet) return [];
       const provider = await wallet.getEthereumProvider();
       if (destroyed || epoch !== generation || current?.user?.id !== userId) return [];
       selectedAddress = wallet.address.toLowerCase(); return [provider];
     },
     async signOut() {generation++; selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; await walletAuth.signOut(); await current?.logout(); renderTick();},
-    destroy() {destroyed = true; generation++; window.clearTimeout(timer); root?.unmount(); host.remove(); current = null;}
+    destroy() {destroyed = true; generation++; notifyWalletWaiters(); window.clearTimeout(timer); root?.unmount(); host.remove(); current = null;}
   };
 }

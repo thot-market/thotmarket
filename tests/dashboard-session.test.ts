@@ -9,7 +9,7 @@ import {isClosedUnpaidPurchase} from '../apps/dashboard/thot-ui.js';
 const applicationSource = await readFile(new URL('../apps/dashboard/app.js', import.meta.url), 'utf8');
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
 // replaced by inert collaborators and only the automatic initial network bootstrap is disabled.
-const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace("import('./privy-auth.bundle.js')", 'globalThis.importPrivyModule()').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
+const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace("import('./privy-auth.bundle.js')", "globalThis.importPrivyModule('./privy-auth.bundle.js')").replace('import(`./privy-auth.bundle.js?retry=${privyImportRetry}`)', 'globalThis.importPrivyModule(`./privy-auth.bundle.js?retry=${privyImportRetry}`)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
 globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, refreshPurchases, pendingPurchases,
   setAuthMode(value) { authMode = value; }, setClerkAuth(value) { clerkAuth = value; } };
 `;
@@ -30,7 +30,7 @@ function documentFixture() {
       classList: { toggle() {} }, addEventListener(type: string, handler: (event: any) => unknown) { handlers.set(type, [...(handlers.get(type) ?? []), handler]); },
       querySelector(selector: string) { if (!children.has(selector)) children.set(selector, make(name + ' ' + selector)); return children.get(selector); },
       querySelectorAll() { return []; }, insertAdjacentHTML(_position: string, content: string) { html += content; },
-      scrollIntoView() {}, remove() { element.isConnected = false; }, append() {}, click() {},
+      scrollIntoView() {}, remove() { element.isConnected = false; }, append() {}, click() {}, setAttribute(key:string,value:string){element[key]=value;},
       close() { element.open = false; for (const callback of handlers.get('close') ?? []) callback({ target: element }); },
       showModal() { element.open = true; },
       dispatch(type: string) { for (const callback of handlers.get(type) ?? []) callback({ preventDefault() {}, currentTarget: element, target: element }); },
@@ -53,7 +53,7 @@ function documentFixture() {
     createElement: (name: string) => make(name), body: make('body') };
   return { document, elements };
 }
-function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any) => Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:()=>Promise<any>; privyTimeoutMs?:number; storage?:any } = {}) {
+function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any) => Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:(url?:string)=>Promise<any>; privyTimeoutMs?:number; storage?:any } = {}) {
   const dom = documentFixture(), calls: Array<{ url: string; init: any }> = [], timers = new Set<ReturnType<typeof setTimeout>>(), controllers = new Set<AbortController>();
   const context: any = { isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
     setTimeout(callback: () => void, duration: number) { const timer = setTimeout(callback, duration===30000?(options.privyTimeoutMs??duration):duration); timers.add(timer); return timer; },
@@ -412,14 +412,14 @@ test('slow Privy bundle download times out without replacing the sign-in action 
   const download=deferred();let created=0;
   const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:10,importPrivyModule:()=>download.promise,walletAuthFactory:()=>({async restore(){return false;}})});
   await a.driver.startAuthentication();const html=a.document.querySelector('#main').innerHTML;
-  await assert.rejects(a.driver.loadPrivyAuth(),/took too long to load/);assert.equal(a.document.querySelector('#main').innerHTML,html);assert.equal(a.driver.state.actor,null);
+  await assert.rejects(a.driver.loadPrivyAuth(),/download timed out/);assert.equal(a.document.querySelector('#main').innerHTML,html);assert.equal(a.driver.state.actor,null);
   download.resolve({createPrivyAuth(){created++;return {};}});await flush();assert.equal(created,0,'a timed-out import never mounts an SDK instance');assert.equal(a.driver.state.actor,null);
 });
 
 test('Privy readiness is bounded after download and failure allows a fresh retry',async t=>{
   const readiness=deferred();let imports=0,destroyed=0,logins=0;
   const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:10,importPrivyModule:async()=>{imports++;return {createPrivyAuth:()=>({initialize:()=>imports===1?readiness.promise:Promise.resolve(),mount(){},destroy(){destroyed++;},async login(){logins++;}})};},walletAuthFactory:()=>({async restore(){return false;}})});
-  await a.driver.startAuthentication();await assert.rejects(a.driver.loadPrivyAuth(),/took too long/);assert.equal(destroyed,1);
+  await a.driver.startAuthentication();await assert.rejects(a.driver.loadPrivyAuth(),/service is taking too long/);assert.equal(destroyed,1);
   await a.driver.openPrivyLogin();assert.equal(imports,2);assert.equal(logins,1);readiness.resolve(null);await flush();assert.equal(logins,1);
 });
 
@@ -443,7 +443,38 @@ test('the sign-in button timeout keeps one retryable Privy action',async t=>{
   const a=dashboard(t,async()=>response(walletCapability),{privyTimeoutMs:10,importPrivyModule:()=>new Promise(()=>{}),walletAuthFactory:()=>({async restore(){return false;}})});
   await a.driver.startAuthentication();const main=a.document.querySelector('#main');
   main.querySelector('[data-privy-login]').dispatch('click');await new Promise(resolve=>setTimeout(resolve,25));
-  assert.match(main.innerHTML,/took too long to load/);assert.doesNotMatch(main.innerHTML,/data-wallet-login/);assert.match(main.innerHTML,/data-privy-login>Sign in<\/button>/);assert.ok(!main.innerHTML.includes('workspace is unavailable'));assert.equal(a.driver.state.actor,null);
+  assert.match(main.innerHTML,/download timed out/);assert.doesNotMatch(main.innerHTML,/data-wallet-login/);assert.match(main.innerHTML,/data-privy-login>Try again<\/button>/);assert.ok(!main.innerHTML.includes('workspace is unavailable'));assert.equal(a.driver.state.actor,null);
+});
+
+test('sign-in immediately announces progress and remains single-flight across anonymous restore',async t=>{
+  const download=deferred(),ready=deferred();let imports=0,logins=0;
+  const a=dashboard(t,async()=>response(walletCapability),{importPrivyModule:()=>{imports++;return download.promise;},walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();const main=a.document.querySelector('#main'),button=main.querySelector('[data-privy-login]');
+  const login=a.driver.openPrivyLogin();
+  assert.equal(button.disabled,true);assert.equal(button.textContent,'Opening sign-in…');assert.equal(button['aria-busy'],'true');
+  assert.equal(main.querySelector('#privy-login-status').textContent,'Loading secure sign-in…');
+  a.driver.showIdentityLogin('Connect your wallet to continue.');
+  assert.match(main.innerHTML,/disabled aria-busy="true"/);assert.match(main.innerHTML,/Loading secure sign-in/);
+  await a.driver.openPrivyLogin();assert.equal(imports,1);
+  download.resolve({createPrivyAuth:()=>({initialize:()=>ready.promise,mount(){},destroy(){},async login(){logins++;}})});await flush();
+  assert.equal(main.querySelector('#privy-login-status').textContent,'Connecting to sign-in…');
+  ready.resolve(null);await login;assert.equal(logins,1);assert.equal(button.disabled,false);assert.equal(button['aria-busy'],'false');
+});
+
+test('retry after a failed module request uses a fresh module URL and opens sign-in once',async t=>{
+  const urls:Array<string|undefined>=[];let logins=0;
+  const a=dashboard(t,async()=>response(walletCapability),{importPrivyModule:async url=>{urls.push(url);if(urls.length===1)throw Error('network unavailable');return {createPrivyAuth:()=>({async initialize(){},mount(){},destroy(){},async login(){logins++;}})};},walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await a.driver.openPrivyLogin();
+  assert.match(a.document.querySelector('#main').innerHTML,/could not download/);
+  await a.driver.openPrivyLogin();
+  assert.deepEqual(urls,['./privy-auth.bundle.js','./privy-auth.bundle.js?retry=1']);assert.equal(logins,1);assert.equal(a.driver.state.actor,null);
+});
+
+test('a login SDK error raised before login returns remains visible with an enabled retry',async t=>{
+  const a=dashboard(t,async()=>response(walletCapability),{importPrivyModule:async()=>({createPrivyAuth:({onError}:any)=>({async initialize(){},mount(){},destroy(){},async login(){onError(new Error('Sign-in service is unavailable.'));}})}),walletAuthFactory:()=>({async restore(){return false;}})});
+  await a.driver.startAuthentication();await a.driver.openPrivyLogin();
+  const main=a.document.querySelector('#main'),button=main.querySelector('[data-privy-login]');
+  assert.match(main.innerHTML,/Sign-in service is unavailable/);assert.equal(button.disabled,false);assert.equal(button.textContent,'Try again');
 });
 
 
