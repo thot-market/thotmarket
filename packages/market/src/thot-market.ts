@@ -91,6 +91,15 @@ export class ThotMarketplace {
    return {address:recovered};
   });
  }
+ async catalog(actor:Actor){
+  allowed(actor);
+  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
+  // Public listing metadata is useful before the guarded account snapshot is
+  // available. This does not establish chain availability or authorize payment;
+  // preparing a purchase still performs the existing fresh checks.
+  return {capabilities:this.capabilities(),wallet:records.find(r=>r.id==='wallet:'+actor.id)?.address??null,
+   listings:records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r))};
+ }
  async workspace(actor:Actor){
   allowed(actor);
   const records=await this.service.db.transaction(tx=>tx.list('thot_records'));

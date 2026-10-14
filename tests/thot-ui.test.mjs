@@ -893,7 +893,7 @@ test('listings and buyer purchase cards expose the seller wallet instead of the 
  const seller='0x1234567890abcdef1234567890abcdef12345678';
  state.thot.listings[0].seller=seller;
  state.thot.orders=[{id:'my-purchase',title:'Purchased trace',seller,buyer:owner,gross:atoms(1),receipt:{status:3,seller,seller_amount:atoms(1),referral_amount:'0'}}];
- const listing=ui.offersHTML().match(/<article class="thot-listing">[\s\S]*?<\/article>/)?.[0];
+ const listing=ui.offersHTML().match(/<article class="thot-listing"[^>]*>[\s\S]*?<\/article>/)?.[0];
  assert(listing);
  for(const html of [listing,ui.purchasesHTML()]){
   assert.match(html,new RegExp('<code[^>]*class="thot-seller-address"[^>]*>'+seller+'<\\/code>'));
@@ -956,4 +956,22 @@ for(const invalid of [undefined,'0x1234','0x'+'0'.repeat(40),'<img src=x onerror
  const html=f.dialogs.at(-1)[2];assert.match(html,/Seller wallet unavailable/);assert.doesNotMatch(html,/thot-copy-seller-wallet|<img/);
  const callsBefore=f.calls.length;await assert.rejects(f.ui.action('thot-copy-seller-wallet',{dataset:{id:invalid},disabled:false}));
  assert.deepEqual(copied,[]);assert.equal(f.requests.length,0);assert.equal(f.calls.length,callsBefore);
+});
+
+
+test('partial catalogue exposes listing metadata and seller copy without buying or false account totals',()=>{
+ const {state,ui}=viewFixture(),catalogue={capabilities:state.thot.capabilities,wallet:owner,listings:state.thot.listings};
+ const html=ui.catalogueHTML(catalogue);
+ assert.match(html,/Listed research/);assert.match(html,new RegExp(other));assert.match(html,/data-action="thot-copy-seller-wallet"/);assert.match(html,/Evaluation only/);
+ assert.match(html,/Loading balances and purchase history/);assert.match(html,/Loading your purchase history/);
+ assert.doesNotMatch(html,/data-action="thot-(?:buy|reserve-buy|unlist|assay|buyer-sample|send|resume-payment)"/);
+ assert.doesNotMatch(html,/No open purchases|Save a trace in your private library first|(?<![0-9])0\.0000 THOT|Local demo/);
+ const failed=ui.catalogueHTML(catalogue,{failed:true});assert.match(failed,/Balances and purchase history could not load/);assert.match(failed,/Purchase history is unavailable/);assert.match(failed,/Retry account details/);
+});
+
+test('catalogue loading and failure are distinct from a verified empty listing response',()=>{
+ const {ui}=viewFixture();
+ assert.match(ui.catalogueHTML(null),/Loading listings/);assert.doesNotMatch(ui.catalogueHTML(null),/No traces listed yet/);
+ assert.match(ui.catalogueHTML(null,{catalogueError:true}),/Listings could not load/);assert.doesNotMatch(ui.catalogueHTML(null,{catalogueError:true}),/No traces listed yet/);
+ assert.match(ui.catalogueHTML({listings:[]}),/No traces listed yet/);
 });

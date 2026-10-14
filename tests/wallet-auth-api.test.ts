@@ -10,6 +10,8 @@ import { WalletAuth, type WalletAuthConfig } from '../packages/auth/src/index.ts
 import { createApplication } from '../packages/market/src/bootstrap.ts';
 import { createHttpServer } from '../apps/api/server.ts';
 import { importDemo } from '../packages/market/src/fixtures.ts';
+import type { ThotChain } from '../packages/chain/thot.ts';
+import type { Actor } from '../packages/market/src/service.ts';
 
 const origin = 'https://thot.example.test', host = 'thot.example.test';
 const config: WalletAuthConfig = { schema_version: 'thot.wallet-auth/1', origin, chain_id: 46630, allow_public_signup: true, session_ttl_seconds: 300 };
@@ -43,6 +45,9 @@ test('signless old-candidate mode retains wallet login and workspace but rejects
   const {call,login}=await setup(t,undefined,[],true),account=await login();
   assert.equal((await call('/v1/auth/session',{cookies:account.cookies})).status,200);
   assert.equal((await call('/v1/thot/workspace',{cookies:account.cookies})).status,200);
+  const catalog=await call('/v1/thot/catalog',{cookies:account.cookies});
+  assert.equal(catalog.status,200);assert.equal(catalog.headers['cache-control'],'no-store');
+  assert.deepEqual(Object.keys(catalog.body).sort(),['capabilities','listings','wallet']);
   for(const path of ['/v1/thot/offers/prepare','/v1/thot/listings','/v1/thot/disputes/finalize','/v1/openrouter/chat/completions','/v1/unknown-future-route']){
     const denied=await call(path,{cookies:account.cookies,body:{}});
     assert.equal(denied.status,403,path);assert.equal(denied.body.error,'THOT_READ_ONLY',path);
@@ -50,6 +55,79 @@ test('signless old-candidate mode retains wallet login and workspace but rejects
   assert.equal((await call('/v1/traces',{cookies:account.cookies})).status,403);
   const delivery=await call('/v1/thot/offers/delivery',{cookies:account.cookies,body:{id:'0x'+'0'.repeat(64)}});
   assert.notEqual(delivery.body.error,'THOT_READ_ONLY','only delivery passes the route guard');
+});
+
+test('wallet catalogue returns only active public metadata without a chain read or private decryption', async t => {
+  const {app,call,login}=await setup(t),alice=await login(),bob=await login();
+  const ownWallet=alice.wallet.address, seller=bob.wallet.address;
+  const privateMarker='SYNTHETIC_PRIVATE_CATALOGUE_CONTENT';
+  const listing={kind:'listing',active:true,wallet:seller,title:'Synthetic cache analysis',price_atoms:'1000000000000000000',
+    license:'Non-exclusive synthetic evaluation for thirty days.',license_hash:'0x'+'1'.repeat(64),evidence_hash:'0x'+'2'.repeat(64),
+    provenance:'P0_OPERATOR',workflow:'coding',turn_count:2,created_at:'2026-09-15T01:00:00.000Z',signature:privateMarker,
+    release_ref:privateMarker,trace_id:privateMarker,authorization:{private:privateMarker},content:{turns:[privateMarker]}};
+  await app.db.transaction(async tx=>{
+    await tx.insert('thot_records','catalogue-active',bob.result.body.actor.id,listing);
+    await tx.insert('thot_records','catalogue-own-inactive',alice.result.body.actor.id,{...listing,active:false});
+    await tx.insert('thot_records','catalogue-other-inactive',bob.result.body.actor.id,{...listing,active:false});
+    await tx.insert('thot_records','catalogue-own-intent',alice.result.body.actor.id,{kind:'intent',offer_id:privateMarker,seller_id:bob.result.body.actor.id});
+  });
+  const configured={mode:'thot-anvil',test_assets:true,production_enabled:false,chain_id:31337};
+  // The only permitted chain access is synchronous configuration projection.
+  // Any RPC, snapshot, account lookup or private-content read fails the test.
+  app.thot.chain=new Proxy({capabilities:()=>configured},{get(target,name){
+    if(name==='capabilities')return target.capabilities;
+    assert.fail('catalogue attempted chain access: '+String(name));
+  }}) as unknown as ThotChain;
+  app.privacy.open=async()=>assert.fail('catalogue attempted private-content decryption');
+  const before=await app.db.transaction(tx=>tx.list('thot_records'));
+  const expected={id:'catalogue-active',seller,owner_label:'Contributor',title:listing.title,price_atoms:listing.price_atoms,
+    license:listing.license,license_hash:listing.license_hash,evidence_hash:listing.evidence_hash,provenance:'P0_OPERATOR',
+    workflow:'coding',turn_count:2,capture_model:null,created_at:listing.created_at,automatic_sales:true,treasury_opt_in:false};
+  const result=await call('/v1/thot/catalog',{cookies:alice.cookies});
+  assert.equal(result.status,200);assert.equal(result.headers['cache-control'],'no-store');
+  assert.deepEqual(result.body,{capabilities:{...configured,trade_evidence:false},wallet:ownWallet,listings:[expected]});
+  assert.ok(!JSON.stringify(result.body).includes(privateMarker));
+  const other=await call('/v1/thot/catalog',{cookies:bob.cookies});
+  assert.equal(other.body.wallet,seller);assert.deepEqual(other.body.listings,[expected]);
+  assert.deepEqual(await app.db.transaction(tx=>tx.list('thot_records')),before,'catalogue does not mutate listing or purchase state');
+  await app.db.transaction(tx=>tx.update('thot_records','catalogue-active',{...listing,active:false}));
+  assert.deepEqual((await call('/v1/thot/catalog',{cookies:alice.cookies})).body.listings,[],'a later read observes withdrawal without reusing a cached catalogue');
+});
+
+test('wallet catalogue enforces authentication, origin, supported roles and an empty query', async t => {
+  const {auth,call,login,clock}=await setup(t),account=await login();
+  assert.equal((await call('/v1/thot/catalog')).status,401);
+  assert.equal((await call('/v1/thot/catalog',{headers:{Authorization:'Bearer invalid-session'}})).status,401);
+  assert.equal((await call('/v1/thot/catalog',{cookies:account.cookies,origin:'https://attacker.example.test'})).status,403);
+  assert.equal((await call('/v1/thot/catalog',{cookies:account.cookies,headers:{'Sec-Fetch-Site':'cross-site'}})).status,403);
+  for(const query of ['?owner_id=another-owner','?include_private=true','?cursor=1&cursor=2']){
+    const response=await call('/v1/thot/catalog'+query,{cookies:account.cookies});
+    assert.equal(response.status,400);assert.equal(response.body.error,'INVALID_CATALOG_QUERY');
+  }
+  // Exercise the route with each principal that an authentication provider can
+  // supply; retain real cookie verification before substituting its test role.
+  const authenticate=auth.authenticate.bind(auth);
+  for(const role of ['user','buyer_admin','buyer_member','operator_security','operator_support','operator_maintenance','service_settlement'] as const){
+    auth.authenticate=async token=>{const session=await authenticate(token);return {...session,actor:{...session.actor,role} as Actor};};
+    const result=await call('/v1/thot/catalog',{cookies:account.cookies});
+    const supported=['user','buyer_admin','buyer_member','operator_security'].includes(role);
+    assert.equal(result.status,supported?200:403,role);
+    if(!supported)assert.equal(result.body.error,'FORBIDDEN');
+  }
+  auth.authenticate=authenticate;
+  assert.equal((await call('/v1/thot/catalog',{cookies:account.cookies,origin:null})).status,200,'same-origin GET retains existing cookie semantics');
+  clock.now+=301000;
+  assert.equal((await call('/v1/thot/catalog',{cookies:account.cookies})).status,401);
+});
+
+test('wallet catalogue reads consume the existing actor quota', async t => {
+  const {auth,call,login}=await setup(t),account=await login(),peer=await login();
+  auth.access.limits.requests_per_minute=2;
+  assert.equal((await call('/v1/thot/catalog',{cookies:account.cookies})).status,200);
+  assert.equal((await call('/v1/thot/catalog',{cookies:account.cookies})).status,200);
+  const limited=await call('/v1/thot/catalog',{cookies:account.cookies});
+  assert.equal(limited.status,429);assert.equal(limited.body.error,'ACTOR_RATE_LIMIT');
+  assert.equal((await call('/v1/thot/catalog',{cookies:peer.cookies})).status,200);
 });
 
 test('Privy public onboarding config preserves SIWE ownership and enables only the required CSP origins', async t => {

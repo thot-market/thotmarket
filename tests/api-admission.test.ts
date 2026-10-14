@@ -95,10 +95,10 @@ test('HTTP admission combines credentials only after provider verification ident
   const server=createHttpServer(app,{externalAuth,admission});await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{await new Promise<void>(resolve=>server.close(()=>resolve()));await app.close();});
   const address=server.address();assert.ok(address&&typeof address==='object');const base=`http://127.0.0.1:${address.port}`;
-  const call=async(token:string)=>{const response=await fetch(base+'/v1/auth/session',{headers:{Authorization:'Bearer '+token}});await response.arrayBuffer();return response.status;};
-  assert.equal(await call('session-a'),200);assert.equal(await call('session-b'),200);assert.equal(await call('session-a'),200);
-  assert.equal(await call('session-b'),429);
-  assert.equal(await call('session-peer'),200);
+  const call=async(token:string,path='/v1/auth/session')=>{const response=await fetch(base+path,{headers:{Authorization:'Bearer '+token}});await response.arrayBuffer();return response.status;};
+  assert.equal(await call('session-a','/v1/thot/catalog'),200);assert.equal(await call('session-b'),200);assert.equal(await call('session-a','/v1/thot/catalog'),200);
+  assert.equal(await call('session-b','/v1/thot/catalog'),429);
+  assert.equal(await call('session-peer','/v1/thot/catalog'),200);
   const users=await Promise.all(Array.from({length:100},(_,index)=>call('session-user-'+index)));
   assert.ok(users.every(status=>status===200));
   assert.equal(await call('invalid-session'),401);

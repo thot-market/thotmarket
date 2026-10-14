@@ -117,7 +117,8 @@
       "node": [
         "tests/e2e/anvil-money.browser.mjs",
         "tests/privy-auth-bridge.test.mjs",
-        "tests/privy-download-browser.test.mjs"
+        "tests/privy-download-browser.test.mjs",
+        "tests/dashboard-market-browser.test.mjs"
       ],
       "node_commands": [
         [

@@ -10,7 +10,7 @@ const applicationSource = await readFile(new URL('../apps/dashboard/app.js', imp
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
 // replaced by inert collaborators and only the automatic initial network bootstrap is disabled.
 const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace('import(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)', 'globalThis.importPrivyModule(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
-globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, refreshPurchases, pendingPurchases,
+globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, refreshPurchases, pendingPurchases, refresh, acceptClerkSession, loadCatalogue, renderCatalogue, acceptMarketFragment, invalidatePrivateState,
   setAuthMode(value) { authMode = value; }, setClerkAuth(value) { clerkAuth = value; } };
 `;
 function deferred<T = any>() {
@@ -66,14 +66,14 @@ function documentFixture() {
     createElement: (name: string) => make(name), body: make('body') };
   return { document, elements };
 }
-function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any)=>Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:(url?:string)=>Promise<any>; privyTimeoutMs?:number; privyResourceObserver?:any; storage?:any } = {}) {
+function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any)=>Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:(url?:string)=>Promise<any>; privyTimeoutMs?:number; privyResourceObserver?:any; storage?:any; hash?:string } = {}) {
   const dom = documentFixture(), calls: Array<{ url: string; init: any }> = [], timers = new Set<ReturnType<typeof setTimeout>>(), controllers = new Set<AbortController>();
-  const context: any = { isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage,PerformanceObserver:options.privyResourceObserver,performance:{now:()=>100},location:{origin:'https://workspace.example.test'}}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
+  const context: any = { isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage,PerformanceObserver:options.privyResourceObserver,performance:{now:()=>100},location:{origin:'https://workspace.example.test',hash:options.hash??'',pathname:'/app',search:''}}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
     setTimeout(callback: () => void, duration: number) { const delay=options.privyTimeoutMs===undefined?duration:duration===30000?options.privyTimeoutMs:duration===90000?options.privyTimeoutMs*3:duration;const timer = setTimeout(callback, delay); timers.add(timer); return timer; },
     clearTimeout(timer: ReturnType<typeof setTimeout>) { clearTimeout(timer); timers.delete(timer); },
     fetch(url: string, init: any = {}) { calls.push({ url, init }); return url==='/v1/thot/workspace'?(options.thotTransport?.(url,init)??Promise.resolve(response({capabilities:{mode:'unconfigured'}}))):url==='/v1/money/capabilities'?Promise.resolve(response({mode:'mock'})):transport(url, init); },
     createInferenceUI: () => ({ actionHTML: () => '', historyHTML: () => '', handle: async () => false }),
-    createThotUI:()=>({purchasesHTML:()=>'<h2>Updated purchase cards</h2>',walletSummaryHTML:()=>'',offersHTML:()=>'<h1>Offers renderer</h1>',earningsHTML:()=>'<h1>Earnings renderer</h1>',tokenHTML:()=>'<h1>THOT renderer</h1>',valuationsHTML:()=>'',samplingHTML:()=>'<h1>Treasury sampler</h1>',action:async()=>false}),
+    createThotUI:()=>({catalogueHTML:(catalogue:any)=>'<section id="market-catalogue">'+(catalogue?.listings?.map((l:any)=>l.title).join('|')??'Loading listings')+'</section>',purchasesHTML:()=>'<h2>Updated purchase cards</h2>',walletSummaryHTML:()=>'',offersHTML:()=>'<h1>Offers renderer</h1>',earningsHTML:()=>'<h1>Earnings renderer</h1>',tokenHTML:()=>'<h1>THOT renderer</h1>',valuationsHTML:()=>'',samplingHTML:()=>'<h1>Treasury sampler</h1>',action:async()=>false}),
     createThotAnalyticsUI:()=>({referralsHTML:()=>'<h2>Referral receipts</h2>',portfolioHTML:()=>'',leaderboardHTML:()=>'<h1>Market activity</h1>',ready:async()=>{},handle:async()=>false,onSubmit:async()=>false,reset(){}}),
     createMoneyUI:()=>({active:()=>false,action:async()=>false,decorate(){}}),
     createMandateEditor: () => ({}), createOperationsUI: () => ({ sectionHTML: () => '', handle: async () => false }),
@@ -95,7 +95,7 @@ function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, 
     const form = dom.document.querySelector('#identity-form'); assert.ok(form);
     dom.document.querySelector('#identity-token').value = token; form.dispatch('submit'); return form;
   };
-  return { ...dom, driver, calls, identity, login, abortRequests(){for(const controller of controllers)controller.abort();} };
+  return { ...dom, driver, calls, identity, login, browser:context.window, abortRequests(){for(const controller of controllers)controller.abort();} };
 }
 
 test('dashboard retries transient GET responses once within the original private request scope',async t=>{
@@ -682,4 +682,75 @@ test('closed unfunded attempts do not poll; unknown payments and funded purchase
   a.driver.state.thot.orders=[{...closed,...extra}];assert.equal(a.driver.pendingPurchases(),extra.job_status!=='complete');
  }
  a.driver.state.thot.orders=[closed,{id:'funded',buyer:'0x1111',receipt:{status:2}}];await a.driver.refreshPurchases();assert.equal(a.calls.length,1);assert.equal(a.calls[0].init.method,'GET');
+});
+
+
+const catalogueFixture=()=>({capabilities:{mode:'thot-production'},wallet:'0x1111',listings:[{id:'listed',title:'Listed research'}]});
+function startMarket(a:any){a.driver.state.loaded=false;a.driver.state.view='market';a.driver.setAuthMode('wallet_siwe');}
+
+test('an explicit marketplace fragment overrides remembered navigation without bypassing role rules',t=>{
+ const storage=memoryStorage();storage.setItem('thot.workspace-view.v1',JSON.stringify({actor:'user-old',role:'user',view:'vault'}));
+ const a=dashboard(t,async()=>response([]),{storage,hash:'#thot-available'});
+ assert.equal(a.driver.restoredView(),'market');
+ a.browser.location.hash='#thot-contribute';a.identity('user-old','buyer_member');assert.equal(a.driver.restoredView(),'market');
+ a.browser.location.hash='#operator';a.identity();assert.equal(a.driver.restoredView(),'vault');
+ a.browser.location.hash='#trace=preserved-library-link';assert.equal(a.driver.restoredView(),'vault');
+});
+
+test('catalogue paints before the chain workspace and keeps private balances unknown',async t=>{
+ const workspace=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):response([]),{hash:'#thot-available',thotTransport:()=>workspace.promise});
+ startMarket(a);const loading=a.driver.refresh();await flush();
+ assert.match(a.document.querySelector('#main').innerHTML,/Listed research/);assert.equal(a.driver.state.loaded,false);assert.equal(a.driver.state.thot,undefined);
+ assert.match(a.document.querySelector('#wallet-summary').innerHTML,/Loading balance/);assert.doesNotMatch(a.document.querySelector('#wallet-summary').innerHTML,/0\.0000/);
+ assert.equal(a.calls.filter(c=>c.url==='/v1/thot/catalog').length,1);assert.ok(a.calls.some(c=>c.url==='/v1/thot/workspace'));
+ workspace.resolve(response({capabilities:{mode:'thot-production'},orders:[]}));await loading;
+ assert.equal(a.driver.state.loaded,true);assert.match(a.document.querySelector('#main').innerHTML,/Offers renderer/);
+});
+
+test('unrelated slow contributor reads do not hide the already loaded catalogue',async t=>{
+ const library=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):url.startsWith('/v1/contributor/library')?library.promise:response([]),{thotTransport:async()=>response({capabilities:{mode:'thot-production'},orders:[]})});
+ startMarket(a);const loading=a.driver.refresh();await flush();
+ assert.match(a.document.querySelector('#main').innerHTML,/Listed research/);assert.equal(a.driver.state.loaded,false);
+ library.resolve(response({items:[]}));await loading;assert.equal(a.driver.state.loaded,true);
+});
+
+test('an accepted wallet session survives account data failure and leaves catalogue readable',async t=>{
+ const workspace=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):response([]),{hash:'#thot-available',thotTransport:()=>workspace.promise});
+ startMarket(a);const accepted=a.driver.acceptClerkSession({actor:{id:'accepted',role:'user'}});await flush();
+ const before=a.document.querySelector('#main').innerHTML;workspace.reject(Error('RPC unavailable'));await accepted;
+ assert.equal(a.driver.state.actor.id,'accepted');assert.equal(a.driver.state.workspaceError,true);assert.equal(a.driver.state.loaded,false);
+ assert.equal(a.document.querySelector('#main').innerHTML,before,'failure updates status without replacing browse controls');
+ assert.match(a.document.querySelector('#wallet-summary').innerHTML,/Balance unavailable/);
+ assert.match(a.document.querySelector('#main').querySelector('[data-catalogue-account-status]').textContent,/could not load/);
+});
+
+test('late catalogue cannot replace a complete account view',async t=>{
+ const catalog=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?catalog.promise:response([]),{thotTransport:async()=>response({capabilities:{mode:'thot-production'},orders:[]})});
+ startMarket(a);await a.driver.refresh();const before=a.document.querySelector('#main').innerHTML;
+ catalog.resolve(response(catalogueFixture()));await flush();
+ assert.equal(a.driver.state.loaded,true);assert.equal(a.document.querySelector('#main').innerHTML,before);assert.equal(a.driver.state.catalogue,null);
+});
+
+test('account changes and logout discard in-flight catalogue and chain responses',async t=>{
+ for(const change of ['switch','logout']){
+  const catalog=deferred(),workspace=deferred(),a=dashboard(t,async()=>catalog.promise,{thotTransport:()=>workspace.promise});
+  startMarket(a);const loading=a.driver.refresh(),rejected=assert.rejects(loading,stale);await flush();
+  a.driver.invalidatePrivateState();if(change==='switch')a.identity('other-user');
+  a.document.querySelector('#main').innerHTML='New account';catalog.resolve(response(catalogueFixture()));workspace.resolve(response({capabilities:{mode:'thot-production'},account:{balance:'old-private-balance'}}));
+  await rejected;await flush();assert.equal(a.driver.state.catalogue,null);assert.equal(a.document.querySelector('#main').innerHTML,'New account');
+ }
+});
+
+test('partial catalogue blocks mutation dispatch until the full account is ready',async t=>{
+ const a=dashboard(t,async()=>{throw Error('Must not fetch');});startMarket(a);
+ for(const action of ['thot-buy','thot-reserve-buy','thot-unlist','thot-send','thot-list-configure','import'])await assert.rejects(a.driver.runAction(action,{dataset:{id:'listed'}}),/Account details are still loading/);
+ assert.equal(a.calls.length,0);
+});
+
+test('same-page marketplace fragment selects Offers and scrolls the mounted section once',async t=>{
+ const a=dashboard(t,async()=>response([]),{hash:'#thot-available'});let scrolls=0;
+ const target=a.document.createElement('available');target.scrollIntoView=()=>scrolls++;a.elements.set('#thot-available',target);
+ a.driver.state.view='vault';a.driver.state.thot={capabilities:{mode:'thot-production'}};
+ assert.equal(a.driver.acceptMarketFragment(),true);assert.equal(a.driver.state.view,'market');assert.equal(scrolls,1);
+ a.driver.render();assert.equal(scrolls,1,'routine rendering must not scroll the reader back');
 });

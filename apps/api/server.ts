@@ -144,7 +144,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       // The retained old candidate serves only authentication and already-delivered
       // licensed content. Deny every other API route before parsing a request body.
       if(options.readOnly&&route.startsWith('/v1/')){
-        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/workspace'].includes(route);
+        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/catalog','/v1/thot/workspace'].includes(route);
         const safePost=req.method==='POST'&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify','/v1/auth/session/revoke','/v1/thot/offers/delivery'].includes(route);
         ensure(safeGet||safePost,'THOT_READ_ONLY',403);
       }
@@ -317,6 +317,9 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         else throw new DomainError('NOT_FOUND',404);
       }
       else if(route==='/v1/thot/capabilities'&&req.method==='GET')result=app.thot.capabilities();
+      else if(route==='/v1/thot/catalog'&&req.method==='GET'){
+        ensure(url.searchParams.size===0,'INVALID_CATALOG_QUERY');result=await app.thot.catalog(actor);
+      }
       else if(route==='/v1/thot/workspace'&&req.method==='GET')result=await app.thot.workspace(actor);
       else if(route==='/v1/thot/analytics'&&req.method==='GET')result=await app.thotAnalytics.workspace(actor,Object.fromEntries(url.searchParams));
       else if(route==='/v1/thot/analytics/leaderboard'&&req.method==='GET')result=await app.thotAnalytics.leaderboard(actor,Object.fromEntries(url.searchParams));

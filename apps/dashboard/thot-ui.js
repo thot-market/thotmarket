@@ -317,9 +317,20 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    ${settlementHTML(r,{refundPaid,buyerTotal:r.buyer_total??o.buyer_total??r.gross??o.gross})}${settlementActions(o)}${refundPaid?`<p>${explorerLink('tx',o.refund_transaction)}</p>`:''}
    <details><summary>Purchase receipt</summary><p class="mono">${escape(o.id)}</p></details></article>`;
  }
- function listingCard(l){
-  const w=state.thot;
-  return `<article class="thot-listing"><div class="thot-listing-body"><h3>${escape(l.title)}</h3>${sellerWalletHTML(l.seller)}<p>${escape(l.workflow)} · ${escape(l.turn_count)} turns · ${escape(l.provenance)}</p>${modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}</div><div class="thot-listing-purchase"><p class="eyebrow">Listed price</p><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong><p class="legal-note">Review the exact total before signing.</p><details><summary>License</summary><p>${escape(l.license)}</p></details>${w.wallet&&!sameWallet(l.seller,w.wallet)?button('assay','Check workflow & length',l.id)+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):'')+(purchasesPaused()?'':button('buy','Buy this trace',l.id,false,true)):''}${sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
+ function listingCard(l,{browseOnly=false,workspace=state.thot}={}){
+  const w=workspace;
+  return `<article class="thot-listing" data-listing-id="${escape(l.id)}"><div class="thot-listing-body"><h3>${escape(l.title)}</h3>${sellerWalletHTML(l.seller)}<p>${escape(l.workflow)} · ${escape(l.turn_count)} turns · ${escape(l.provenance)}</p>${modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}</div><div class="thot-listing-purchase"><p class="eyebrow">Listed price</p><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong><p class="legal-note">Review the exact total before signing.</p><details><summary>License</summary><p>${escape(l.license)}</p></details>${!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet)?button('assay','Check workflow & length',l.id)+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):'')+(purchasesPaused()?'':button('buy','Buy this trace',l.id,false,true)):''}${!browseOnly&&sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
+ }
+ function catalogueHTML(catalogue,{failed=false,catalogueError=false}={}){
+  const listings=catalogue?.listings??[],available=listings.filter(l=>!sameWallet(l.seller,catalogue?.wallet));
+  const accountStatus=failed?'Balances and purchase history could not load. Retry to enable buying.':'Loading balances and purchase history. Browse listings while we enable buying.';
+  return `<section id="market-catalogue"><section class="page-heading"><div><p class="eyebrow">Marketplace</p><h1>Buy a trace. Put it to work.</h1><p>Browse contributor-authorized conversations, review the price and licence, then pay from your wallet.</p></div><button class="button secondary" data-action="refresh">${failed?'Retry account details':'Refresh'}</button></section>
+   <div class="section-head" id="thot-available"><h2>Available traces</h2></div>
+   <p class="legal-note" data-catalogue-account-status role="status">${accountStatus}</p>
+   <div data-catalogue-fetch-status role="status">${catalogue?'':catalogueError?'<p>Listings could not load. Use Refresh to try again.</p>':'<p>Loading listings…</p>'}</div>
+   <section class="thot-listings" aria-label="Available traces">${catalogue?available.map(l=>listingCard(l,{browseOnly:true,workspace:catalogue})).join('')||'<div class="panel thot-empty"><h3>No traces listed yet</h3><p>Contributor-authorized research will appear here.</p></div>':''}</section>
+   <section id="thot-purchases" class="panel"><h2>Your purchases</h2><p data-catalogue-history-status>${failed?'Purchase history is unavailable. Retry account details to check it.':'Loading your purchase history…'}</p></section>
+   ${state.role==='user'?'<section id="thot-contribute" class="panel"><h2>Sell your traces</h2><p>Your selling controls will appear after account details load.</p></section>':''}</section>`;
  }
  function purchasesHTML(){
   const w=state.thot,orders=(w.orders??[]).filter(o=>sameWallet(o.buyer,w.wallet));
@@ -835,5 +846,5 @@ ${tradeEvidenceOptions(listingMetadata)}
   const body=op==='lock'?{action:op,amount:document.querySelector('#thot-lock').value}:op==='refer'?{action:op,referrer:document.querySelector('#thot-referrer').value}:op==='withdraw'||op==='extend'?{action:op,lot_id:Number(id)}:op==='dispute-confirm'?{action:'dispute',id,reason:document.querySelector('#thot-reason').value}:{action:op,id};
   const prepared=await api('/v1/thot/transaction',{method:'POST',body});current();review(op==='dispute-confirm'?'Review your dispute':'Review THOT action',{...prepared,...(['claim','finalize','cancelOffer','refundExpired','refundUndelivered','withdraw','staking-claim','dispute-confirm'].includes(op)?{exit:true}:{}),...(op==='dispute-confirm'?{confirmDisputeId:id}:{})});return true;
  }
- return {walletSummaryHTML,purchasesHTML,offersHTML,earningsHTML,tokenHTML,valuationsHTML,samplingHTML,disputesHTML,onInput,action};
+ return {walletSummaryHTML,catalogueHTML,purchasesHTML,offersHTML,earningsHTML,tokenHTML,valuationsHTML,samplingHTML,disputesHTML,onInput,action};
 }
