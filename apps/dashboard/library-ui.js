@@ -32,17 +32,19 @@ export function createLibraryUI({state,api,openDialog,dialog,escape,toast}){
     return {listed:own.find(l=>l.active),sales:(state.thot?.orders??[]).filter(o=>ids.has(o.listing_id)&&sameWallet(o.seller,state.thot?.wallet)&&o.receipt?.status>0)};
   }
   function comparable(item){
+    if(state.thot?.workspace_scope==='buyer')return '<p class="journey-comparable">Price comparisons load when you review a sale.</p>';
     const estimate=state.thot?.valuations?.find(v=>v.trace_id===item.trace_id)?.estimate;
     if(estimate?.independent?.status==='estimated')return `<p class="journey-comparable">Similar completed sales<strong>${escape(thotAmount(estimate.independent.median_gross_atoms))}</strong>Median gross price · not an offer</p>`;
     return '<p class="journey-comparable">Not enough comparable sales yet.</p>';
   }
   function row(item){
-    const {listed,sales}=traceMarket(item),sold=sales.some(o=>o.receipt.status===5),pending=sales.some(o=>[1,2,3,4].includes(o.receipt.status));
-    const label=sold?'Sold':pending?'Sale pending':listed?'Listed':item.state==='RECORDING'?'Recording':'Private';
-    const ready=liveMarket()&&item.sale_eligibility?.can_list===true;
+    const accountPending=state.loaded===false,{listed,sales}=accountPending?{listed:null,sales:[]}:traceMarket(item),sold=sales.some(o=>o.receipt.status===5),pending=sales.some(o=>[1,2,3,4].includes(o.receipt.status));
+    const label=accountPending?'Sale status loading':sold?'Sold':pending?'Sale pending':listed?'Listed':item.state==='RECORDING'?'Recording':'Private';
+    const ready=!accountPending&&liveMarket()&&item.sale_eligibility?.can_list===true;
     return `<article class="library-row" data-testid="conversation-row" data-trace-id="${escape(item.trace_id)}"><div class="library-description"><span class="pill ${pending?'warn':''}">${label}</span><span class="journey-source">${escape(item.source)} · ${item.history_version?.previous_version_id?'Updated history snapshot':item.origin==='upload'?'Uploaded history':'Captured session'}</span><button class="library-title" data-action="library-open" data-id="${escape(item.trace_id)}">${escape(item.title)}</button><p>${escape(item.project||'Saved conversation')} · ${item.turn_count} readable turns · ${item.session_at?escape(when(item.session_at)):escape(when(item.created_at))}</p>${display(item)?`<p class="library-display-note">${escape(display(item))}</p>`:''}<p class="library-sale-note">${escape(saleInfo(item)[0])}</p>${item.note?`<p class="library-note-preview">${escape(item.note.slice(0,180))}</p>`:''}${item.last_checkpoint_at?`<p>Saved through ${escape(when(item.last_checkpoint_at))}</p>`:''}${item.segments>1?`<p>${item.segments} captures of this conversation. Each release is reviewed separately.</p>`:''}</div><div class="journey-trace-actions">${ready&&!listed&&!pending&&!sold?comparable(item):''}${listed?`<strong>${escape(thotAmount(listed.price_atoms))}</strong><span class="legal-note">Your asking price</span><button class="button secondary small" data-action="thot-unlist" data-id="${escape(listed.id)}">Stop future sale</button>`:ready&&!pending&&!sold?`<button class="button" data-action="thot-list-configure" data-id="${escape(item.trace_id)}">Review & sell</button>`:`<button class="button secondary" data-action="library-open" data-id="${escape(item.trace_id)}">${sold||pending?'Read your trace':'Review trace'}</button>`}<button class="text-button" data-action="library-bookmark" data-id="${escape(item.trace_id)}" data-value="${!item.bookmarked}" aria-label="${item.bookmarked?'Remove bookmark':'Bookmark'} ${escape(item.title)}">${item.bookmarked?'★ Bookmarked':'☆ Bookmark'}</button></div></article>`;
   }
   function workSummary(){
+    if(state.loaded===false)return '<p class="legal-note" role="status">'+(state.workspaceError?'Balances and sale status are unavailable. Your saved conversations are still available.':'Loading balances and sale status. You can read your work now.')+'</p>';
     if(!state.thot?.account)return '';
     const sales=(state.thot.orders??[]).filter(o=>sameWallet(o.seller,state.thot.wallet));
     const paid=sales.filter(o=>o.receipt?.status===5&&/^0x[0-9a-f]{64}$/i.test(o.payout_transaction??'')).reduce((n,o)=>n+BigInt(o.receipt.seller_amount??0),0n);
@@ -60,7 +62,7 @@ export function createLibraryUI({state,api,openDialog,dialog,escape,toast}){
   }
   function sectionHTML(){return `<section id="conversation-library">${body()}</section>`;}
   function paint(){const el=document.querySelector('#conversation-library');if(el&&state.role==='user'&&state.view==='vault')el.innerHTML=body();}
-  async function load(){if(loading||!state.loaded||state.role!=='user')return;loading=true;try{const result=await api('/v1/contributor/library'+queryString());state.traceLibrary=result;paint();}finally{loading=false;}}
+  async function load(){if(loading||!state.loaded&&!state.libraryLoaded||state.role!=='user')return;loading=true;try{const result=await api('/v1/contributor/library'+queryString());state.traceLibrary=result;paint();}finally{loading=false;}}
   function ready(){clearTimeout(timer);timer=setTimeout(async()=>{try{if(state.loaded&&state.role==='user'&&state.view==='vault'&&!document.hidden&&!document.activeElement?.matches('input,textarea,select'))await load();}catch(error){if(error.name!=='StaleWorkspaceError'){const footer=document.querySelector('.library-footer span');if(footer)footer.textContent='Could not refresh. Your last loaded records are shown.';}}finally{if(state.loaded&&state.role==='user')ready();}},5000);void acceptFragment();}
   function readerHTML(){
     const {item,end}=reader,turns=item.content?.turns??[],segments=item.capture_segments??[],start=Math.max(0,end-40);
@@ -109,7 +111,7 @@ export function createLibraryUI({state,api,openDialog,dialog,escape,toast}){
     if(form.id==='library-edit'){const f=new FormData(form);await api('/v1/contributor/library/'+encodeURIComponent(form.dataset.id),{method:'PATCH',body:{title:String(f.get('title')),note:String(f.get('note'))}});await load();toast('Your title and note are saved privately.');return true;}
     return false;
   }
-  async function acceptFragment(){if(!state.loaded||state.role!=='user'||!/^#trace=[A-Za-z0-9-]{16,80}$/.test(location.hash))return;const id=location.hash.slice(7);history.replaceState(history.state,'',location.pathname+location.search);try{await open(id);}catch(error){toast(error.message);}}
+  async function acceptFragment(){if(!state.loaded&&!state.libraryLoaded||state.role!=='user'||!/^#trace=[A-Za-z0-9-]{16,80}$/.test(location.hash))return;const id=location.hash.slice(7);history.replaceState(history.state,'',location.pathname+location.search);try{await open(id);}catch(error){toast(error.message);}}
   function reset(){clearTimeout(timer);timer=null;state.traceLibrary=null;reader=null;query='';source='all';bookmarked=false;cursor='';previous=[];}
   return {sectionHTML,queryString,ready,reset,handle,onSubmit,acceptFragment};
 }

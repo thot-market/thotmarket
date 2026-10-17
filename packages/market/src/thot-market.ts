@@ -23,6 +23,8 @@ const addr=(value:unknown)=>{ensure(typeof value==='string'&&/^0x[\da-fA-F]{40}$
 const digest=(value:unknown)=>'0x'+canonicalHash(value).replace(/^sha256:/,'').replace(/^0x/,'');
 const allowed=(actor:Actor)=>ensure(['user','buyer_admin','buyer_member','operator_security'].includes(actor.role),'FORBIDDEN',403);
 const withdrawnSample=(error:unknown)=>error instanceof Error&&['TREASURY_SAMPLE_UNAVAILABLE','AUTHORIZATION_UNAVAILABLE','TRADE_EVIDENCE_UNAVAILABLE','TRACE_CHANGED','TRACE_UNAVAILABLE','TRACE_INELIGIBLE','RESERVE_SOURCE_IDENTITY_UNAVAILABLE','RELEASE_EXPIRED','NOT_FOUND'].includes(error.message);
+type RetentionSnapshot={source:Document;records:Document[]};
+type RetentionChainReads={authorizations:Map<string,Awaited<ReturnType<ThotChain['authorizationState']>>>;offers:Map<string,Awaited<ReturnType<ThotChain['offer']>>>};
 /** Independent THOT flow. Legacy cash/burn ledgers never become token claims. */
 export class ThotMarketplace {
  service:ThotService; chain?:ThotChain;
@@ -100,8 +102,9 @@ export class ThotMarketplace {
   return {capabilities:this.capabilities(),wallet:records.find(r=>r.id==='wallet:'+actor.id)?.address??null,
    listings:records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r))};
  }
- async workspace(actor:Actor){
+ async workspace(actor:Actor,options:{scope?:'buyer'|'full'}={}){
   allowed(actor);
+  const scope=options.scope??'full';ensure(scope==='buyer'||scope==='full','INVALID_WORKSPACE_SCOPE');
   const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
   const wallet=records.find(r=>r.id==='wallet:'+actor.id)?.address;
   const listings=records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r));
@@ -112,14 +115,17 @@ export class ThotMarketplace {
   const visible=intents.slice(-50),view=chain?await chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id)),block!):null;
   const orders=[];
   if(view)for(let n=0;n<visible.length;n++){const i=visible[n]!,receipt=view.offers[n]!;if(receipt.status!==0||i.owner_id===actor.id)orders.push({...this.publicIntent(i),receipt});}
-  const valuations=actor.role==='user'&&chain&&block?await this.valuationRows(actor,records,wallet,block):[];
-  const holderRewards=chain?await holderRewardsWorkspace(chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id),block!):null;
-  const staking=chain?await stakingWorkspace(chain,wallet,block!):null;
+  // Browsing and purchasing require fresh wallet, receipt and pause checks, not
+  // contributor estimates or every staking campaign. Deferred fields are marked
+  // by the response scope; callers must load full before rendering those views.
+  const valuations=scope==='full'&&actor.role==='user'&&chain&&block?await this.valuationRows(actor,records,wallet,block):[];
+  const holderRewards=scope==='full'&&chain?await holderRewardsWorkspace(chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id),block!):null;
+  const staking=scope==='full'&&chain?await stakingWorkspace(chain,wallet,block!):null;
   const reserveBuyer=wallet&&chain?await chain.isReserveBuyer(wallet,block!):false;
   // Anvil can change code at the same height without changing the block hash.
   if(chain&&!chain.publicChain())await chain.guard();
   if(chain&&block)await chain.assertSnapshot(block);
-  return {holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
+  return {workspace_scope:scope,holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
  }
  private publicListing(r:Document){return {...(r.brokerage_claim?{brokerage_claim:r.brokerage_claim}:{}),id:r.id,seller:r.wallet,owner_label:'Contributor',title:r.title,price_atoms:r.price_atoms,license:r.license,license_hash:r.license_hash,evidence_hash:r.evidence_hash,provenance:r.provenance,workflow:r.workflow,turn_count:r.turn_count,capture_model:r.capture_model??null,created_at:r.created_at,automatic_sales:!!r.signature,treasury_opt_in:r.treasury_sampling_consent===THOT_TREASURY_SAMPLING_POLICY};}
  private publicIntent(r:Document){return {job_status:['queued','awaiting_funding','awaiting_reconciliation','awaiting_settlement','disputed','blocked','complete'].includes(r.job_status)?r.job_status:null,last_error:r.last_error?(['AUTHORIZATION_UNAVAILABLE','CONTENT_ALREADY_SUBSIDIZED','THOT_DELIVERY_ACK_PENDING','THOT_MARKET_PAUSED','THOT_OPERATOR_UNAVAILABLE'].includes(r.last_error)?r.last_error:'AUTOMATION_PENDING'):null,...(r.campaign_id?{campaign_id:r.campaign_id}:{}),...(r.selection_id?{selection_id:r.selection_id}:{}),id:r.offer_id,listing_id:r.listing_id,title:r.title,buyer:r.wallet,seller:r.seller_wallet,gross:r.gross,economics:r.economics??null,seller_gross:r.seller_gross??r.gross,buyer_surcharge:r.buyer_surcharge??'0',buyer_total:r.buyer_total??r.gross,buyer_surcharge_bps:r.buyer_surcharge_bps??0,license_hash:r.license_hash,evidence_hash:r.evidence_hash,automatic:r.automatic===true,payout_transaction:r.payout_transaction??null,refund_transaction:r.refund_transaction??null,payout_scope:'beneficiary_claimable_batch'};}
@@ -383,23 +389,50 @@ export class ThotMarketplace {
   const buyerRelease=i.treasury?release:((({brokerage_evidence:_privateProof,...licensed})=>licensed)(release));
   return {receipt:o,release:buyerRelease,delivery_hash:o.evidence_hash,acknowledgment:null,notice:`The operator attests this committed release is available. This does not prove the buyer read it. The ${o.dispute_seconds/3600}-hour dispute window protects delivery disputes. Undisputed sales finalize and pay automatically when the settlement worker confirms the deadline.`};
  }
+ private async retentionSnapshot(tx:Transaction,traceId:string):Promise<RetentionSnapshot>{
+  const source=await tx.get('traces',traceId),records=await tx.list('thot_records');
+  const listingIds=new Set(records.filter(r=>r.kind==='listing'&&r.trace_id===traceId).map(r=>r.id));
+  // Include whole owner-bound documents, plus related intents and sample selections.
+  // An insertion matters just as much as a revision when deciding whether a copy is paid.
+  return {source,records:records.filter(r=>r.trace_id===traceId||listingIds.has(r.listing_id))};
+ }
+ private async retentionChainReads(records:Document[]):Promise<RetentionChainReads>{
+  const authorizations:RetentionChainReads['authorizations']=new Map(),offers:RetentionChainReads['offers']=new Map();
+  for(const l of records.filter(r=>r.kind==='listing'&&!r.release_deleted_at)){
+   if(l.signature&&l.authorization)authorizations.set(l.id,await this.enabled().authorizationState(l.wallet,l.authorization.nonce,l.signature));
+   for(const i of records.filter(r=>r.kind==='intent'&&r.listing_id===l.id))offers.set(i.id,await this.enabled().offer(i.offer_id));
+  }
+  // An early result may reorganize while later listings are checked. Recheck
+  // each collected anchor at the end of the batch, still outside service_lock.
+  const blocks=new Map([...authorizations.values(),...offers.values()].map(r=>[r.block.number+':'+r.block.hash,r.block]));
+  for(const block of blocks.values())await this.enabled().assertSnapshot(block);
+  return {authorizations,offers};
+ }
+ private retentionWindows({source,records}:RetentionSnapshot,now:string){
+  const sourceLive=!source.deleted&&source.retention_expires_at>now;
+  return {source_live:sourceLive,prepared:records.filter(r=>r.kind==='listing'&&!r.release_deleted_at&&!(r.signature&&r.authorization)&&sourceLive&&Date.parse(r.created_at)+15*60*1000>Date.parse(now)).map(r=>r.id)};
+ }
  async cleanupTrace(tx:Transaction,traceId:string){
-  const records=await tx.list('thot_records'),source=await tx.get('traces',traceId);
+  return this.applyTraceRetention(tx,traceId,await this.retentionSnapshot(tx,traceId));
+ }
+ private async applyTraceRetention(tx:Transaction,traceId:string,{records,source}:RetentionSnapshot,reads?:RetentionChainReads,appliedAt?:string){
   let retained=0;
-  if(source.deleted||source.retention_expires_at<=this.service.now())await this.tradeEvidence?.cleanup(tx,traceId);
+  if(source.deleted||source.retention_expires_at<=(appliedAt??this.service.now()))await this.tradeEvidence?.cleanup(tx,traceId);
   for(const l of records.filter(r=>r.kind==='listing'&&r.trace_id===traceId&&!r.release_deleted_at)){
-   const sourceLive=!source.deleted&&source.retention_expires_at>this.service.now();
+   const sourceLive=!source.deleted&&source.retention_expires_at>(appliedAt??this.service.now());
    if(!sourceLive)l.active=false;
    let keep=sourceLive&&l.active;
    if(l.signature&&l.authorization){
-    const a=await this.enabled().authorizationState(l.wallet,l.authorization.nonce,l.signature);
+    const a=reads?reads.authorizations.get(l.id):await this.enabled().authorizationState(l.wallet,l.authorization.nonce,l.signature);
+    ensure(a,'RETENTION_CHAIN_READ_MISSING',503);
     const usable=!a.revoked&&a.uses<l.authorization.maxUses&&a.block.timestamp<l.authorization.validUntil;
     if(!usable)l.active=false;
     keep=sourceLive&&usable;
-   }else if(sourceLive&&Date.parse(l.created_at)+15*60*1000>this.now())keep=true;
+   }else if(sourceLive&&Date.parse(l.created_at)+15*60*1000>(appliedAt?Date.parse(appliedAt):this.now()))keep=true;
    for(const i of records.filter(r=>r.kind==='intent'&&r.listing_id===l.id)){
     // If RPC is unavailable cleanup fails closed and retries, rather than deleting paid material.
-    const o=await this.enabled().offer(i.offer_id);
+    const o=reads?reads.offers.get(i.id):await this.enabled().offer(i.offer_id);
+    ensure(o,'RETENTION_CHAIN_READ_MISSING',503);
     if(o.status===1&&o.block.timestamp<=o.issued_at+86400)keep=true;
     if([2,3,4,5].includes(o.status)&&o.block.timestamp<o.accepted_at+(l.retention_days??30)*86400)keep=true;
    }
@@ -745,13 +778,31 @@ export class ThotMarketplace {
   }
  }
  async sweepRetention(){
-  return this.service.db.transaction(async tx=>{
-   const listings=(await tx.list('thot_records')).filter(r=>(r.kind==='listing'&&!r.release_deleted_at)||(r.kind==='trade_evidence'&&!r.revoked));
-   for(const traceId of new Set(listings.map(r=>String(r.trace_id)))){
-    const count=await this.cleanupTrace(tx,traceId),trace=await tx.get('traces',traceId);
-    if(trace.source_private_objects_deleted){trace.private_objects_deleted=count===0;trace.thot_release_copies_retained=count;await tx.update('traces',traceId,trace);}
-   }
+  const traceIds=await this.service.db.transaction(async tx=>{
+   const records=(await tx.list('thot_records')).filter(r=>(r.kind==='listing'&&!r.release_deleted_at)||(r.kind==='trade_evidence'&&!r.revoked));
+   return [...new Set(records.map(r=>String(r.trace_id)))];
   });
+  for(const traceId of traceIds){
+   const before=await this.service.db.transaction(tx=>this.retentionSnapshot(tx,traceId)),revision=canonicalHash(before);
+   const windows=canonicalHash(this.retentionWindows(before,this.service.now()));
+   // RPC can take seconds. Never make authentication and unrelated account reads
+   // wait behind it on service_lock. These are fresh guarded reads, not a cache.
+   const reads=await this.retentionChainReads(before.records);
+   await this.service.db.transaction(async tx=>{
+    const current=await this.retentionSnapshot(tx,traceId);
+    // A new funding intent, changed listing, ownership or source revision makes
+    // the collected reads insufficient. Preserve every copy and retry next sweep.
+    if(canonicalHash(current)!==revision)return;
+    // Do not combine an earlier unfunded observation with newly expired source
+    // or preparation time. A later fresh pass must decide that boundary.
+    const appliedAt=this.service.now();
+    if(canonicalHash(this.retentionWindows(current,appliedAt))!==windows)return;
+    // Object removal may itself wait. Keep the validated time for every listing
+    // in this apply, so later copies cannot expire against older chain results.
+    const count=await this.applyTraceRetention(tx,traceId,current,reads,appliedAt),trace=current.source;
+    if(trace.source_private_objects_deleted){trace.private_objects_deleted=count===0;trace.thot_release_copies_retained=count;await tx.update('traces',traceId,trace);}
+   });
+  }
  }
  private async saveDisputeExplanation(actor:Actor,id:string,wallet:string,reason:string){
   const reasonHash=digest(reason),key='dispute:'+digest([id,wallet,reasonHash]);

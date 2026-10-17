@@ -120,12 +120,18 @@ test('concurrent campaigns isolate commitments, retain unused allowance, and pau
   assert.equal((await reserve.campaign(second)).committed, units('10'));
   await f.warp(start + 30 * DAY);
   assert.equal(await reserve.remainingAllowance(first), units('2700'), 'unused allowance accumulates across days');
-  await govern('setCampaignPaused', [first, true], f.other);
-  assert.equal(await reserve.remainingAllowance(first), 0n);
-  assert.equal(await reserve.remainingAllowance(second), units('30'));
-  await f.warp(start + 45 * DAY);
-  await govern('setCampaignPaused', [first, false], f.buyer);
-  assert.equal(await reserve.remainingAllowance(first), units('4050'), 'pause never stops the release clock');
+  // Pin the governance transactions themselves; warp would consume the pinned block.
+  const pauseAt = start + 31 * DAY;
+  await f.provider.send('evm_setNextBlockTimestamp', [pauseAt]);
+  const pauseReceipt = await govern('setCampaignPaused', [first, true], f.other);
+  assert.equal((await f.provider.getBlock(pauseReceipt.blockNumber)).timestamp, pauseAt);
+  assert.equal(await reserve.remainingAllowance(first, { blockTag: pauseReceipt.blockNumber }), 0n);
+  assert.equal(await reserve.remainingAllowance(second, { blockTag: pauseReceipt.blockNumber }), units('31'));
+  const resumeAt = start + 45 * DAY;
+  await f.provider.send('evm_setNextBlockTimestamp', [resumeAt]);
+  const resumeReceipt = await govern('setCampaignPaused', [first, false], f.buyer);
+  assert.equal((await f.provider.getBlock(resumeReceipt.blockNumber)).timestamp, resumeAt);
+  assert.equal(await reserve.remainingAllowance(first, { blockTag: resumeReceipt.blockNumber }), units('4050'), 'pause never stops the release clock');
   await govern('pause', [], f.other);
   assert.equal(await reserve.remainingAllowance(first), 0n);
   assert.equal(await reserve.remainingAllowance(second), 0n);

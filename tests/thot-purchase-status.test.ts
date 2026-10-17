@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ThotMarketplace} from '../packages/market/src/thot-market.ts';
 import {ThotChain} from '../packages/chain/thot.ts';
+import {holderRewardsWorkspace} from '../packages/chain/thot-holder-rewards.ts';
+import {Interface} from 'ethers';
+function deferred(){let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};}
 
 test('all chain modes refuse paused offer preparation before writing an intent',async()=>{
  for(const mode of ['anvil','testnet','production']){
@@ -25,6 +28,58 @@ test('workspace pause uses the same confirmed block as account and offers in eve
   const view=await ThotChain.prototype.readWorkspace.call(chain as any,undefined,[]);
   assert.equal(view.market_paused,true);assert.equal(checked,1);
  }
+});
+
+test('buyer workspace defers estimates and staking but retains guarded account, receipts and isolation',async()=>{
+ const block={number:42,hash:'0x'+'a'.repeat(64),timestamp:1234},wallet='0x'+'1'.repeat(40),other='0x'+'2'.repeat(40);
+ const records=[
+  {id:'wallet:owner',kind:'wallet',owner_id:'owner',address:wallet},
+  {id:'wallet:other',kind:'wallet',owner_id:'other',address:other},
+  {id:'mine',kind:'listing',owner_id:'owner',wallet,trace_id:'my-trace',active:false},
+  {id:'public',kind:'listing',owner_id:'other',wallet:other,trace_id:'other-private-trace',active:true},
+  {kind:'intent',owner_id:'owner',offer_id:'0x'+'3'.repeat(64),listing_id:'public'},
+  {kind:'intent',owner_id:'other',offer_id:'0x'+'4'.repeat(64),listing_id:'private'},
+ ];
+ let snapshots=0,assertions=0,valuations=0,fail=false;
+ const chain:any={config:{staking:'must-not-read',feeDiscounts:'must-not-read'},publicChain:()=>true,
+  snapshot:async()=>{snapshots++;if(fail)throw Error('THOT_CODE_PIN_MISMATCH');return block;},
+  readWorkspace:async(owner:string,ids:string[],b:any)=>{assert.equal(owner,wallet);assert.equal(b,block);assert.deepEqual(ids,['0x'+'3'.repeat(64)]);return {account:{wallet:owner,balance:'17',claimable:'3',block:b},offers:ids.map(id=>({id,status:2,block:b})),market_paused:true};},
+  isReserveBuyer:async(owner:string,b:any)=>{assert.equal(owner,wallet);assert.equal(b,block);return false;},assertSnapshot:async(b:any)=>{assertions++;assert.equal(b,block);}};
+ const market=Object.assign(Object.create(ThotMarketplace.prototype),{chain,service:{db:{transaction:async(fn:any)=>fn({list:async()=>records})}},capabilities:()=>({mode:'thot-production'}),valuationRows:async()=>{valuations++;return [{trace_id:'my-trace'}];}});
+ const first=await market.workspace({id:'owner',role:'user'},{scope:'buyer'});
+ assert.equal(first.workspace_scope,'buyer');assert.equal(first.account.balance,'17');assert.equal(first.market_paused,true);
+ assert.equal(first.orders.length,1);assert.equal(first.orders[0].receipt.block,first.account.block);
+ assert.equal(first.own_listings[0].trace_id,'my-trace');assert(!JSON.stringify(first).includes('other-private-trace'));
+ assert.equal(valuations,0);assert.equal(first.holder_rewards,null);assert.equal(first.staking,null);assert.deepEqual(first.valuations,[]);
+ await market.workspace({id:'owner',role:'user'},{scope:'buyer'});assert.equal(snapshots,2);assert.equal(assertions,2,'each request independently verifies its snapshot');
+ chain.config={};const full=await market.workspace({id:'owner',role:'user'});assert.equal(full.workspace_scope,'full');assert.equal(valuations,1);assert.equal(full.valuations[0].trace_id,'my-trace');
+ fail=true;await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'buyer'}),/THOT_CODE_PIN_MISMATCH/);
+ fail=false;chain.assertSnapshot=async()=>{throw Error('THOT_SNAPSHOT_CHANGED');};await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'buyer'}),/THOT_SNAPSHOT_CHANGED/);
+ await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'bad'}),/INVALID_WORKSPACE_SCOPE/);
+ await assert.rejects(market.workspace({id:'other',role:'service_settlement'},{scope:'buyer'}),/FORBIDDEN/);
+});
+
+test('pause and account reads start together, but order fanout waits for both',async()=>{
+ const block={number:42},accountGate=deferred(),pauseGate=deferred();
+ const started:string[]=[];
+ const chain={snapshot:async()=>block,accountAt:async()=>{started.push('account');await accountGate.promise;return {balance:'1',block};},market:{paused:async()=>{started.push('pause');await pauseGate.promise;return false;}},offerAt:async()=>{started.push('order');return {status:2,block};},assertSnapshot:async()=>{started.push('assert');}};
+ const view=ThotChain.prototype.readWorkspace.call(chain as any,'0x'+'1'.repeat(40),['0x'+'2'.repeat(64)]);
+ await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(started,['account','pause']);
+ accountGate.resolve();await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(started,['account','pause']);
+ pauseGate.resolve();assert.equal((await view).market_paused,false);assert.deepEqual(started,['account','pause','order','assert']);
+});
+
+test('direct-discount display reads run concurrently at one block and never cache later values',async()=>{
+ const address='0x'+'1'.repeat(40),governor='0x'+'2'.repeat(40),owner='0x'+'3'.repeat(40),block={number:42,hash:'0x'+'4'.repeat(64),timestamp:1234};
+ const methods=['firstThreshold','secondThreshold','firstBps','secondBps','version','lockThreshold','lockDuration','lockBps'];
+ const abi=new Interface([...methods.map(name=>'function '+name+'() view returns(uint256)'),'function qualifyingBalance(address) view returns(uint256)','function rateBps(address) view returns(uint256)','function isOwner(address) view returns(bool)']);
+ let currentBalance=500n,gate=deferred(),started=0,checked=0;
+ const provider={call:async(tx:any)=>{assert.equal(tx.blockTag,42);const parsed=abi.parseTransaction(tx)!;started++;await gate.promise;return abi.encodeFunctionResult(parsed.name,[parsed.name==='isOwner'?false:parsed.name==='qualifyingBalance'?currentBalance:100n]);}};
+ const chain={config:{feeDiscounts:address,governor,percentageFees:true},provider,snapshot:async()=>block,assertSnapshot:async(b:any)=>{assert.equal(b,block);checked++;}};
+ const first=holderRewardsWorkspace(chain as any,owner);await new Promise(resolve=>setImmediate(resolve));assert.equal(started,11,'all fixed-size independent reads start without a serial RPC round trip');
+ gate.resolve();assert.equal((await first)!.qualifying_balance_atoms,'500');assert.equal(checked,1);
+ currentBalance=700n;gate=deferred();gate.resolve();const second=await holderRewardsWorkspace(chain as any,owner);assert.equal(second!.qualifying_balance_atoms,'700');assert.equal(started,22);assert.equal(checked,2);
+ chain.assertSnapshot=async()=>{throw Error('THOT_SNAPSHOT_CHANGED');};await assert.rejects(holderRewardsWorkspace(chain as any,owner),/THOT_SNAPSHOT_CHANGED/);
 });
 
 test('ordinary intent status exposes fixed codes and no raw worker exceptions',()=>{

@@ -578,7 +578,7 @@ test('purchase recovery survives a new UI instance and reconciles existing hashe
  const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
  let sends=0,fail=true,prepares=0;
  const request=async p=>{if(p.method==='eth_sendTransaction')return hash(++sends);if(p.params[0]===hash(2)&&fail)throw Error('Receipt unavailable');return {status:'0x1'};};
- const respond=async path=>{if(path==='/v1/thot/workspace')return {market_paused:!fail};prepares++;return {id:hash(9),transactions};};
+ const respond=async path=>{if(path==='/v1/thot/workspace?scope=buyer')return {market_paused:!fail};prepares++;return {id:hash(9),transactions};};
  const first=fixture(t,request,respond,{recoveryStorage:storage});
  await first.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(first.send(),/Receipt unavailable/);assert.equal(sends,2);
  const stored=JSON.parse([...data.values()][0]);assert.equal(stored.id,hash(9));assert.equal(stored.steps[1].hash,hash(2));assert.equal(stored.extra,undefined);
@@ -590,14 +590,14 @@ test('purchase recovery survives a new UI instance and reconciles existing hashe
 
 test('a pause after the approval prevents payment without resending approval on recovery',async t=>{
  let sends=0,checks=0,paused=true;
- const f=fixture(t,async p=>p.method==='eth_sendTransaction'?hash(++sends):{status:'0x1'},async path=>path==='/v1/thot/workspace'?{market_paused:++checks>1&&paused}:{id:hash(10),transactions});
+ const f=fixture(t,async p=>p.method==='eth_sendTransaction'?hash(++sends):{status:'0x1'},async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:++checks>1&&paused}:{id:hash(10),transactions});
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/Purchases are paused/);assert.equal(sends,1);
  paused=false;await f.send();assert.equal(sends,2);
 });
 
 test('failed availability RPC blocks payment and marks state unknown',async t=>{
  let sends=0;
- const f=fixture(t,async()=>{sends++;},async path=>{if(path==='/v1/thot/workspace')throw Error('RPC secret diagnostic');return {transactions};});
+ const f=fixture(t,async()=>{sends++;},async path=>{if(path==='/v1/thot/workspace?scope=buyer')throw Error('RPC secret diagnostic');return {transactions};});
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/availability is unknown/);assert.equal(sends,0);assert.equal(f.state.thot.market_paused,null);
 });
 
@@ -605,7 +605,7 @@ test('a reload with unknown submission never resends and another identity cannot
  const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
  let sends=0;
  const request=async p=>{if(p.method==='eth_call')return '0x';sends++;throw Error('Transport closed');};
- const respond=async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions};
+ const respond=async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions};
  const first=fixture(t,request,respond,{recoveryStorage:storage});await first.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(first.send(),/Transport closed/);
  const second=fixture(t,request,respond,{recoveryStorage:storage});await second.ui.action('thot-resume-payment',button());await assert.rejects(second.send(),/may already have submitted/);assert.equal(sends,1);
  second.state.actor.id='other-person';await assert.rejects(second.ui.action('thot-resume-payment',button()),/No pending/);
@@ -646,7 +646,7 @@ test('a receipt on a replaced block stays recoverable and is never resubmitted',
 test('unknown purchase submission does not block a separately authorized claim or erase recovery',async t=>{
  let sends=0;
  const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
- const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===1)throw Error('Submission unknown');return hash(sends);}return {status:'0x1'};},async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[transactions[0]]},{recoveryStorage:storage});
+ const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===1)throw Error('Submission unknown');return hash(sends);}return {status:'0x1'};},async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions:[transactions[0]]},{recoveryStorage:storage});
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/Submission unknown/);
  await f.ui.action('thot-claim',button());assert.doesNotMatch(f.dialogs.at(-1)[0],/Resume/);await f.send();assert.equal(sends,2);assert.equal(data.size,1);
  await f.ui.action('thot-resume-payment',button());await assert.rejects(f.send(),/may already have submitted/);assert.equal(sends,2);
@@ -657,7 +657,7 @@ test('unknown purchase preserves deadline-sensitive dispute filing and seller re
  const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
  let sends=0,confirmedDispute;
  const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===1)throw Error('Purchase submission unknown');return hash(sends);}return {status:'0x1'};},async(path,options)=>{
-  if(path==='/v1/thot/workspace')return {market_paused:false};
+  if(path==='/v1/thot/workspace?scope=buyer')return {market_paused:false};
   if(path==='/v1/thot/disputes/confirm'){confirmedDispute=options.body;return {status:'confirmed'};}
   return {wallet:owner,transactions:[transactions[0]]};
  },{recoveryStorage:storage});
@@ -689,7 +689,7 @@ test('replacement adoption persists across reload and never submits during verif
   if(p.method==='eth_getTransactionByHash')return p.params[0]===hash(3)?{hash:hash(3),from:owner,to:owner,input:'0xaaaa',value:'0x0',chainId:'0x7a69',nonce:'0x0'}:p.params[0]===hash(1)?{hash:hash(1),nonce:'0x0'}:null;
   if(p.method==='eth_getTransactionReceipt'){if(!receiptReady)throw Error('RPC unavailable');return {status:'0x1'};}
  };
- const respond=path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions,buyer_total:'100000000000000000000'};
+ const respond=path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions,buyer_total:'100000000000000000000'};
  const first=fixture(t,request,respond,{recoveryStorage:storage});
  await first.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(first.send(),/RPC unavailable/);assert.equal(sends,1);
  receiptReady=true;globalThis.document.querySelector=()=>({value:hash(3)});
@@ -778,7 +778,7 @@ for(const ambiguous of [false,true])test(`saved ${ambiguous?'unknown submission'
   if(p.method==='eth_call')return allowance;
   if(p.method==='eth_sendTransaction'){sends++;assert.equal(p.params[0].to,other);return hash(2);}
   if(p.method==='eth_getTransactionReceipt')return {status:'0x1'};
- },async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[purchaseApprovalTx,{...transactions[1],to:other}],purchase:true},{recoveryStorage:storage});
+ },async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions:[purchaseApprovalTx,{...transactions[1],to:other}],purchase:true},{recoveryStorage:storage});
  Object.assign(f.state.thot.capabilities,{token:owner,market:other});
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});
  await new Promise(resolve=>setImmediate(resolve));
@@ -796,7 +796,7 @@ for(const ambiguous of [false,true])test(`saved ${ambiguous?'unknown submission'
 
 test('purchase preflight failure never opens payment wallet and offers fresh review',async t=>{
  let sends=0,refreshes=0;
- const f=fixture(t,async p=>{if(p.method==='eth_call')throw Error('execution reverted: REVIEW_INPUTS_CHANGED');if(p.method==='eth_sendTransaction')sends++;},async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[transactions[0]]});
+ const f=fixture(t,async p=>{if(p.method==='eth_call')throw Error('execution reverted: REVIEW_INPUTS_CHANGED');if(p.method==='eth_sendTransaction')sends++;},async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions:[transactions[0]]});
  const progress={innerHTML:''},primary={textContent:'',disabled:false};document.querySelector=selector=>selector==='[data-wallet-progress]'?progress:selector==='[data-action="thot-send"]'?primary:{value:'10000'};
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/No payment was sent/);
  assert.equal(sends,0);assert.equal(primary.textContent,'Review a new purchase');assert.doesNotMatch(progress.innerHTML,/Your transaction has been submitted/);
@@ -806,14 +806,14 @@ test('purchase preflight failure never opens payment wallet and offers fresh rev
 test('canonical reverted purchase can leave recovery without another payment',async t=>{
  let sends=0,receipts=0;
  const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
- const f=fixture(t,async p=>{if(p.method==='eth_call')return '0x';if(p.method==='eth_sendTransaction')return hash(++sends);if(p.method==='eth_getTransactionReceipt'){receipts++;return {status:'0x0'};}},async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[transactions[0]]},{recoveryStorage:storage});
+ const f=fixture(t,async p=>{if(p.method==='eth_call')return '0x';if(p.method==='eth_sendTransaction')return hash(++sends);if(p.method==='eth_getTransactionReceipt'){receipts++;return {status:'0x0'};}},async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions:[transactions[0]]},{recoveryStorage:storage});
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/reverted/);assert.equal(data.size,1);assert.equal(receipts,2);
  await f.send();assert.equal(sends,1);assert.equal(receipts,4);assert.equal(data.size,0);assert.equal(f.refreshes,1);
 });
 
 test('a failure receipt that changes canonical block cannot authorize fresh purchase',async t=>{
  let sends=0,receipts=0;
- const f=fixture(t,async p=>{if(p.method==='eth_call')return '0x';if(p.method==='eth_sendTransaction')return hash(++sends);if(p.method==='eth_getTransactionReceipt')return {status:'0x0',blockHash:++receipts%2?hash(999):hash(998)};},async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[transactions[0]]});
+ const f=fixture(t,async p=>{if(p.method==='eth_call')return '0x';if(p.method==='eth_sendTransaction')return hash(++sends);if(p.method==='eth_getTransactionReceipt')return {status:'0x0',blockHash:++receipts%2?hash(999):hash(998)};},async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions:[transactions[0]]});
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/confirmation changed/);await assert.rejects(f.send(),/confirmation changed/);assert.equal(sends,1);assert.equal(f.refreshes,0);
 });
 
@@ -821,7 +821,7 @@ test('legacy saved revert is revalidated after reload before recovery is removed
  const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
  let sends=0,available=true;
  const request=async p=>{if(p.method==='eth_call')return '0x';if(p.method==='eth_sendTransaction')return hash(++sends);if(p.method==='eth_getTransactionReceipt'){if(!available)throw Error('RPC unavailable');return {status:'0x0'};}};
- const respond=async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[transactions[0]]};
+ const respond=async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions:[transactions[0]]};
  const first=fixture(t,request,respond,{recoveryStorage:storage});await first.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(first.send(),/reverted/);
  const second=fixture(t,request,respond,{recoveryStorage:storage});await second.ui.action('thot-resume-payment',button());assert.match(second.dialogs.at(-1)[3],/Review a new purchase/);
  available=false;await assert.rejects(second.send(),/RPC unavailable/);assert.equal(data.size,1);assert.equal(sends,1);
@@ -830,7 +830,7 @@ test('legacy saved revert is revalidated after reload before recovery is removed
 
 test('fresh-review keeps dialog open until listing refresh completes',async t=>{
  const pause=deferred(),started=deferred();let closes=0;
- const f=fixture(t,async p=>{if(p.method==='eth_call')throw Error('expired');},async path=>path==='/v1/thot/workspace'?{market_paused:false}:{transactions:[transactions[0]]},{dialog:{close(){closes++;}},refresh:async()=>{started.resolve();await pause.promise;}});
+ const f=fixture(t,async p=>{if(p.method==='eth_call')throw Error('expired');},async path=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{transactions:[transactions[0]]},{dialog:{close(){closes++;}},refresh:async()=>{started.resolve();await pause.promise;}});
  await f.ui.action('thot-buy',{dataset:{id:'listing'}});await assert.rejects(f.send(),/No payment was sent/);
  const resetting=f.send();await started.promise;assert.equal(closes,0);pause.resolve();await resetting;assert.equal(closes,1);
 });

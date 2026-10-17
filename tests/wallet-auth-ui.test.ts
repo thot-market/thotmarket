@@ -184,6 +184,50 @@ test('an existing injected wallet restores without waiting for the optional SDK'
   assert.equal(await a.ui.restore(),true);assert.equal(extra,0);assert.equal(a.sessions.length,1);a.ui.destroy();
 });
 
+test('restore checks available wallets concurrently and ignores a faster mismatching account',async()=>{
+  let release!: () => void, extra=0;
+  const stalled=provider(), wrong=provider(), matching=provider();wrong.state.address=bob;
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  stalled.p.request=async()=>{await held;throw Error('locked extension');};
+  const a=fixture({window:{ethereum:{providers:[stalled.p,wrong.p,matching.p]}},additionalProviders:async()=>{extra++;return [];}});
+  try {
+    const restore=a.ui.restore();await tick();await tick();
+    assert.equal(a.sessions.length,1,'the matching wallet is usable while the first provider remains unresolved');
+    assert.equal(await restore,true);assert.equal(a.ui.getProvider(),matching.p);assert.equal(extra,0);
+    assert.equal(a.sessions[0].wallet_address,alice);
+  }finally{release();a.ui.destroy();await tick();}
+});
+
+test('restore reads account and chain together but accepts neither until both match',async()=>{
+  let release!: (value:string[])=>void;
+  const a=fixture(),original=a.p.request;let first=true;
+  a.p.request=(input:any)=>{
+    if(first&&input.method==='eth_accounts'){first=false;return new Promise(resolve=>{release=resolve;});}
+    return original(input);
+  };
+  const restoring=a.ui.restore();await tick();
+  assert.ok(a.state.calls.some((call:any)=>call.method==='eth_chainId'));
+  assert.equal(a.sessions.length,0);release([alice]);
+  assert.equal(await restoring,true);assert.equal(a.sessions.length,1);a.ui.destroy();
+});
+
+test('an unavailable account does not wait for its stalled chain read before trying the email wallet',async()=>{
+  const embedded=provider();let extra=0;
+  const a=fixture({additionalProviders:async()=>{extra++;return[embedded.p];}});
+  a.p.request=async(input:any)=>input.method==='eth_accounts'?[]:new Promise(()=>{});
+  const restoring=a.ui.restore();await tick();await tick();
+  assert.equal(extra,1,'known mismatching account fails without waiting for another provider read');
+  assert.equal(await restoring,true);assert.equal(a.ui.getProvider(),embedded.p);a.ui.destroy();
+});
+
+test('logout invalidates concurrent provider discovery before a late matching account can restore',async()=>{
+  let release!: (value:string[])=>void;
+  const a=fixture(),original=a.p.request;
+  a.p.request=(input:any)=>input.method==='eth_accounts'?new Promise(resolve=>{release=resolve;}):original(input);
+  const restoring=a.ui.restore();await tick();await a.ui.signOut();release([alice]);
+  assert.equal(await restoring,false);assert.equal(a.sessions.length,0);assert.equal(a.ui.getProvider(),null);a.ui.destroy();
+});
+
 test('a stalled anonymous-session request is aborted and leaves a visible retry without accepting a session',async()=>{
   let release!:(value:any)=>void;
   const a=fixture({requestTimeoutMs:10,fetch:(path:string)=>path==='/v1/auth/session'?new Promise(resolve=>{release=resolve;}):null});

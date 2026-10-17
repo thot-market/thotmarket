@@ -61,6 +61,33 @@ test('HTTP security: bearer identity, roles and private endpoint isolation are e
   assert.equal((await call('/v1/internal/assay',{token:buyer})).status,404);
   assert.equal((await call('/v1/dev/session',{body:{role:'service_settlement'}})).status,403);
 });
+test('buyer workspace scope is explicit, authenticated, uncached and cannot select another account',async t=>{
+  const{app,call,session}=await setup(t),user=await session('user'),buyer=await session('buyer_admin');
+  const owner=(await call('/v1/auth/session',{token:user})).body.actor.id;
+  const other=(await call('/v1/auth/session',{token:buyer})).body.actor.id;
+  const wallet='0x'+'11'.repeat(20),otherWallet='0x'+'22'.repeat(20);
+  const listing={kind:'listing',active:false,title:'Synthetic listing',price_atoms:'1',license:'Synthetic evaluation only',license_hash:'synthetic-license',evidence_hash:'synthetic-evidence',provenance:'P0_OPERATOR',workflow:'coding',turn_count:2,created_at:'2026-10-01T00:00:00.000Z'};
+  await app.db.transaction(async tx=>{
+    await tx.insert('thot_records','wallet:'+owner,owner,{kind:'wallet',address:wallet});
+    await tx.insert('thot_records','wallet:'+other,other,{kind:'wallet',address:otherWallet});
+    await tx.insert('thot_records','owner-listing',owner,{...listing,wallet,trace_id:'private-owner-trace'});
+    await tx.insert('thot_records','other-listing',other,{...listing,wallet:otherWallet,trace_id:'private-other-trace'});
+  });
+  assert.equal((await call('/v1/thot/workspace?scope=buyer')).status,401);
+  const first=await call('/v1/thot/workspace?scope=buyer',{token:user});
+  assert.equal(first.status,200);assert.equal(first.headers.get('cache-control'),'no-store');
+  assert.equal(first.body.workspace_scope,'buyer');assert.equal(first.body.wallet,wallet);
+  assert.equal(first.body.account,null,'unconfigured financial state is unavailable, never invented as zero');
+  assert.deepEqual(first.body.own_listings.map((l:Document)=>l.trace_id),['private-owner-trace']);
+  assert.deepEqual(first.body.valuations,[]);assert.equal(first.body.holder_rewards,null);assert.equal(first.body.staking,null);
+  assert(!JSON.stringify(first.body).includes('private-other-trace'));
+  const second=await call('/v1/thot/workspace?scope=buyer',{token:buyer});
+  assert.equal(second.body.wallet,otherWallet);assert(!JSON.stringify(second.body).includes('private-owner-trace'));
+  for(const path of ['/v1/thot/workspace','/v1/thot/workspace?scope=full'])assert.equal((await call(path,{token:user})).body.workspace_scope,'full');
+  for(const query of ['scope=','scope=unknown','scope=buyer&scope=full','scope=buyer&owner='+other,'private=DO_NOT_LOG_WORKSPACE_QUERY']){
+    const result=await call('/v1/thot/workspace?'+query,{token:user});assert.equal(result.status,400);assert.equal(result.body.error,'INVALID_WORKSPACE_QUERY');
+  }
+});
 test('HTTP security: hostile origins/hosts, malformed JSON, missing keys and arbitrary code are rejected safely',async t=>{
   const{call,session,base,logs}=await setup(t);const user=await session('user');
   assert.equal((await call('/v1/dev/session',{body:{role:'user'},headers:{Origin:'https://attacker.invalid'}})).status,403);
@@ -117,7 +144,8 @@ test('read diagnostics are operator-only and preserve RPC categories without sen
     info:{error:{code:-32000,message:'header not found '+secret,data:secret},payload:{method:'eth_call',params:[secret]},response:{statusCode:503,headers:{Authorization:secret},body:secret}},
     transaction:{from:secret,data:secret},actor:secret});
   app.thot.workspace=async()=>{throw error;};
-  const failure=await call('/v1/thot/workspace?private='+secret,{token:user});assert.equal(failure.status,500);
+  const invalid=await call('/v1/thot/workspace?private='+secret,{token:user});assert.equal(invalid.status,400);
+  const failure=await call('/v1/thot/workspace?scope=buyer',{token:user});assert.equal(failure.status,500);
   assert.equal((await call('/v1/operator/read-diagnostics')).status,401);
   for(const token of [user,buyer])assert.equal((await call('/v1/operator/read-diagnostics',{token})).status,403);
   const result=await call('/v1/operator/read-diagnostics',{token:operator});assert.equal(result.status,200);assert.equal(result.headers.get('cache-control'),'no-store');

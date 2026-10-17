@@ -666,7 +666,7 @@ ${tradeEvidenceOptions(listingMetadata)}
     for(const step of operation.steps){
      // Already submitted transactions must reconcile even during a pause.
      if(operation.purchase&&!step.hash&&!step.uncertain&&!step.confirmed){
-      let workspace;try{workspace=await api('/v1/thot/workspace');}catch(error){state.thot.market_paused=null;throw Error('Purchase availability is unknown. Check the chain before submitting payment.');}
+      let workspace;try{workspace=await api('/v1/thot/workspace?scope=buyer');}catch(error){state.thot.market_paused=null;throw Error('Purchase availability is unknown. Check the chain before submitting payment.');}
       operation.current();state.thot.market_paused=workspace.market_paused??null;if(purchasesPaused())throw Error(pauseNotice());
      }
      if(purchaseApproval(operation,step)){

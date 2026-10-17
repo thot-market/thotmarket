@@ -12,6 +12,8 @@ const cap={mode:'thot-anvil',chain_id:31337,test_assets:true,production_enabled:
 const listing={id:'synthetic-listing',title:'Synthetic deployment comparison',seller,price_atoms:'1000000000000000000',license:'Synthetic evaluation licence, 30 days.',automatic_sales:true,workflow:'research',turn_count:2,provenance:'P0_OPERATOR',capture_model:null};
 const catalogue={capabilities:cap,wallet,listings:[listing]};
 const workspace={...catalogue,market_paused:false,reserve_buyer:false,account:{balance:'10000000000000000000',claimable:'0'},orders:[],own_listings:[],valuations:[],holder_rewards:null,staking:null};
+const libraryItem={trace_id:'synthetic-trace-000001',title:'My private synthetic conversation',source:'Codex',state:'IMPORTED',origin:'upload',turn_count:2,created_at:'2026-01-01T00:00:00Z',sale_eligibility:{can_list:true,reason_code:'EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED'}};
+const library={items:[libraryItem],summary:{saved:1,added_week:0,recording:0,bookmarked:0},total_matches:1,attempts:[],refreshed_at:'2026-01-01T00:00:00Z'};
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};
 let browser;
 before(async()=>{
@@ -43,16 +45,17 @@ async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vaul
    if(u.origin!==origin)return route.abort();
    const send=(body,status=200)=>route.fulfill({status,contentType:'application/json',headers:{'Cache-Control':'no-store'},body:JSON.stringify(body)});
    if(path.startsWith('/v1/')){
-     requests.push({path,method:route.request().method()});
+     requests.push({path,search:u.search,method:route.request().method()});
      if(path==='/v1/auth/capabilities')return send({mode:'wallet_siwe',wallet:{chain_id:31337,rpc_url:origin+'/rpc'}});
      if(path==='/v1/auth/session')return send(revoked?{}:{actor:{id:'synthetic-reader',role:'user'},wallet_address:wallet,chain_id:31337},revoked?401:200);
      if(path==='/v1/auth/session/revoke'){revoked=true;return send({});}
      if(path==='/v1/thot/catalog'){if(holdCatalog)await catalog.promise;return send(catalogue);}
-     if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:workspace,failed?400:200);}
+     if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
      if(path==='/v1/money/capabilities')return send({mode:'mock'});
      if(path==='/v1/earnings')return send({entitlements:[],settlements:[],burn_allocations:[]});
      if(path==='/v1/contributor/portfolio')return send({items:[],robinhood:{status:'not_linked'}});
-     if(path==='/v1/contributor/library')return send({items:[],total:0});
+     if(path==='/v1/contributor/library')return send(library);
+     if(path==='/v1/contributor/library/'+libraryItem.trace_id)return send({...libraryItem,note:'',events:[],model_history:[],capture_segments:[],content:{turns:[{role:'user',content:'Private synthetic question'},{role:'assistant',content:'Private synthetic response'}]}});
      if(path==='/v1/inference/capabilities')return send({enabled:false});
      if(['/v1/traces','/v1/candidates','/v1/inference/requests'].includes(path))return send([]);
      return send({enabled:false,items:[]});
@@ -130,4 +133,53 @@ test('wallet change discards late catalogue and account responses',async t=>{
  f.releaseCatalog();f.release();await f.page.waitForTimeout(100);
  assert.equal(await card(f.page).count(),0);
  assert.equal(await f.page.locator('#wallet-summary').isVisible(),false);
+});
+
+test('My work is readable while chain data waits and never presents pending sale state as private or zero',async t=>{
+ const f=await fixture(t);await f.open('');
+ await f.page.getByRole('button',{name:libraryItem.title,exact:true}).waitFor();
+ assert.match(await f.page.locator('#wallet-summary').innerText(),/Loading balance/);
+ assert.match(await f.page.locator('.library-row').innerText(),/Sale status loading/);
+ assert.equal(await f.page.locator('[data-action="thot-list-configure"]').count(),0);
+ assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace'&&r.search==='?scope=buyer').length,1);
+ await f.page.getByRole('button',{name:'Add a trace'}).click();
+ await f.page.locator('[data-action="journey-local"][data-client="codex"]').click();
+ await f.page.getByRole('button',{name:/Daily history uploads/}).click();
+ await f.page.getByRole('heading',{name:'Upload Codex history daily'}).waitFor();
+ await f.page.locator('#detail-dialog [data-action="close-dialog"]').click();
+ await f.page.getByRole('button',{name:'Add a trace'}).click();
+ await f.page.locator('[data-action="journey-local"][data-client="claude"]').click();
+ await f.page.getByRole('button',{name:/Import a conversation/}).click();
+ await f.page.locator('#research-file').waitFor();
+ await f.page.locator('#detail-dialog [data-action="close-dialog"]').first().click();
+ await f.page.getByRole('button',{name:libraryItem.title,exact:true}).click();
+ await f.page.getByText('Private synthetic response',{exact:true}).waitFor();
+ assert.equal(await f.page.locator('[data-action="thot-list-configure"]').count(),0);
+ await f.snapshot('library-before-account');
+ f.release();await f.page.locator('.library-row [data-action="thot-list-configure"]').waitFor();
+ assert.equal(await f.page.getByText('Private synthetic response',{exact:true}).isVisible(),true,'account readiness must not close a private reader');
+ assert.equal(f.requests.filter(r=>r.method!=='GET').length,0);
+});
+
+test('My work navigation loads contributor records without repeating the market wallet snapshot',async t=>{
+ const f=await fixture(t);await f.open();f.release();await ready(f.page).waitFor();
+ assert.equal(f.requests.some(r=>r.path.startsWith('/v1/contributor/')),false);
+ await f.page.getByRole('button',{name:'My work',exact:true}).click();
+ await f.page.getByRole('button',{name:libraryItem.title,exact:true}).waitFor();
+ assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace').length,1);
+ assert.equal(f.requests.filter(r=>r.path==='/v1/contributor/library').length,1);
+ await f.page.locator('.journey-menu>summary').click();await f.page.getByRole('button',{name:'Manage THOT',exact:true}).click();
+ await f.page.waitForFunction(()=>document.title==='THOT · thot market');
+ assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace'&&r.search==='').length,1,'full token view upgrades the reduced response');
+});
+
+test('chain failure leaves the private library usable and account changes clear it',async t=>{
+ const f=await fixture(t,{failWorkspace:true});await f.open('');
+ await f.page.getByRole('button',{name:libraryItem.title,exact:true}).waitFor();f.release();
+ await f.page.getByText('Balance unavailable',{exact:true}).waitFor();
+ assert.equal(await f.page.getByRole('button',{name:libraryItem.title,exact:true}).isVisible(),true);
+ assert.equal(await f.page.locator('[data-action="thot-list-configure"]').count(),0);
+ await f.page.evaluate(()=>window.fixtureAccountChange());
+ await f.page.getByRole('heading',{name:'Sign in with your wallet.'}).waitFor();
+ assert.equal(await f.page.getByRole('button',{name:libraryItem.title,exact:true}).count(),0);
 });

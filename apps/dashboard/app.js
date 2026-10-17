@@ -34,7 +34,7 @@ let earningsTimer=null, earningsRefreshRunning=false, fullRefreshCount=0;
 let earningsUpdatedAt=null, earningsRefreshError=false;
 let purchasesTimer=null,purchasesRefreshing=false,purchasesAttempts=0;
 let signingOut=false, walletLoginAttempt=0;
-let catalogueRequest=null, renderedCatalogue=null, scrolledMarketFragment=null;
+let catalogueRequest=null, renderedCatalogue=null, scrolledMarketFragment=null, contributorRequest=null;
 const initialView=role=>role==='user'?'vault':['buyer_admin','buyer_member'].includes(role)?'market':'operator';
 const isThotMode=mode=>['thot-anvil','thot-testnet','thot-production'].includes(mode);
 
@@ -60,7 +60,8 @@ function acceptMarketFragment(){
   const hash=marketFragment();if(!hash)return false;scrolledMarketFragment=null;
   if(state.actor&&!signingOut){
     state.view='market';
-    if(state.loaded&&hash==='#thot-contribute'&&!state.contributorLoaded){loading();if(!fullRefreshCount)void safely(refresh);return true;}
+    if(hash==='#thot-contribute'&&state.thot?.workspace_scope==='buyer'){state.loaded=false;loading();if(!fullRefreshCount)void safely(refresh);return true;}
+    if(state.loaded&&hash==='#thot-contribute'&&!state.contributorLoaded){loading();void safely(loadContributorRecords);return true;}
     if(!state.loaded)void loadCatalogue();render();
   }
   return true;
@@ -109,7 +110,7 @@ async function refreshPurchases(){
   purchasesRefreshing=true;purchasesAttempts++;
   const current=captureScope(),wallet=state.thot.wallet;
   try{
-    const workspace=await api('/v1/thot/workspace');current();
+    const workspace=await api('/v1/thot/workspace?scope=buyer');current();
     if(!purchasesVisible()||dialog.open||target!==document.querySelector('#thot-buyer-purchases')||editingPurchaseControl(target))return;
     if(!isThotMode(workspace?.capabilities?.mode)||workspace.wallet?.toLowerCase()!==wallet.toLowerCase())return;
     state.thot=workspace;updatePurchaseCards(target);
@@ -334,7 +335,7 @@ async function session(role) {
   historySyncUI.authLost();
   robinhoodSetupUI.authLost();
   contributorUI.reset();
-  resetCatalogue();state.contributorLoaded=false;state.traces=[];state.candidates=[];state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.generation++; state.loaded = false; state.token = null; state.actor = null; state.thot=null; state.thotSampling=null; state.money=null; state.canExplore=false;state.traceExplorer=null; state.role = role;state.environmentOverview=null;
+  resetCatalogue();resetContributorRecords();state.traces=[];state.candidates=[];state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.generation++; state.loaded = false; state.token = null; state.actor = null; state.thot=null; state.thotSampling=null; state.money=null; state.canExplore=false;state.traceExplorer=null; state.role = role;state.environmentOverview=null;
   activePreview = null; if (dialog.open) dialog.close();document.querySelector('#dialog-content').innerHTML='';thotUI.clearPrivateReview?.(); loading();
   document.querySelector('#role').value = role;
   const result = await api('/v1/dev/session', { method: 'POST', body: { role } });
@@ -343,6 +344,36 @@ async function session(role) {
   await refresh();
 }
 function resetCatalogue(){state.catalogue=null;state.catalogueError=false;state.workspaceError=false;catalogueRequest=null;renderedCatalogue=null;scrolledMarketFragment=null;}
+function resetContributorRecords(){contributorRequest=null;state.libraryLoaded=false;state.contributorLoaded=false;state.contributorError=false;}
+// A confirmed wallet snapshot is needed to trade, not to read an authenticated
+// contributor's own library. Keep these independent and discard late accounts.
+async function loadContributorRecords(){
+  if(state.role!=='user'||!state.actor||signingOut||state.contributorLoaded)return;
+  const generation=state.generation;if(contributorRequest?.generation===generation)return contributorRequest.promise;
+  const current=captureScope(),request={generation,promise:null};contributorRequest=request;state.contributorError=false;
+  request.promise=(async()=>{
+    try{
+      const library=api('/v1/contributor/library'+libraryUI.queryString()).then(traceLibrary=>{
+        current();state.traceLibrary=traceLibrary;state.libraryLoaded=true;if(state.view==='vault')render();
+      });
+      const [traces,contributorPortfolio]=await Promise.all([api('/v1/traces'),api('/v1/contributor/portfolio'),library]);current();
+      Object.assign(state,{traces,contributorPortfolio,contributorLoaded:true});render();libraryUI.ready();
+    }catch(error){if(error.name==='StaleWorkspaceError')return;current();state.contributorError=true;if(state.view==='vault')render();throw error;}
+    finally{if(contributorRequest===request)contributorRequest=null;}
+  })();
+  return request.promise;
+}
+function renderContributorLoading(){
+  if(!state.actor||signingOut||state.role!=='user'||state.view!=='vault'||state.loaded&&state.contributorLoaded)return false;
+  document.querySelector('.journey-menu')?.removeAttribute?.('hidden');document.title='My work · thot market';rememberView();
+  document.querySelectorAll('[data-view].nav-item').forEach(button=>button.classList.toggle('active',button.dataset.view==='vault'));
+  main.classList.toggle('thot-workspace',true);
+  const balance=document.querySelector('#wallet-summary');if(balance){balance.innerHTML=state.loaded?thotUI.walletSummaryHTML():`<span><small>Wallet balance</small><strong>${state.workspaceError?'Balance unavailable':'Loading balance…'}</strong></span>`;balance.hidden=!balance.innerHTML;}
+  main.innerHTML=state.libraryLoaded?libraryUI.sectionHTML():heading('','My work','Your AI conversations. Private until you choose to share.')+`<section class="panel" role="status"><p>${state.contributorError?'Your library could not load. Try again.':'Loading your conversations…'}</p>${state.contributorError?'<button class="button secondary" data-action="retry-library">Retry library</button>':''}</section>`;
+  if(state.libraryLoaded&&state.contributorError)main.insertAdjacentHTML('beforeend','<p role="status">Some connection details could not load. <button class="text-button" data-action="retry-library">Retry</button></p>');
+  return true;
+}
+const needsFullWorkspace=()=>!['vault','market'].includes(state.view)||marketFragment()==='#thot-contribute';
 async function loadCatalogue(){
   if(state.loaded||!state.actor||signingOut||!['user','buyer_admin','buyer_member','operator_security'].includes(state.role))return;
   const generation=state.generation;if(catalogueRequest?.generation===generation)return catalogueRequest.promise;
@@ -376,45 +407,55 @@ function renderCatalogue(){
   document.title='Buy traces · thot market';document.querySelectorAll('[data-view].nav-item').forEach(button=>button.classList.toggle('active',button.dataset.view==='market'));
   rememberView();scrollMarketFragment();return true;
 }
-async function refresh() {
+async function refresh(options={}) {
   fullRefreshCount++;stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;
-  try { return await refreshWorkspace(); }
+  try { return await refreshWorkspace(options); }
   finally { fullRefreshCount--;scheduleEarningsRefresh();schedulePurchasesRefresh(); }
 }
-async function refreshWorkspace() {
+async function refreshWorkspace({full=false}={}) {
   if (!state.token && !(['clerk','wallet_siwe'].includes(authMode)&&state.actor)) return authMode==='development'?session(state.role):showIdentityLogin();
   const generation = ++state.generation, role = state.role;
   state.workspaceError=false;
+  if(role==='user'&&(state.view==='vault'||marketFragment()==='#thot-contribute')){state.contributorLoaded=false;void safely(loadContributorRecords);if(state.view==='vault')renderContributorLoading();}
   if(!state.loaded&&state.view==='market'){void loadCatalogue();renderCatalogue();}
   try {
-  const [moneyCapabilities,thotWorkspace]=await Promise.all([api('/v1/money/capabilities'),['user','buyer_admin','buyer_member','operator_security'].includes(role)?api('/v1/thot/workspace'):null]);
+  const workspacePath='/v1/thot/workspace'+(!full&&!needsFullWorkspace()&&role!=='operator_security'?'?scope=buyer':'');
+  let [moneyCapabilities,thotWorkspace]=await Promise.all([api('/v1/money/capabilities'),['user','buyer_admin','buyer_member','operator_security'].includes(role)?api(workspacePath):null]);
+  // Navigation can change while a buyer snapshot is in flight. Never paint a
+  // full token/governance view from fields that this response deliberately omits.
+  if(thotWorkspace?.workspace_scope==='buyer'&&needsFullWorkspace())thotWorkspace=await api('/v1/thot/workspace');
   let sampling=null,disputes=null;
-  if(role==='operator_security'||thotWorkspace?.reserve_buyer||thotWorkspace?.account?.dispute_reviewer){const c=await api('/v1/thot/capabilities');if(isThotMode(c.mode))sampling=await api('/v1/thot/sampling');}
-  if(thotWorkspace?.account?.dispute_reviewer)disputes=await api('/v1/thot/disputes');
+  if((full||needsFullWorkspace())&&(role==='operator_security'||thotWorkspace?.reserve_buyer||thotWorkspace?.account?.dispute_reviewer)){const c=await api('/v1/thot/capabilities');if(isThotMode(c.mode))sampling=await api('/v1/thot/sampling');}
+  if((full||needsFullWorkspace())&&thotWorkspace?.account?.dispute_reviewer)disputes=await api('/v1/thot/disputes');
   if(generation!==state.generation)return;
   state.money=moneyCapabilities;state.thot=thotWorkspace;state.thotSampling=sampling;state.thotDisputes=disputes;
-  if (!state.loaded&&!renderCatalogue()) loading();
+  if (!state.loaded&&!renderCatalogue()&&!renderContributorLoading()) loading();
   if (role === 'user') {
     if(isThotMode(thotWorkspace?.capabilities.mode)){
       // The buyer and earnings views need the guarded wallet snapshot, not a
       // contributor's private history or the separate legacy demo ledgers.
-      if(state.view==='vault'||marketFragment()==='#thot-contribute'){
-        const [traces,contributorPortfolio,traceLibrary]=await Promise.all([api('/v1/traces'),api('/v1/contributor/portfolio'),api('/v1/contributor/library'+libraryUI.queryString())]);
-        if(generation!==state.generation)return;
-        Object.assign(state,{traces,contributorPortfolio,traceLibrary,contributorLoaded:true});
-      }
+      if((state.view==='vault'||marketFragment()==='#thot-contribute')&&!state.contributorLoaded)void safely(loadContributorRecords);
     }else{
-      const [traces, candidates, earnings, inferenceCapabilities, inferenceRequests, contributorPortfolio, traceLibrary] = await Promise.all([api('/v1/traces'), api('/v1/candidates'), api('/v1/earnings'), api('/v1/inference/capabilities'), api('/v1/inference/requests'), api('/v1/contributor/portfolio'), api('/v1/contributor/library'+libraryUI.queryString())]);
+      const [candidates, earnings, inferenceCapabilities, inferenceRequests] = await Promise.all([api('/v1/candidates'), api('/v1/earnings'), api('/v1/inference/capabilities'), api('/v1/inference/requests'),loadContributorRecords()]);
       if (generation !== state.generation) return;
-      Object.assign(state, { traces, candidates, earnings, inferenceCapabilities, inferenceRequests, contributorPortfolio, traceLibrary, contributorLoaded:true });
+      Object.assign(state, { candidates, earnings, inferenceCapabilities, inferenceRequests });
     }
     earningsUpdatedAt=new Date();earningsRefreshError=false;
-  } else if(role==='operator_security'){state.traceExplorer=await api('/v1/operator/trace-explorer');
+  } else if(role==='operator_security'){
+    const traceExplorer=await api('/v1/operator/trace-explorer');
+    if(generation!==state.generation)return;state.traceExplorer=traceExplorer;
   } else if (role === 'buyer_admin'||role==='buyer_member') {
     const mandates = await api('/v1/buyer/mandates');
     if (generation !== state.generation) return; state.mandates = mandates;
   }
-  if(state.view==='explorer'&&state.canExplore)state.traceExplorer=await api('/v1/operator/trace-explorer');
+  if(state.view==='explorer'&&state.canExplore){
+    const traceExplorer=await api('/v1/operator/trace-explorer');
+    if(generation!==state.generation)return;state.traceExplorer=traceExplorer;
+  }
+  if(generation!==state.generation)return;
+  // A view change can also happen during a later role-specific read, after the
+  // first scope check. Resolve the requested full view before marking it ready.
+  if(thotWorkspace?.workspace_scope==='buyer'&&needsFullWorkspace())return refreshWorkspace({full:true});
   state.loaded = true;state.workspaceError=false; document.querySelector('#notice').hidden = true; render(); libraryUI.ready(); agentCaptureUI.authReady(); robinhoodSetupUI.authReady(); historySyncUI.authReady();
   }catch(error){if(generation===state.generation){state.workspaceError=true;renderCatalogue();}throw error;}
 }
@@ -556,6 +597,7 @@ function restoreCatalogueReading(reading){
 }
 function render() {
   if(renderCatalogue())return;
+  if(renderContributorLoading())return;
   const catalogueReading=renderedCatalogue&&state.loaded&&state.view==='market'?captureCatalogueReading():null;renderedCatalogue=null;
   const walletSummary=document.querySelector('#wallet-summary');if(walletSummary){walletSummary.innerHTML=state.loaded&&!signingOut?thotUI.walletSummaryHTML():'';walletSummary.hidden=!walletSummary.innerHTML;}
   if (!state.loaded || !state.actor || (!state.token && !['clerk','wallet_siwe'].includes(authMode)) || signingOut) { stopEarningsRefresh(); return; }
@@ -637,7 +679,13 @@ function download(value, filename) {
   const link = document.createElement('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function runAction(action, button) {
-  if(state.actor&&!state.loaded&&!['refresh','thot-refresh','thot-copy-seller-wallet','identity-sign-out','dismiss-notice','close-dialog'].includes(action))throw Error('Account details are still loading. Wait for them or use Refresh to retry.');
+  const privateLibraryAction=state.role==='user'&&state.libraryLoaded&&[
+    'journey-add','journey-local','journey-connections','library-open','library-earlier','library-later','library-bookmark','library-next','library-previous','library-filter-bookmarks','library-connections','import-research','confirm-research',
+    'history-sync-open','history-sync-manage','history-sync-cancel','copy-setup-command','start-agent-capture','setup-codex','setup-claude','setup-zai','capture-start-codex','capture-start-claude','capture-start-zai','cancel-agent-capture','openrouter-open','openrouter-usage'
+  ].includes(action);
+  if(state.actor&&!state.loaded&&!privateLibraryAction&&!['retry-library','refresh','thot-refresh','thot-copy-seller-wallet','identity-sign-out','dismiss-notice','close-dialog'].includes(action))throw Error('Account details are still loading. Wait for them or use Refresh to retry.');
+  if(action==='retry-library'){state.contributorLoaded=false;return loadContributorRecords();}
+  if(action==='thot-list-configure'&&state.thot?.workspace_scope==='buyer')await refresh({full:true});
   if(await historySyncUI.handle(action,button))return;
   if(await journeyUI.handle(action,button))return;
   if(await analyticsUI.handle(action,button))return;
@@ -746,7 +794,7 @@ async function safely(task, button) {
     if(error.name==='StaleWorkspaceError')return;
     const target = dialog.open && document.querySelector('#dialog-error');
     if (target) { target.textContent = Number(error?.code)===4001?'You cancelled the wallet request. Nothing was sent for this step. Continue when you are ready.':error.message; target.hidden = false; target.scrollIntoView({ block: 'nearest' }); }
-    else { notice(error.message); if (!state.loaded&&!document.querySelector('#identity-form')&&!renderCatalogue()) main.innerHTML = `<div class="panel">${empty('The workspace is unavailable.', 'Check the local service, then refresh. No account totals are shown until records can be loaded.', '<button class="button" data-action="refresh">Try again ↻</button>')}</div>`; }
+    else { notice(error.message); if (!state.loaded&&!document.querySelector('#identity-form')&&!renderCatalogue()&&!renderContributorLoading()) main.innerHTML = `<div class="panel">${empty('The workspace is unavailable.', 'Check the local service, then refresh. No account totals are shown until records can be loaded.', '<button class="button" data-action="refresh">Try again ↻</button>')}</div>`; }
   } finally { if (button?.isConnected) button.disabled = false; }
 }
 document.addEventListener('click', event => {
@@ -756,7 +804,8 @@ document.addEventListener('click', event => {
     const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;
     state.view = button.dataset.view;purchasesAttempts=0;
     if(state.view!=='market'&&marketFragment()){window.history?.replaceState(window.history.state,'',window.location.pathname+window.location.search);scrolledMarketFragment=null;}
-    if(state.actor&&state.role==='user'&&state.view==='vault'&&!state.contributorLoaded){loading();void safely(refresh);return;}
+    if(state.actor&&state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){state.loaded=false;loading();if(!fullRefreshCount)void safely(refresh);return;}
+    if(state.actor&&state.role==='user'&&state.view==='vault'&&!state.contributorLoaded){renderContributorLoading();void safely(loadContributorRecords);return;}
     if(!state.loaded&&state.actor){if(state.view==='market')void loadCatalogue();else loading();}
     render(); return;
   }
@@ -802,7 +851,7 @@ function invalidatePrivateState(){
   robinhoodSetupUI.authLost();
   const accountControl=document.querySelector('#clerk-user-button');
   if(accountControl){clerkAuth?.unmountUserButton(accountControl);accountControl.remove();}
-  contributorUI.reset();state.generation++;state.token=null;state.actor=null;state.canExplore=false;state.traceExplorer=null;state.loaded=false;state.contributorLoaded=false;state.traces=[];state.candidates=[];state.mandates=[];state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.inferenceRequests=[];
+  contributorUI.reset();resetContributorRecords();state.generation++;state.token=null;state.actor=null;state.canExplore=false;state.traceExplorer=null;state.loaded=false;state.traces=[];state.candidates=[];state.mandates=[];state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.inferenceRequests=[];
   if(dialog.open)dialog.close();
   document.querySelector('#dialog-content').innerHTML='';thotUI.clearPrivateReview?.();
 }
@@ -942,7 +991,7 @@ async function acceptClerkSession({actor,permissions}){
   state.thot=null;state.thotSampling=null;state.thotDisputes=null;state.money=null;resetCatalogue();
   stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;earningsUpdatedAt=null;earningsRefreshError=false;
   signingOut=false;
-  contributorUI.reset();state.generation++;state.loaded=false;state.contributorLoaded=false;state.token=null;state.actor=actor;state.role=actor.role;state.canExplore=permissions?.trace_explorer===true;
+  contributorUI.reset();resetContributorRecords();state.generation++;state.loaded=false;state.token=null;state.actor=actor;state.role=actor.role;state.canExplore=permissions?.trace_explorer===true;
   state.view=restoredView();
   const accountMenu=document.querySelector('.journey-menu');if(accountMenu)accountMenu.hidden=false;
   if(dialog.open)dialog.close();

@@ -50,10 +50,16 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
   }
   async function context(p, expected, wallet) {
     current(expected);
-    const accounts = await p.request({ method: 'eth_accounts' }); current(expected);
-    if (!Array.isArray(accounts) || accounts[0]?.toLowerCase() !== wallet.toLowerCase()) throw new Error('The selected wallet account changed. Please sign in again.');
-    const chain = await p.request({ method: 'eth_chainId' }); current(expected);
-    if (Number(chain) !== chainId) throw new Error(`Select ${network.chainName} to sign in.`);
+    await Promise.all([
+      Promise.resolve(p.request({ method: 'eth_accounts' })).then(accounts => {
+        current(expected);
+        if (!Array.isArray(accounts) || accounts[0]?.toLowerCase() !== wallet.toLowerCase()) throw new Error('The selected wallet account changed. Please sign in again.');
+      }),
+      Promise.resolve(p.request({ method: 'eth_chainId' })).then(chain => {
+        current(expected);
+        if (Number(chain) !== chainId) throw new Error(`Select ${network.chainName} to sign in.`);
+      })
+    ]); current(expected);
   }
   async function ensureChain(p, expected) {
     const chain = await p.request({ method: 'eth_chainId' }); current(expected);
@@ -117,14 +123,16 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
       if (!response.ok) throw new Error('The wallet session could not be restored.');
       let selected = null;
       const match = async candidates => {
-        for (const candidate of [...new Set(candidates)]) {
-          try {
-            const accounts = await bounded(candidate.request({method: 'eth_accounts'}), providerTimeoutMs, 'Wallet provider did not respond.'); current(expected);
-            const chain = await bounded(candidate.request({method: 'eth_chainId'}), providerTimeoutMs, 'Wallet provider did not respond.'); current(expected);
-            if (accounts?.[0]?.toLowerCase() === result.wallet_address?.toLowerCase() && Number(chain) === chainId) return candidate;
-          } catch (error) {current(expected);}
-        }
-        return null;
+        // A locked or unresponsive extension must not delay a different wallet
+        // that already matches this session. Only noninteractive reads race;
+        // account/chain identity is rechecked after listeners are attached.
+        try {
+          const matched = await Promise.any([...new Set(candidates)].map(async candidate => {
+            await bounded(context(candidate, expected, result.wallet_address), providerTimeoutMs, 'Wallet provider did not respond.');
+            current(expected); return candidate;
+          }));
+          current(expected); return matched;
+        } catch { current(expected); return null; }
       };
       // Anonymous and injected-wallet restores never download the optional SDK.
       selected = await match(availableProviders()); current(expected);

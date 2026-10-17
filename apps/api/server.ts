@@ -334,7 +334,11 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       else if(route==='/v1/thot/catalog'&&req.method==='GET'){
         ensure(url.searchParams.size===0,'INVALID_CATALOG_QUERY');result=await app.thot.catalog(actor);
       }
-      else if(route==='/v1/thot/workspace'&&req.method==='GET')result=await app.thot.workspace(actor);
+      else if(route==='/v1/thot/workspace'&&req.method==='GET'){
+        const scope=url.searchParams.get('scope')??'full';
+        ensure(url.searchParams.size<=(url.searchParams.has('scope')?1:0)&&(scope==='buyer'||scope==='full'),'INVALID_WORKSPACE_QUERY');
+        result=await app.thot.workspace(actor,{scope});
+      }
       else if(route==='/v1/thot/analytics'&&req.method==='GET')result=await app.thotAnalytics.workspace(actor,Object.fromEntries(url.searchParams));
       else if(route==='/v1/thot/analytics/leaderboard'&&req.method==='GET')result=await app.thotAnalytics.leaderboard(actor,Object.fromEntries(url.searchParams));
       else if(route==='/v1/thot/analytics/profile'&&req.method==='POST')result=await app.thotAnalytics.setProfile(actor,key,body);

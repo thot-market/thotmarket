@@ -34,7 +34,7 @@ const evidence = {schema: 'thot.local-purchase-demo/1', status: 'RUNNING', econo
   source_commit: git(['rev-parse', 'HEAD']),
   source_dirty: git(['status', '--porcelain']) === null ? null : Boolean(git(['status', '--porcelain'])),
   scope: 'Synthetic local browser actors and disposable Anvil. Test assets only. Local time accelerated.',
-  assumptions: ['Wallet transport is injected; all signing, transactions, API responses and content delivery are real local operations.', 'Local development role authentication; hosted SIWE/Privy and Safe governance are separate acceptance gates.', 'In-memory database: browser reload and delayed worker pickup, not application/database process recovery.', 'Ordinary zero-referral sale; positive referral payout is not exercised.', 'Refund order uses real API preparation and direct local signer funding; refund status is shown in browser.'],
+  assumptions: ['Wallet transport is injected; all signing, transactions, API responses and content delivery are real local operations.', 'Local development role authentication; hosted SIWE/Privy and Safe governance are separate acceptance gates.', 'The unrelated reader is an authenticated API-only actor without treasury authority; its delivery access is required to fail.', 'In-memory database: browser reload and delayed worker pickup, not application/database process recovery.', 'Ordinary zero-referral sale; positive referral payout is not exercised.', 'Refund order uses real API preparation and direct local signer funding; refund status is shown in browser.'],
   checks: [], screenshots: [], transactions: [], skips: []};
 let fixture, app, server, browser, worker, activePage, phase = 'fixture';
 const contexts = [], workerErrors = [];
@@ -57,7 +57,7 @@ try {
   browser = await chromium.launch({headless: true, executablePath: process.env.THOT_E2E_BROWSER ?? process.env.THOT_E2E_BROWSER ?? '/usr/bin/chromium'});
   const startWorker = () => {worker = startWorkerLoop(app, {intervalMs: 250, onError: e => workerErrors.push(String(e.message))});};
   async function session(role, signer) {
-    const context = await browser.newContext({viewport: {width: 1360, height: 980}, recordVideo: {dir: output, size: {width: 1360, height: 980}}});
+    const context = await browser.newContext({viewport: {width: 1360, height: 980}, ...(role==='operator_security'?{}:{recordVideo: {dir: output, size: {width: 1360, height: 980}}})});
     const run = {context, signer, address: await signer.getAddress(), role, rejectNext: false, holdReceipts: false, sent: []};
     contexts.push(run);
     await context.exposeBinding('localFixtureWallet', async (_source, {method, params}) => {
@@ -83,22 +83,25 @@ try {
       window.ethereum = {isMetaMask: true, request: async input => {const value = await window.localFixtureWallet(input); if (value?.rejected) {const error = new Error('Synthetic wallet rejection'); error.code = 4001; throw error;} return value;}, on() {}, removeListener() {}};
       document.addEventListener('DOMContentLoaded', () => {const banner = document.createElement('div'); banner.textContent = `LOCAL TEST · ${label} · synthetic actors/assets · dispute time accelerated in this recording`; banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;padding:8px;background:#172b4d;color:white;z-index:99999;text-align:center;font:14px sans-serif;pointer-events:none'; document.body.append(banner);});
     }, {label: role === 'user' ? 'Seller' : role === 'buyer_admin' ? 'Buyer' : 'Unrelated reader'});
-    run.page = await context.newPage(); activePage = run.page; run.page.setDefaultTimeout(30000);
     const response = await context.request.post(origin + '/v1/dev/session', {data: {role}});
     assert.equal(response.status(), 200); run.token = (await response.json()).token;
     run.api = async (path, body, expected = 200, key = randomUUID()) => {
       const response = await context.request.fetch(origin + path, {method: body === undefined ? 'GET' : 'POST', headers: {Authorization: 'Bearer ' + run.token, 'Idempotency-Key': key}, ...(body === undefined ? {} : {data: body})});
       const result = await response.json(); assert.equal(response.status(), expected, path + ': ' + JSON.stringify(result)); return result;
     };
+    // This actor only proves delivery isolation. Opening Treasury would require
+    // governance permissions it deliberately does not have in percentage mode.
+    if(role==='operator_security')return run;
+    run.page = await context.newPage(); activePage = run.page; run.page.setDefaultTimeout(30000);
     run.open = async view => {
       await run.page.goto(origin + '/app'); await run.page.locator('#main h1').waitFor();
-      if (role !== 'user') { await run.page.locator('.journey-menu > summary').click(); const loaded = run.page.waitForResponse(r => r.url().endsWith('/v1/thot/workspace')); await run.page.locator('#role').selectOption(role); await loaded; await run.page.waitForFunction(role => document.querySelector('#role').value === role, role); }
+      if (role !== 'user') { await run.page.locator('.journey-menu > summary').click(); const loaded = run.page.waitForResponse(r => new URL(r.url()).pathname === '/v1/thot/workspace'); await run.page.locator('#role').selectOption(role); assert.equal((await loaded).status(), 200); await run.page.waitForFunction(role => document.querySelector('#role').value === role, role); }
       const target = run.page.locator(`nav [data-view="${view}"]`);
       if (!(await target.isVisible())) await run.page.locator('.journey-menu > summary').click();
       await target.click(); if (view === 'market') await run.page.locator('[data-action="thot-refresh"]').waitFor();
     };
-    await run.open(role === 'operator_security' ? 'operator' : 'market');
-    if (role !== 'operator_security' && !(await run.api('/v1/thot/workspace')).wallet) { await run.page.locator('[data-action="thot-link"]').waitFor();
+    await run.open('market');
+    if (!(await run.api('/v1/thot/workspace')).wallet) { await run.page.locator('[data-action="thot-link"]').waitFor();
       const linked = run.page.waitForResponse(r => r.url().endsWith('/v1/thot/wallet/link'));
       await run.page.locator('[data-action="thot-link"]').click(); assert.equal((await linked).status(), 200);
       await waitFor(async () => (await run.api('/v1/thot/workspace')).wallet === run.address, 'wallet link');

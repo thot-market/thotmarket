@@ -131,7 +131,7 @@ test('critical THOT reads and delivery sends fail closed after local runtime/cha
         const view = await chain.readWorkspace(owner, ids);
         assert.equal(advanced, true); assert.equal(codeReads, 4);
         assert(maxActiveOrders >= 2 && maxActiveOrders <= orderFanoutLimit, 'a large workspace must read orders concurrently without exceeding four active orders');
-        assert(maxAccountReads > 0 && maxAccountReads <= 7, 'the account phase has at most seven independent RPC reads');
+        assert(maxAccountReads > 0 && maxAccountReads <= 8, 'the account and pause phase has at most eight independent RPC reads');
         assert(maxActive <= orderFanoutLimit * orderReadMethods.length, 'RPC fanout stays bounded by four orders and their seven required fields');
         assert.equal(active, 0); assert.equal(activeAccountReads, 0); assert.equal(activeOrderReads.size, 0);
         assert.deepEqual([...observedOrderReads.keys()].sort(), [...ids].sort());
@@ -241,9 +241,17 @@ test('critical THOT reads and delivery sends fail closed after local runtime/cha
         assert(next.account.block.number > first.account.block.number);
         assert.equal(checkedBlocks[0], next.account.block);
 
+        codeReads = 0; checkedBlocks = [];
+        const buyer = await app.thot.workspace(demoUser, {scope: 'buyer'});
+        assert.equal(buyer.workspace_scope, 'buyer');
+        assert.equal(buyer.account.wallet, owner);assert.equal(buyer.account.balance, next.account.balance);
+        assert.deepEqual(buyer.valuations, []);assert.equal(buyer.holder_rewards, null);assert.equal(buyer.staking, null);
+        assert.equal(codeReads, 8, 'buyer scope keeps both local runtime checks');assert.equal(checkedBlocks.length, 0, 'buyer scope does not read contributor comparable-sale anchors');
+
         const beforeCodeChange = await f.provider.send('evm_snapshot', []);
         await f.provider.send('anvil_setCode', [f.config.token, '0x60006000fd']);
         await assert.rejects(app.thot.workspace(demoUser), /THOT_CODE_PIN_MISMATCH/);
+        await assert.rejects(app.thot.workspace(demoUser, {scope: 'buyer'}), /THOT_CODE_PIN_MISMATCH/);
         await f.provider.send('evm_revert', [beforeCodeChange]);
 
         const beforeReorg = await f.provider.send('evm_snapshot', []);

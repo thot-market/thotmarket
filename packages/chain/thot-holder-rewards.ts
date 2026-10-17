@@ -61,10 +61,16 @@ export async function prepareHolderPolicy(chain:ThotChain,wallet:string,input:Re
 async function directDiscountWorkspace(chain:ThotChain,wallet?:string,sharedBlock?:ThotSnapshot){
  const c=chain.config,block=sharedBlock??await chain.snapshot(),at={blockTag:block.number},address=getAddress(c.feeDiscounts!);
  const policy=new Contract(address,['function firstThreshold() view returns(uint256)','function secondThreshold() view returns(uint256)','function firstBps() view returns(uint16)','function secondBps() view returns(uint16)','function version() view returns(uint256)','function qualifyingBalance(address) view returns(uint256)','function rateBps(address) view returns(uint256)','function lockThreshold() view returns(uint256)','function lockDuration() view returns(uint64)','function lockBps() view returns(uint16)'],chain.provider);
- const [first,second,low,high,version,balance]=await Promise.all([policy.firstThreshold(at),policy.secondThreshold(at),policy.firstBps(at),policy.secondBps(at),policy.version(at),wallet?policy.qualifyingBalance(wallet,at):0n]);
- const lock=c.percentageFees?{minimum_atoms:String(await policy.lockThreshold(at)),duration_seconds:Number(await policy.lockDuration(at)),rebate_bps:Number(await policy.lockBps(at))}:null;
- const actualRate=c.percentageFees&&wallet?Number(await policy.rateBps(wallet,at)):null;
- const controller=new Contract(c.governor!,['function isOwner(address) view returns(bool)'],chain.provider),isOwner=wallet?Boolean(await controller.isOwner(wallet,at)):false;
+ const controller=new Contract(c.governor!,['function isOwner(address) view returns(bool)'],chain.provider);
+ // Independent fixed-size reads share this request's confirmed block. At most
+ // eleven RPCs, with no cached policy or account result across requests.
+ const [first,second,low,high,version,balance,lockThreshold,lockDuration,lockBps,rate,isOwner]=await Promise.all([
+  policy.firstThreshold(at),policy.secondThreshold(at),policy.firstBps(at),policy.secondBps(at),policy.version(at),wallet?policy.qualifyingBalance(wallet,at):0n,
+  c.percentageFees?policy.lockThreshold(at):null,c.percentageFees?policy.lockDuration(at):null,c.percentageFees?policy.lockBps(at):null,
+  c.percentageFees&&wallet?policy.rateBps(wallet,at):null,wallet?controller.isOwner(wallet,at):false,
+ ]);
+ const lock=c.percentageFees?{minimum_atoms:String(lockThreshold),duration_seconds:Number(lockDuration),rebate_bps:Number(lockBps)}:null;
+ const actualRate=rate===null?null:Number(rate);
  if(!sharedBlock)await chain.assertSnapshot(block);
- return {mode:'upfront-discount' as const,address,is_owner:isOwner,inventory_atoms:'0',total_paid_atoms:'0',qualifying_balance_atoms:String(balance),lock_tier:lock,rate_bps:actualRate??Number(version===0n?0:balance>=second?high:balance>=first?low:0),policy:version?{id:Number(version),starts_at:0,tiers:[{minimum_atoms:String(first),rebate_bps:Number(low)},{minimum_atoms:String(second),rebate_bps:Number(high)}]}:null,orders:[] as {offer_id:string;amount_atoms:string;policy_id:number;rate_bps:number;claimable:boolean;paid_atoms:string}[],block};
+ return {mode:'upfront-discount' as const,address,is_owner:Boolean(isOwner),inventory_atoms:'0',total_paid_atoms:'0',qualifying_balance_atoms:String(balance),lock_tier:lock,rate_bps:actualRate??Number(version===0n?0:balance>=second?high:balance>=first?low:0),policy:version?{id:Number(version),starts_at:0,tiers:[{minimum_atoms:String(first),rebate_bps:Number(low)},{minimum_atoms:String(second),rebate_bps:Number(high)}]}:null,orders:[] as {offer_id:string;amount_atoms:string;policy_id:number;rate_bps:number;claimable:boolean;paid_atoms:string}[],block};
 }

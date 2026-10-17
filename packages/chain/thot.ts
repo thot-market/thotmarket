@@ -322,9 +322,12 @@ export class ThotChain {
   // Request-local batching only: no time-based reuse across HTTP requests or
   // transaction decisions. Every field is read at the same confirmed height.
   // A caller supplying sharedBlock must assert it after all of its reads finish.
-  const block=sharedBlock??await this.snapshot(),account=owner?await this.accountAt(owner,block):null;
+  const block=sharedBlock??await this.snapshot();
+  // Pause and account reads are independent at this confirmed height. Finish
+  // this bounded (at most eight RPCs) phase before the existing order batches.
+  const [account,paused]=await Promise.all([owner?this.accountAt(owner,block):null,this.market.paused({blockTag:block.number})]);
   const offers=await boundedMap(offerIds,4,id=>this.offerAt(id,block,owner));
-  const market_paused=Boolean(await this.market.paused({blockTag:block.number}));
+  const market_paused=Boolean(paused);
   if(!sharedBlock)await this.assertSnapshot(block);return {account,offers,market_paused,block};
  }
  async marketPaused(){
