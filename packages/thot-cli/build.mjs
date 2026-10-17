@@ -23,15 +23,15 @@ async function copy(path){
       text=text.replace(/(['"])([^'"]*\.ts)\1/g,(_,quote,name)=>quote+name.slice(0,-3)+'.js'+quote);
       target=target.slice(0,-3)+'.js';
     }
-    if(path==='scripts/thot-capture.ts'||path==='scripts/thot-setup.ts'){
-      text=text.replaceAll('thot-capture','thot').replaceAll('thot-setup','thot setup');
+    if(path==='scripts/thot-capture.ts'||path==='scripts/thot-setup.ts'||path==='scripts/thot-history.ts'){
+      text=text.replaceAll('thot-capture','thot').replaceAll('thot-setup','thot setup').replaceAll('thot-history','thot history');
     }
     if(path==='packages/capture/src/terminal.ts')text=text.replaceAll('THOT |','THOT |').replaceAll('THOT capture','Thot capture');
     body=text;
   }
   await mkdir(dirname(target),{recursive:true});await writeFile(target,body);
 }
-for(const entry of ['scripts/thot-capture.ts','scripts/thot-setup.ts','scripts/capture-terminal-child.ts'])await copy(entry);
+for(const entry of ['scripts/thot-capture.ts','scripts/thot-setup.ts','scripts/thot-history.ts','scripts/capture-terminal-child.ts'])await copy(entry);
 for(const name of ['verify.mjs','canonical.mjs','hardware.mjs','verify_dcap.py','requirements.txt','README.txt'])await copy('packages/provenance/portable/'+name);
 for(const path of ['packages/provenance/scripts/verify_recorder.py','trace-vault/attestation_verify.py'])await copy(path);
 // Production has no accepted API/recorder pair yet. The package must never

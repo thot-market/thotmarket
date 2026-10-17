@@ -17,6 +17,8 @@ import { PlaidLinks, type PlaidConfig } from './plaid-link.ts';
 import { InferencePortfolioCapture } from './inference-capture.ts';
 import {TraceLibrary} from './trace-library.ts';
 import {CaptureDevices} from './capture-devices.ts';
+import {HistoryDevices} from './history-devices.ts';
+import {ReleasePreview} from './release-preview.ts';
 import { AgentCaptureIngestion } from './agent-capture.ts';
 import {ThotChain, type ThotChainConfig} from '../../chain/thot.ts';
 import {ThotMarketplace} from './thot-market.ts';
@@ -81,8 +83,10 @@ export async function createApplication(options:{dataDir?:string;databaseUrl?:st
   const robinhood=new RobinhoodLinks(service,privacy,masterKey,options.robinhood,options.brokerageVerifier);
   const plaid=new PlaidLinks(service,privacy,masterKey,robinhood,options.plaid);
   const portfolio=new ContributorPortfolio(service,robinhood,plaid);
+  const historyDevices=new HistoryDevices(service,portfolio);
+  const releasePreview=new ReleasePreview(service);
   const robinhoodBrowser=new RobinhoodBrowserCoordinator(robinhood,options.robinhood?.browser);
   let closing:Promise<void>|undefined;
-  return {db,privacy,service,thot,thotAnalytics,tradeEvidence,inference,inferenceCapture,agentCapture,captureDevices,library,robinhood,robinhoodBrowser,plaid,portfolio,openrouter,dataDir,close:()=>closing??=(async()=>{await openrouter!.close();thotChain?.close();await service.moneyPath?.close();await robinhoodBrowser.close();await db!.close();await lease.release();})()};
+  return {db,privacy,service,thot,thotAnalytics,tradeEvidence,inference,inferenceCapture,agentCapture,captureDevices,historyDevices,releasePreview,library,robinhood,robinhoodBrowser,plaid,portfolio,openrouter,dataDir,close:()=>closing??=(async()=>{await openrouter!.close();thotChain?.close();await service.moneyPath?.close();await robinhoodBrowser.close();await db!.close();await lease.release();})()};
   } catch(error) {await openrouter?.close();thotChain?.close();await moneyPath?.close();if(db)await db.close();await lease.release();throw error;}
 }

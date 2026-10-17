@@ -179,14 +179,23 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       if(req.method==='GET'&&route==='/v1/auth/capabilities'){chargeRate('public');reply(200,{mode:authMode,development_session_available:!externalAuth,bearer_required:authMode!=='wallet_siwe',external_login_available:false,session_revocation_available:true,rate_limits:access.limits,...(externalAuth instanceof WalletAuth?externalAuth.capabilitiesForOrigin(requestOrigin!):externalAuth?.capabilities??{}),...(privy?{privy}:{}),production_enabled:false});return;}
       if(req.method==='GET'&&route==='/v1/public/keys'){chargeRate('public');reply(200,{disclosure:{key_id:'thot-local-disclosure-v1',algorithm:'Ed25519',public_key_pem:app.privacy.disclosurePublicKey},development:true});return;}
       const mutating=req.method==='POST'||req.method==='PATCH';
-      const bearer=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_.-]{1,16384})$/)?.[1];
+      const historyDevice=route.match(/^\/v1\/history-devices\/([^/]+)\/(status|imports|pause|resume|disconnect)$/);
+      const authorizationBearer=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_.-]{1,16384})$/)?.[1];
+      const historyToken=req.headers['x-thot-history-token'];
+      if(historyToken!==undefined){
+        ensure(req.method==='POST'&&historyDevice&&typeof historyToken==='string'&&/^[A-Za-z0-9_-]{43}$/.test(historyToken),'INVALID_HISTORY_TOKEN_ROUTE',401);
+        ensure(!/^Bearer\b/i.test(req.headers.authorization??''),'CONFLICTING_HISTORY_CREDENTIALS',401);
+      }
+      // Private ingress uses Authorization for its Basic gate. This alternate
+      // header is accepted solely by upload-only history capability routes.
+      const bearer=authorizationBearer??(typeof historyToken==='string'?historyToken:undefined);
       const cookieToken=externalAuth instanceof WalletAuth?externalAuth.tokenFromCookie(req.headers.cookie):'';
       const token=bearer||cookieToken;
       const deviceCapture=route.match(/^\/v1\/capture-devices\/([^/]+)\/(captures|disconnect)$/);
       const captureCapability=route.match(/^\/v1\/agent-captures\/([^/]+)\/(parts|complete|checkpoint|authorize|heartbeat)$/);
       const publicAuth=req.method==='POST'&&(route==='/v1/dev/session'||externalAuth instanceof WalletAuth&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify'].includes(route));
       const relayRoute=req.method==='POST'&&route==='/v1/openrouter/chat/completions';
-      const delegated=req.method==='POST'&&(!!deviceCapture||!!captureCapability);
+      const delegated=req.method==='POST'&&(!!deviceCapture||!!captureCapability||!!historyDevice);
       const authenticateSession=async()=>{
         ensure(token,'UNAUTHENTICATED',401);
         if(cookieToken&&req.method!=='GET'&&req.method!=='HEAD'&&externalAuth instanceof WalletAuth)externalAuth.requireOrigin(req.headers.origin);
@@ -204,10 +213,11 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       }else if(relayRoute){ensure(bearer,'UNAUTHENTICATED',401);const authorization=await app.openrouter.authorize(bearer);verifiedAdmission('account',authorization.owner_id);}
       else if(delegated){
         ensure(bearer,'UNAUTHENTICATED',401);
-        if(deviceCapture){const device=await app.db.transaction(tx=>app.captureDevices.authenticate(tx,decodeURIComponent(deviceCapture[1]!),bearer));verifiedAdmission('capture',device.owner_id);}
+        if(historyDevice){const device=await app.db.transaction(tx=>app.historyDevices.authenticate(tx,decodeURIComponent(historyDevice[1]!),bearer,historyDevice[2]==='imports'));verifiedAdmission('capture',device.owner_id);}
+        else if(deviceCapture){const device=await app.db.transaction(tx=>app.captureDevices.authenticate(tx,decodeURIComponent(deviceCapture[1]!),bearer));verifiedAdmission('capture',device.owner_id);}
         else {const capture=await app.agentCapture.authenticate(decodeURIComponent(captureCapability![1]!),bearer);if(capture.device_id)await app.db.transaction(tx=>app.captureDevices.active(tx,capture.device_id));verifiedAdmission('capture',capture.owner_id);}
       }else {const session=await authenticateSession();verifiedAdmission('account',session.actor.id);}
-      const routeLimit=publicAuth||delegated&&!['parts','complete','checkpoint'].includes(captureCapability?.[2]??'')?8192:route.startsWith('/v1/contributor/import/')?16_000_000:captureCapability?CAPTURE_PART_JSON_BYTES:4_000_000;
+      const routeLimit=historyDevice?.[2]==='imports'?16_000_000:publicAuth||delegated&&!['parts','complete','checkpoint'].includes(captureCapability?.[2]??'')?8192:route.startsWith('/v1/contributor/import/')?16_000_000:['/v1/thot/listings/preview','/v1/thot/listings/exclude'].includes(route)?65536:captureCapability?CAPTURE_PART_JSON_BYTES:4_000_000;
       const body=mutating?await jsonBody(req,Math.min(routeLimit,admission.limits.body_bytes_in_flight),admission,release=>{releaseBody=release;},()=>{if(req.headers.expect?.toLowerCase()==='100-continue')res.writeContinue();}):{};
       if(req.method==='POST'&&route==='/v1/dev/session') {
         ensure(app.service.config.development&&!externalAuth,'DEVELOPMENT_AUTH_DISABLED',403);
@@ -238,6 +248,10 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         }finally{res.off('close',abort);controller.abort();}return;
       }
       ensure(token,'UNAUTHENTICATED',401);
+      if(req.method==='POST'&&historyDevice){
+        ensure(bearer,'UNAUTHENTICATED',401);const id=decodeURIComponent(historyDevice[1]!),action=historyDevice[2]!;
+        reply(200,action==='imports'?await app.historyDevices.import(id,bearer,body):action==='status'?await app.historyDevices.status(id,bearer):await app.historyDevices.control(id,bearer,String(req.headers['idempotency-key']??''),action as 'pause'|'resume'|'disconnect'));return;
+      }
       if(req.method==='POST'&&deviceCapture){ensure(bearer,'UNAUTHENTICATED',401);const id=decodeURIComponent(deviceCapture[1]!);reply(200,deviceCapture[2]==='captures'?await app.captureDevices.begin(id,token,body):await app.captureDevices.disconnect(id,token,String(req.headers['idempotency-key']??'')));return;}
       const authorizeCapture=route.match(/^\/v1\/agent-captures\/([^/]+)\/authorize$/);
       if(req.method==='POST'&&authorizeCapture){ensure(bearer,'UNAUTHENTICATED',401);reply(200,await app.agentCapture.authorize(decodeURIComponent(authorizeCapture[1]!),token));return;}
@@ -383,6 +397,11 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         result=await app.captureDevices.create(actor,connection,{salePolicyId});
       }
       else if(req.method==='GET'&&route==='/v1/contributor/capture-devices')result=await app.captureDevices.list(actor);
+      else if(req.method==='POST'&&route==='/v1/contributor/history-devices')result=await app.historyDevices.create(actor,body);
+      else if(req.method==='GET'&&route==='/v1/contributor/history-devices')result=await app.historyDevices.list(actor);
+      else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/history-devices'&&['pause','resume','disconnect'].includes(segments[4]!))result=await app.historyDevices.update(actor,key,segments[3]!,segments[4] as 'pause'|'resume'|'disconnect');
+      else if(req.method==='POST'&&route==='/v1/thot/listings/preview')result=await app.releasePreview.preview(actor,body);
+      else if(req.method==='POST'&&route==='/v1/thot/listings/exclude')result=await app.releasePreview.exclude(actor,key,body);
       else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/capture-devices'&&segments[4]==='disconnect')result=await app.captureDevices.revoke(actor,key,segments[3]!);
       else if(req.method==='POST'&&route==='/v1/contributor/agent-captures/begin')result=await app.agentCapture.begin(actor,body);
       else if(req.method==='GET'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/agent-captures'&&segments[4]==='status')result=await app.agentCapture.status(actor,segments[3]!);

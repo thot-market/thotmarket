@@ -108,15 +108,15 @@ test('workspace failure keeps listings visible and retry recovers without signin
  assert.equal(await card(f.page).isVisible(),true);assert.equal(await ready(f.page).count(),0);
  assert.equal(f.requests.filter(r=>r.path==='/v1/auth/session/revoke').length,0);
  await f.snapshot('catalogue-account-unavailable');
- f.recover();await f.page.getByRole('button',{name:'Refresh current view'}).click();await ready(f.page).waitFor();
+ f.recover();await f.page.locator('.journey-menu>summary').click();await f.page.getByRole('button',{name:'Refresh current view'}).click();await ready(f.page).waitFor();
  assert.equal(await ready(f.page).isEnabled(),true);
 });
 
 test('same-page fragment selects marketplace and late account response cannot restore signed-out content',async t=>{
  const f=await fixture(t);await f.open('');
- await f.page.locator('[data-action="identity-sign-out"]').waitFor();
+ await f.page.locator('[data-action="identity-sign-out"]').waitFor({state:'attached'});
  await f.page.evaluate(()=>{location.hash='thot-available';});await card(f.page).waitFor();
- await f.page.locator('[data-action="identity-sign-out"]').click();
+ await f.page.locator('.journey-menu>summary').click();await f.page.locator('[data-action="identity-sign-out"]').click();
  await f.page.getByRole('heading',{name:'Sign in with your wallet.'}).waitFor();
  f.release();await f.page.waitForTimeout(100);
  assert.equal(await card(f.page).count(),0);assert.equal(await ready(f.page).count(),0);
@@ -124,7 +124,7 @@ test('same-page fragment selects marketplace and late account response cannot re
 
 test('wallet change discards late catalogue and account responses',async t=>{
  const f=await fixture(t,{holdCatalog:true});await f.open();
- await f.page.locator('[data-action="identity-sign-out"]').waitFor();
+ await f.page.locator('[data-action="identity-sign-out"]').waitFor({state:'attached'});
  await f.page.evaluate(()=>window.fixtureAccountChange());
  await f.page.getByRole('heading',{name:'Sign in with your wallet.'}).waitFor();
  f.releaseCatalog();f.release();await f.page.waitForTimeout(100);

@@ -30,6 +30,8 @@ test('reviewed export builds a standalone CLI tarball with runtime verification 
     assert(paths.includes('bin/thot.js'));
     assert(paths.includes('LICENSE'));
     assert(paths.includes('runtime/scripts/capture-terminal-child.js'));
+    assert(paths.includes('runtime/scripts/thot-history.js'));
+    for(const module of ['history-connect','history-schedule','history-sync'])assert(paths.includes('runtime/packages/capture/src/'+module+'.js'));
     for(const name of ['verify.mjs','canonical.mjs','hardware.mjs','verify_dcap.py','requirements.txt','README.txt']){
       assert(paths.includes('runtime/packages/provenance/portable/'+name),name);
     }
@@ -50,6 +52,9 @@ test('reviewed export builds a standalone CLI tarball with runtime verification 
     assert.doesNotMatch(help,/legacy --thot-url|THOT_URL, THOT_URL/);
     const setup=execFileSync(process.execPath,[join(installed,'bin/thot.js'),'setup','--help'],{encoding:'utf8',cwd:temporary});
     assert.match(setup,/Usage: thot setup/);
+    const history=execFileSync(process.execPath,[join(installed,'bin/thot.js'),'history','--help'],{encoding:'utf8',cwd:temporary});
+    assert.match(history,/thot history/);
+    assert.match(history,/connect/);
     const {recorderPolicyFile}=await import(pathToFileURL(join(installed,'runtime/packages/capture/src/tee/policy-file.js')));
     const selected=await recorderPolicyFile('https://unused.invalid',{});
     assert.deepEqual(JSON.parse(await readFile(selected,'utf8')),{url:'',instances:{}});

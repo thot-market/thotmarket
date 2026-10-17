@@ -73,11 +73,11 @@ test('private library reader submits explicit release rights without listing or 
  const calls:any[]=[],dialogs:string[]=[],toasts:string[]=[];
  const instance=createLibraryUI({state:{},api:async(path:string,options:any)=>{calls.push({path,options});if(options?.method==='POST'){item.private_import=null;return{status:'AVAILABLE',listed:false};}return item;},openDialog(_t:string,_s:string,body:string){dialogs.push(body);},dialog:{},escape,toast:(message:string)=>toasts.push(message)});
  await instance.handle('library-open',{dataset:{id:item.trace_id}});
- assert.match(dialogs[0],/Prepare for a THOT listing/);assert.match(dialogs[0],/Uploaded history remains unverified/);
+ assert.match(dialogs[0],/Prepare release for review/);assert.match(dialogs[0],/Uploaded history remains unverified/);
  await instance.onSubmit({id:'library-prepare-sale',dataset:{id:item.trace_id}});
  const post=calls.find(c=>c.options?.method==='POST');assert.equal(post.path,'/v1/contributor/library/trace-private/prepare-sale');
  assert.deepEqual(post.options.body,{content_commitment:'a'.repeat(64),rights_confirmed:true,model_output_licensed:false});
- assert.doesNotMatch(dialogs.at(-1)!,/id="library-prepare-sale"/);assert.match(toasts.at(-1)!,/Sign once there/);
+ assert.doesNotMatch(dialogs.at(-1)!,/id="library-prepare-sale"/);assert.match(toasts.at(-1)!,/Review & sell/);
  assert.equal(calls.filter(c=>c.options?.method==='POST').length,1);
 });
 
@@ -93,10 +93,30 @@ test('library explains release blockers without offering a rights bypass for pri
   ['RELEASE_CHANGED',/earlier content commitment cannot authorize changed content/],
   ['RELEASE_CONTENT_LIMIT',/exceeds the supported release assessment limit/],
   ['RELEASE_EVIDENCE_UNAVAILABLE',/assessed release or its evidence is unavailable/],
-  ['EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED',/license and price in Offers, then sign/]
+  ['EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED',/licence and price, then sign/]
  ] as const){
   item.sale_eligibility={reason_code:reason,can_prepare_sale:false};
   await instance.handle('library-open',{dataset:{id:item.trace_id}});
   const html=dialogs.at(-1)!;assert.match(html,explanation);assert.match(html,/Listing requires explicit seller authorization/);assert.doesNotMatch(html,/id="library-prepare-sale"/);
  }
+});
+
+test('My work separates confirmed payouts, pending sales and insufficient comparables from wallet holdings',async()=>{
+ // @ts-expect-error Browser-native UI module.
+ const {createLibraryUI}=await import('../apps/dashboard/library-ui.js');
+ const owner='0x'+'1'.repeat(40),buyer='0x'+'2'.repeat(40),atoms=(n:number)=>(BigInt(n)*10n**18n).toString();
+ const item={trace_id:'trace-1',title:'Synthetic coding trace',source:'Codex',origin:'upload',turn_count:3,state:'IMPORTED',sale_eligibility:{can_list:true,reason_code:'EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED'}};
+ const state:any={traceLibrary:{items:[item],summary:{saved:1},attempts:[]},thot:{capabilities:{mode:'thot-anvil'},wallet:owner,account:{balance:atoms(9999)},orders:[
+  {seller:owner,buyer,receipt:{status:5,seller_amount:atoms(3)},payout_transaction:'0x'+'a'.repeat(64)},
+  {seller:owner,buyer,receipt:{status:5,seller_amount:atoms(8)}},
+  {seller:owner,buyer,receipt:{status:3,seller_amount:atoms(5)}},
+  {seller:buyer,buyer:owner,receipt:{status:5,seller_amount:atoms(17)},payout_transaction:'0x'+'b'.repeat(64)},
+ ],valuations:[{trace_id:'trace-1',estimate:{independent:{status:'insufficient_data'},sponsored:{status:'estimated',median_gross_atoms:atoms(400)}}}]}};
+ const ui=createLibraryUI({state,escape});const html=ui.sectionHTML();
+ assert.match(html,/Paid to your wallet[\s\S]*3\.00 THOT/);assert.match(html,/Pending sale proceeds[\s\S]*5\.00 THOT/);
+ assert.doesNotMatch(html,/9,999|17\.00|11\.00|400\.00/);assert.match(html,/Not enough comparable sales yet/);
+ assert.match(html,/data-action="thot-list-configure" data-id="trace-1"/);
+ state.thot.capabilities.mode='unconfigured';assert.doesNotMatch(ui.sectionHTML(),/data-action="thot-list-configure"/);state.thot.capabilities.mode='thot-anvil';
+ state.thot.own_listings=[{id:'owned-listing',trace_id:'trace-1',active:true,price_atoms:atoms(9)}];
+ assert.match(ui.sectionHTML(),/>Listed<\/span>/);assert.match(ui.sectionHTML(),/Your asking price/);assert.match(ui.sectionHTML(),/data-action="thot-unlist" data-id="owned-listing"/);
 });

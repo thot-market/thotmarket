@@ -18,16 +18,17 @@ export class ContributorPortfolio {
     const parsed=parseCodingSessionJsonl(input.text);
     return {...parsed.preview,warnings:parsed.limitations,privacy_flags:[...new Set([...parsed.preview.privacy_flags,...(scanSecrets(parsed.trace).rejected?['secret']:[])])],metadata_records_skipped:parsed.summary.metadata_records_skipped};
   }
-  async import(actor:Actor,key:string,input:Document){
+  async import(actor:Actor,key:string,input:Document,trusted:{authorize?:(tx:Transaction)=>Promise<void>;historySync?:Document}={}){
     const preview=this.preview(actor,input);
     ensure(input.content_commitment===preview.content_commitment,'IMPORT_PREVIEW_CHANGED',409);
     ensure(input.save_privately===undefined||typeof input.save_privately==='boolean','INVALID_PRIVATE_IMPORT');
     const privateSave=input.save_privately===true;
     if(privateSave)ensure((input.rights_confirmed===undefined||input.rights_confirmed===false)&&(input.model_output_licensed===undefined||input.model_output_licensed===false),'PRIVATE_IMPORT_RELEASE_CONFLICT');
     else{ensure(input.rights_confirmed===true,'IMPORT_RIGHTS_CONFIRMATION_REQUIRED');ensure(typeof input.model_output_licensed==='boolean','IMPORT_OUTPUT_CHOICE_REQUIRED');}
-    const imported=await this.service.importTrace(actor,key,{bundle:{format:'thot.coding-session-jsonl/1',text:input.text},content_commitment:preview.content_commitment,category:input.category??(privateSave?'general':'research_flow'),...(privateSave?{save_privately:true}:{rights_confirmed:true,model_output_licensed:input.model_output_licensed})});
+    const imported=await this.service.importTrace(actor,key,{bundle:{format:'thot.coding-session-jsonl/1',text:input.text},content_commitment:preview.content_commitment,category:input.category??(privateSave?'general':'research_flow'),...(privateSave?{save_privately:true}:{rights_confirmed:true,model_output_licensed:input.model_output_licensed})},trusted);
     // Retry recovers this metadata step after an interrupted import, without duplicate inventory.
     const saved=await this.service.db.transaction(async tx=>{
+      await trusted.authorize?.(tx);
       const trace=await tx.get('traces',imported.trace_id,actor.id);
       if(!trace.import_preview){trace.import_preview=preview;trace.provenance_status='IMPORTED_UNVERIFIED';await tx.update('traces',trace.trace_id,trace);}
       const credentials=await this.verifiedCredentials(tx,actor);

@@ -12,8 +12,9 @@ const routes=new Set([
   '/staking-ui.js','/staking.css','/thot-analytics-ui.js','/mandate-editor.js',
   '/inference-ui.js','/operations-ui.js','/contributor-ui.js','/clerk-auth-ui.js',
   '/wallet-auth-ui.js','/privy-auth-state.js','/openrouter-ui.js',
-  '/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js',
+  '/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js','/history-sync-ui.js',
   '/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started.js',
+  '/connected-journey-ui.js',
 ]);
 const compressBrotli=promisify(brotliCompress),compressGzip=promisify(gzip);
 const maxFileBytes=16*1024*1024,maxSourceBytes=32*1024*1024,compressionOverhead=65536;

@@ -105,7 +105,7 @@ export class ThotMarketplace {
   const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
   const wallet=records.find(r=>r.id==='wallet:'+actor.id)?.address;
   const listings=records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r));
-  const own=records.filter(r=>r.kind==='listing'&&r.owner_id===actor.id).map(r=>({...this.publicListing(r),active:r.active}));
+  const own=records.filter(r=>r.kind==='listing'&&r.owner_id===actor.id).map(r=>({...this.publicListing(r),trace_id:r.trace_id,active:r.active}));
   const intents=records.filter(r=>r.kind==='intent'&&(r.owner_id===actor.id||r.seller_id===actor.id));
   // All chain-backed fields share one guarded, confirmed request snapshot.
   const chain=this.chain,block=chain?await chain.snapshot():null;

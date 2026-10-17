@@ -11,10 +11,10 @@ const button=()=>({dataset:{},disabled:false});
 function fixture(t,request,respond,options={}){
  const previousWindow=globalThis.window,previousDocument=globalThis.document;
  const state={actor:{id:'seller'},generation:1,role:'user',thot:{market_paused:false,wallet:owner,capabilities:{chain_id:31337,dispute_seconds:3600}}};
- const requests=[],dialogs=[],calls=[],notices=[];let refreshes=0;
+ const requests=[],dialogs=[],calls=[],notices=[],previewResponse=options.previewResponse;let refreshes=0;
  globalThis.window={ethereum:{request:async p=>{requests.push(p);if(p.method==='eth_requestAccounts')return [state.thot.wallet];if(p.method==='eth_chainId')return '0x7a69';if(p.method==='eth_blockNumber')return '0x20';if(p.method==='eth_getBlockByNumber')return {hash:hash(999)};const result=await request(p,state);return p.method==='eth_getTransactionReceipt'&&result?{transactionHash:p.params[0],blockNumber:'0x10',blockHash:hash(999),...result}:result;}}};
  globalThis.document={querySelector:()=>({value:'10000'})};
- const ui=createThotUI({state,api:async(path,options)=>{calls.push({path,options});return respond?respond(path,options):{transactions,notice:'Review the lock.'};},openDialog:(...args)=>dialogs.push(args),dialog:{close(){}},refresh:async()=>{refreshes++;},escape:String,json:JSON.stringify,toast:m=>notices.push(m),...options});
+ const ui=createThotUI({state,api:async(path,options)=>{calls.push({path,options});if(path.endsWith('/preview')){if(previewResponse)return previewResponse(path,options);const metadata=respond?await respond('/v1/thot/listings/metadata',options):{};return {...metadata,trace_id:options.body.trace_id,content:{turns:[{role:'user',content:'Synthetic reviewed release'}]},sale_eligibility:{can_list:true},exclusion:{supported:false}};}return respond?respond(path,options):{transactions,notice:'Review the lock.'};},openDialog:(...args)=>dialogs.push(args),dialog:{close(){}},refresh:async()=>{refreshes++;},escape:String,json:JSON.stringify,toast:m=>notices.push(m),...options});
  t.after(()=>{globalThis.window=previousWindow;globalThis.document=previousDocument;});
  return {ui,state,requests,dialogs,calls,notices,get refreshes(){return refreshes;},prepare:()=>ui.action('thot-lock',button()),send:()=>ui.action('thot-send',button())};
 }
@@ -169,19 +169,19 @@ test('enrollment requires explicit consent then one signature and activation, wi
  document.querySelector=id=>inputs[id];
  await f.ui.action('thot-list-configure',button());
  await assert.rejects(f.ui.action('thot-list-confirm',button()),/Authorize the content rights/);
- assert.equal(f.calls.length,1);inputs['#thot-list-consent'].checked=true;
+ assert.equal(f.calls.length,2);inputs['#thot-list-consent'].checked=true;
  await f.ui.action('thot-list-confirm',button());
- assert.equal(f.calls[1].options.body.automatic_sales,true);assert.equal(f.calls[1].options.body.treasury_opt_in,true);assert.equal(f.calls[1].options.body.treasury_sampling_consent,'thot.treasury-sampling/1');assert.equal(f.calls[1].options.body.free_preview,undefined);
- assert.deepEqual(f.calls[2],{path:'/v1/thot/listings/activate',options:{method:'POST',body:{id:'listing',signature}}});
+ assert.equal(f.calls[2].options.body.automatic_sales,true);assert.equal(f.calls[2].options.body.treasury_opt_in,true);assert.equal(f.calls[2].options.body.treasury_sampling_consent,'thot.treasury-sampling/1');assert.equal(f.calls[2].options.body.free_preview,undefined);
+ assert.deepEqual(f.calls[3],{path:'/v1/thot/listings/activate',options:{method:'POST',body:{id:'listing',signature}}});
  assert.equal(f.requests.filter(p=>p.method==='eth_signTypedData_v4').length,1);
  assert.equal(f.requests.filter(p=>p.method==='eth_sendTransaction').length,0);
 });
 
-test('listing setup never renders returned trace text and reserve sampling remains optional',async t=>{
+test('listing setup renders only the explicit owner preview and reserve sampling remains optional',async t=>{
  const secret='TRACE_TEXT_MUST_STAY_PRIVATE_IN_LISTING_SETUP';
  const f=fixture(t,async()=>{},async path=>path.endsWith('/metadata')?{trace_id:'trace',content_hash:hash(1),content:{turns:[{role:'user',content:secret}]}}:{id:'listing',typed_data:{}});
  const inputs={'#thot-trace':{value:'trace'},'#thot-title':{value:'Useful research'},'#thot-price':{value:'100'},'#thot-license':{value:'Exact non-exclusive research licence'},'#thot-list-consent':{checked:true},'#thot-treasury-consent':{checked:false}};document.querySelector=id=>inputs[id];
- await f.ui.action('thot-list-configure',button());assert.doesNotMatch(f.dialogs.at(-1)[2],new RegExp(secret));assert.match(f.dialogs.at(-1)[2],/no ordinary pre-purchase trace preview/i);
+ await f.ui.action('thot-list-configure',button());assert.doesNotMatch(f.dialogs.at(-1)[2],new RegExp(secret));assert.match(f.dialogs.at(-1)[2],/Synthetic reviewed release/);assert.match(f.dialogs.at(-1)[2],/no ordinary pre-purchase trace preview/i);
  await f.ui.action('thot-list-confirm',button());const body=f.calls.find(call=>call.path==='/v1/thot/listings').options.body;assert.equal(body.treasury_opt_in,false);assert.equal(body.treasury_sampling_consent,undefined);assert.equal(body.free_preview,undefined);
 });
 
@@ -331,7 +331,7 @@ test('price preview deducts quoted service costs and labels fixed proceeds witho
 test('wrong-chain wallet cannot request a sale signature or activate a listing',async t=>{
  const f=fixture(t,async()=>{throw Error('No signing expected');},async()=>({trace_id:'trace'}));document.querySelector=()=>({value:'test',checked:true});
  await f.ui.action('thot-list-configure',button());window.ethereum.request=async p=>p.method==='eth_chainId'?'0x1':[owner];
- await assert.rejects(f.ui.action('thot-list-confirm',button()),/Switch your wallet/);assert.equal(f.calls.length,1);
+ await assert.rejects(f.ui.action('thot-list-confirm',button()),/Switch your wallet/);assert.equal(f.calls.length,2);
 });
 
 test('wallet account changed while signing cannot activate a listing for the earlier account',async t=>{
@@ -974,4 +974,37 @@ test('catalogue loading and failure are distinct from a verified empty listing r
  assert.match(ui.catalogueHTML(null),/Loading listings/);assert.doesNotMatch(ui.catalogueHTML(null),/No traces listed yet/);
  assert.match(ui.catalogueHTML(null,{catalogueError:true}),/Listings could not load/);assert.doesNotMatch(ui.catalogueHTML(null,{catalogueError:true}),/No traces listed yet/);
  assert.match(ui.catalogueHTML({listings:[]}),/No traces listed yet/);
+});
+
+
+test('owner release review refuses a mismatched commitment before opening sale controls',async t=>{
+ const f=fixture(t,async()=>{throw Error('No wallet request expected');},async()=>({trace_id:'trace',content_hash:hash(1)}),{previewResponse:async()=>({trace_id:'trace',content_hash:hash(2),content:{turns:[]},sale_eligibility:{can_list:true}})});
+ await assert.rejects(f.ui.action('thot-list-configure',{dataset:{id:'trace'}}),/release changed while loading/);
+ assert.equal(f.dialogs.length,0);assert.equal(f.requests.length,0);
+ assert.deepEqual(f.calls.map(c=>c.path),['/v1/thot/listings/metadata','/v1/thot/listings/preview']);
+});
+
+test('selected privacy changes cannot sign an unchanged release and server removal requires fresh consent',async t=>{
+ let contentHash=hash(1);
+ const preview=()=>({trace_id:'trace',content_hash:contentHash,content:{turns:[{role:'user',content:contentHash===hash(1)?'First synthetic message':'Remaining synthetic message'}]},sale_eligibility:{can_list:true},exclusion:{supported:true}});
+ const f=fixture(t,async()=>{throw Error('No signature expected');},async(path,options)=>{
+  if(path.endsWith('/metadata'))return {trace_id:'trace',content_hash:contentHash};
+  if(path.endsWith('/exclude')){assert.deepEqual(options.body,{trace_id:'trace',content_hash:hash(1),excluded_turns:[0],rights_confirmed:true,model_output_licensed:false});contentHash=hash(2);return preview();}
+  throw Error('Unexpected API write');
+ },{previewResponse:async()=>preview()});
+ const selected={name:'excluded_turn',value:'0',checked:true},sign={disabled:false,textContent:''};
+ document.querySelectorAll=()=>[selected];document.querySelector=id=>({'#release-exclusion-rights':{checked:true},'#release-exclusion-outputs':{checked:false},'#thot-list-consent':{checked:false},'[data-action="thot-list-confirm"]':sign}[id]);
+ await f.ui.action('thot-list-configure',{dataset:{id:'trace'}});f.ui.onInput(selected);assert.equal(sign.disabled,true);
+ await assert.rejects(f.ui.action('thot-list-confirm',button()),/Apply the selected removals/);
+ await f.ui.action('thot-release-exclude',button());
+ assert.match(f.dialogs.at(-1)[2],/Remaining synthetic message/);assert.doesNotMatch(f.dialogs.at(-1)[2],/First synthetic message/);
+ await assert.rejects(f.ui.action('thot-list-confirm',button()),/Authorize the content rights/);
+ assert.equal(f.requests.length,0);assert.equal(f.calls.filter(c=>c.path==='/v1/thot/listings').length,0);
+});
+
+test('a changed account discards a delayed private release preview',async t=>{
+ const wait=deferred(),f=fixture(t,async()=>{},async()=>({trace_id:'trace',content_hash:hash(1)}),{previewResponse:()=>wait.promise});
+ const work=f.ui.action('thot-list-configure',{dataset:{id:'trace'}});f.state.generation++;f.state.actor={id:'another'};
+ wait.resolve({trace_id:'trace',content_hash:hash(1),content:{turns:[{role:'user',content:'Former private content'}]},sale_eligibility:{can_list:true}});
+ await assert.rejects(work,{name:'StaleWorkspaceError'});assert.equal(f.dialogs.length,0);
 });

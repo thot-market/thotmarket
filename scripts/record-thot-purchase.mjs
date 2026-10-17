@@ -92,8 +92,10 @@ try {
     };
     run.open = async view => {
       await run.page.goto(origin + '/app'); await run.page.locator('#main h1').waitFor();
-      if (role !== 'user') { const loaded = run.page.waitForResponse(r => r.url().endsWith('/v1/thot/workspace')); await run.page.locator('#role').selectOption(role); await loaded; await run.page.waitForFunction(role => document.querySelector('#role').value === role, role); }
-      await run.page.locator(`nav [data-view="${view}"]`).click(); if (view === 'market') await run.page.locator('[data-action="thot-refresh"]').waitFor();
+      if (role !== 'user') { await run.page.locator('.journey-menu > summary').click(); const loaded = run.page.waitForResponse(r => r.url().endsWith('/v1/thot/workspace')); await run.page.locator('#role').selectOption(role); await loaded; await run.page.waitForFunction(role => document.querySelector('#role').value === role, role); }
+      const target = run.page.locator(`nav [data-view="${view}"]`);
+      if (!(await target.isVisible())) await run.page.locator('.journey-menu > summary').click();
+      await target.click(); if (view === 'market') await run.page.locator('[data-action="thot-refresh"]').waitFor();
     };
     await run.open(role === 'operator_security' ? 'operator' : 'market');
     if (role !== 'operator_security' && !(await run.api('/v1/thot/workspace')).wallet) { await run.page.locator('[data-action="thot-link"]').waitFor();
@@ -111,7 +113,9 @@ try {
   assert.equal((await stranger.api('/v1/thot/workspace')).wallet, stranger.address);
   async function enroll(label) {
     phase = 'synthetic-import'; await seller.open('vault');
-    await seller.page.locator('[data-action="import-research"]').first().click();
+    await seller.page.locator('[data-action="journey-add"]').first().click();
+    await seller.page.locator('[data-action="journey-local"][data-client="claude"]').click();
+    await seller.page.locator('#detail-dialog [data-action="import-research"]').click();
     const text = [
       {type: 'user', sessionId: randomUUID(), timestamp: '2026-09-22T10:00:00Z', cwd: '/workspace/synthetic-demo', message: {role: 'user', content: `Synthetic ${label}: how should a cache key include a project ID?`}},
       {type: 'assistant', timestamp: '2026-09-22T10:01:00Z', message: {role: 'assistant', content: [{type: 'text', text: 'Synthetic answer: prefix every cache key with the project identifier.'}]}},
@@ -125,16 +129,15 @@ try {
     const imported = seller.page.waitForResponse(r => r.url().endsWith('/v1/contributor/import/confirm'));
     await seller.page.locator('[data-action="confirm-research"]').click();
     const response = await imported; assert.equal(response.status(), 200); const trace = await response.json();
-    await seller.page.locator('nav [data-view="market"]').click();
+    const reviewTrace = seller.page.locator(`[data-action="thot-list-configure"][data-id="${trace.trace_id}"]`);
     if(label==='purchase') {
       await seller.page.reload();
-      await seller.page.locator('nav [data-view="market"].active').waitFor();
-      await seller.page.locator('#thot-trace').waitFor();
-      evidence.checks.push('A contributor returning to Marketplace after a browser reload keeps the selected page.');
+      await seller.page.locator('nav [data-view="vault"].active').waitFor();
+      await reviewTrace.waitFor();
+      evidence.checks.push('My work preserves the signed-in contributor and imported trace after a browser reload.');
     }
-    await seller.page.locator('#thot-trace').selectOption(trace.trace_id);
     const metadataResponse = seller.page.waitForResponse(r => r.url().endsWith('/v1/thot/listings/metadata'));
-    await seller.page.locator('[data-action="thot-list-configure"]').click();
+    await reviewTrace.click();
     const metadata = await (await metadataResponse).json();
     await seller.page.locator('#thot-title').fill('Synthetic ' + label);
     await seller.page.locator('#thot-price').fill('100'); await seller.page.locator('#thot-list-consent').check();
@@ -148,15 +151,19 @@ try {
           const price = form.querySelector('#thot-price').getBoundingClientRect();
           const licence = form.querySelector('#thot-license').getBoundingClientRect();
           const body = form.closest('.dialog-body');
+          const release = body.querySelector('.journey-release').getBoundingClientRect();
+          const terms = form.closest('aside').getBoundingClientRect();
           return {title:{x:title.x,y:title.y,bottom:title.bottom}, price:{x:price.x,y:price.y}, licenceWidth:licence.width,
+            release:{x:release.x,y:release.y,right:release.right,bottom:release.bottom}, terms:{x:terms.x,y:terms.y},
             overflow:body.scrollWidth > body.clientWidth + 1,
             checked:form.querySelector('#thot-list-consent').checked,
             optional:form.querySelector('#thot-treasury-consent').checked};
         });
         assert.equal(layout.overflow,false); assert.equal(layout.checked,true); assert.equal(layout.optional,false);
         assert(layout.licenceWidth > 250);
-        if (width === 390) assert(layout.price.y > layout.title.bottom);
-        else assert(Math.abs(layout.title.y-layout.price.y)<2);
+        assert(layout.price.y > layout.title.bottom,'Sale fields remain stacked for readable review');
+        if (width === 390) assert(layout.terms.y > layout.release.bottom,'Mobile sale terms follow the exact release');
+        else assert(layout.terms.x > layout.release.right&&Math.abs(layout.release.y-layout.terms.y)<2,'Desktop release and sale terms sit side by side');
         await shot(seller.page, width === 390 ? 'listing-mobile' : 'listing-desktop');
       }
       await seller.page.setViewportSize(desktop);
@@ -310,7 +317,25 @@ try {
   }
   await app.thot.processSales(); assert.equal(await fixture.token.balanceOf(seller.address), balancesBefore.seller + expected.seller);
   evidence.payout_transaction = completed.payout_transaction; evidence.checks.push('Early payout denied; local-only accelerated deadline yields mined payout and exact beneficiary balance deltas; repeated worker cycle cannot pay twice.');
-  await seller.open('earnings'); await shot(seller.page, 'purchase-06-seller-paid');
+  // The stopped worker cannot perform its next 30-second analytics pass. Catch up
+  // the read-only index before recording totals beside the confirmed payout.
+  await app.thotAnalytics.refresh();
+  const sellerAnalytics=await seller.api('/v1/thot/analytics');
+  const sellerSnapshot=await seller.api('/v1/thot/workspace');
+  assert.equal(sellerAnalytics.status.complete,true);
+  assert.equal(sellerAnalytics.status.through_block,sellerSnapshot.account.block.number);
+  assert.equal(BigInt(sellerAnalytics.own.independent_seller_atoms),expected.seller);
+  assert.equal(BigInt(sellerAnalytics.own.treasury_seller_atoms),0n);
+  assert.equal(BigInt(sellerAnalytics.own.pooled_paid_atoms),expected.seller);
+  evidence.checks.push('Indexed independent seller proceeds and pooled payments match the actual confirmed payout at the current account block.');
+  await seller.open('earnings');
+  const indexedSellerDisplay=`${expected.seller/10n**18n}.${String(expected.seller%10n**18n).padStart(18,'0').slice(0,4)} THOT`;
+  await seller.page.waitForFunction(expected=>{
+    const cards=document.querySelectorAll('#thot-referral-analytics .library-metrics article');
+    const sales=[...cards].find(card=>card.querySelector('small')?.textContent==='Independent trace sales');
+    return sales?.querySelector('strong')?.textContent===expected;
+  },indexedSellerDisplay);
+  await shot(seller.page, 'purchase-06-seller-paid');
   phase = 'refund';
   const refundListing = (await enroll('refund')).listing;
   const refundOffer = await buyer.api('/v1/thot/offers/prepare', {listing_id: refundListing.id});

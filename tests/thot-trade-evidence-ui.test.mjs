@@ -26,7 +26,7 @@ function listingFixture(t,fields){
  const inputs={...fields};
  globalThis.window={ethereum:{request:async p=>p.method==='eth_requestAccounts'?[owner]:p.method==='eth_chainId'?'0x7a69':p.method==='eth_signTypedData_v4'?'0x'+'ab'.repeat(65):{status:'0x1'}}};
  globalThis.document={querySelector:id=>inputs[id]??{value:'',checked:false}};
- const ui=createThotUI({state,api:async(path,options)=>{calls.push({path,options});if(path.endsWith('/metadata'))return {trace_id:'t',content_hash:'h',trade_evidence:[{id:'proof-1',evidence_hash:'hash-1',symbol:'AAPL',window_days:7}]};if(path==='/v1/thot/listings')return {id:'listing',typed_data:{domain:{chainId:31337,verifyingContract:owner}}};return {id:'listing'};},openDialog:(...a)=>dialogs.push(a),dialog:{close(){}},refresh:async()=>{},escape:esc,json:JSON.stringify,toast(){}});
+ const ui=createThotUI({state,api:async(path,options)=>{calls.push({path,options});if(path.endsWith('/preview'))return {trace_id:'t',content_hash:'h',content:{turns:[]},sale_eligibility:{can_list:true}};if(path.endsWith('/metadata'))return {trace_id:'t',content_hash:'h',trade_evidence:[{id:'proof-1',evidence_hash:'hash-1',symbol:'AAPL',window_days:7}]};if(path==='/v1/thot/listings')return {id:'listing',typed_data:{domain:{chainId:31337,verifyingContract:owner}}};return {id:'listing'};},openDialog:(...a)=>dialogs.push(a),dialog:{close(){}},refresh:async()=>{},escape:esc,json:JSON.stringify,toast(){}});
  t.after(()=>{globalThis.window=previousWindow;globalThis.document=previousDocument;});
  return {ui,state,calls,dialogs};
 }

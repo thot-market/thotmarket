@@ -16,9 +16,9 @@ function fixture(overrides = {}) {
     const old = fields.get('#openrouter-connect-form'); if (old) old.isConnected = false;
     fields.clear(); dialogs.push({ title, subtitle, html }); dialog.open = true;
     if (html.includes('id="openrouter-connect-form"')) {
-      const key = { value: '', isConnected: true }, price = {value:'100'}, consent = { checked: false }, treasury = {checked:false}, button = { disabled: false }, formListeners = new Map();
-      const form = { isConnected: true, querySelector(id) { return id === '#openrouter-sale-price' ? price : id === '#openrouter-api-key' ? key : id === '#openrouter-recording-consent' ? consent : id === '#openrouter-treasury-consent' ? treasury : id === 'button[type="submit"]' ? button : null; }, reportValidity() { return !!key.value && consent.checked; }, addEventListener(event, callback) { formListeners.set(event, callback); }, submit() { return formListeners.get('submit')?.({ preventDefault() {}, currentTarget: form }); } };
-      fields.set('#openrouter-connect-form', form); fields.set('#openrouter-api-key', key); fields.set('#openrouter-recording-consent', consent); fields.set('#openrouter-treasury-consent',treasury);
+      const key = { value: '', isConnected: true }, price = {value:'100'}, consent = { checked: false }, autoSales = {checked:false}, treasury = {checked:false}, button = { disabled: false }, formListeners = new Map();
+      const form = { isConnected: true, querySelector(id) { return id === '#openrouter-auto-sales' ? autoSales : id === '#openrouter-sale-price' ? price : id === '#openrouter-api-key' ? key : id === '#openrouter-recording-consent' ? consent : id === '#openrouter-treasury-consent' ? treasury : id === 'button[type="submit"]' ? button : null; }, reportValidity() { return !!key.value && consent.checked; }, addEventListener(event, callback) { formListeners.set(event, callback); }, submit() { return formListeners.get('submit')?.({ preventDefault() {}, currentTarget: form }); } };
+      fields.set('#openrouter-auto-sales',autoSales); fields.set('#openrouter-connect-form', form); fields.set('#openrouter-api-key', key); fields.set('#openrouter-recording-consent', consent); fields.set('#openrouter-treasury-consent',treasury);
     }
     if (html.includes('id="openrouter-proxy"')) { fields.set('#openrouter-proxy', { value: '' }); fields.set('#openrouter-base', { value: '' }); }
   }
@@ -148,7 +148,7 @@ test('a supported connection signs one scoped policy before sending the provider
  const a=fixture({provider,prepare:async()=>({id:'stream:one',typed_data:{domain:{chainId:31337,verifyingContract:market},message:{seller:wallet}}})});
  a.state.thot={wallet,capabilities:{stream_sales:true,chain_id:31337,market}};await a.ui.handle('openrouter-open');
  assert.match(a.dialogs[0].html,/subsequent traces only/);assert.match(a.dialogs[0].html,/including model outputs/);assert.match(a.dialogs[0].html,/asking price, not an assay estimate/);assert.match(a.dialogs[0].html,/one complete approved release from each stable group of 20/);
- await a.fill().submit();const connect=a.calls.find(call=>call.path.endsWith('/connect'));
+ a.fields.get('#openrouter-auto-sales').checked=true;await a.fill().submit();const connect=a.calls.find(call=>call.path.endsWith('/connect'));
  const prepared=a.calls.find(call=>call.path==='/v1/thot/streams/prepare').options.body;assert.equal(prepared.price_thot,'100');assert.equal(prepared.treasury_sampling_opt_in,false);
  assert.equal(walletCalls.filter(c=>c.method==='eth_signTypedData_v4').length,1);assert.equal(connect.options.body.sale_policy_id,'stream:one');assert.equal(connect.options.body.rights_confirmed,true);assert.equal(connect.options.body.model_output_licensed,true);
  assert.match(a.dialogs.at(-1).html,/No per-trace signing/);
@@ -158,7 +158,7 @@ test('OpenRouter reserve sampling is separately optional and sent only when chec
  const wallet='0x'+'1'.repeat(40),market='0x'+'2'.repeat(40);
  const provider={async request(input){if(input.method==='eth_accounts')return [wallet];if(input.method==='eth_chainId')return '0x7a69';if(input.method==='eth_signTypedData_v4')return '0x'+'3'.repeat(130);throw Error('Unexpected wallet method');}};
  const a=fixture({provider,prepare:async()=>({id:'stream:one',typed_data:{domain:{chainId:31337,verifyingContract:market},message:{seller:wallet}}})});
- a.state.thot={wallet,capabilities:{stream_sales:true,chain_id:31337,market}};await a.ui.handle('openrouter-open');a.fields.get('#openrouter-treasury-consent').checked=true;await a.fill().submit();
+ a.state.thot={wallet,capabilities:{stream_sales:true,chain_id:31337,market}};await a.ui.handle('openrouter-open');a.fields.get('#openrouter-treasury-consent').checked=true;a.fields.get('#openrouter-auto-sales').checked=true;await a.fill().submit();
  const prepared=a.calls.find(call=>call.path==='/v1/thot/streams/prepare').options.body;assert.equal(prepared.price_thot,'100');assert.equal(prepared.treasury_sampling_opt_in,true);
 });
 
@@ -166,7 +166,7 @@ test('connection signer/domain mismatch cannot send a provider key or signed sal
  const wallet='0x'+'1'.repeat(40),market='0x'+'2'.repeat(40),calls=[];
  const provider={async request(input){calls.push(input);return input.method==='eth_accounts'?[wallet]:'0x7a69';}};
  const a=fixture({provider,prepare:async()=>({id:'stream:wrong',typed_data:{domain:{chainId:1,verifyingContract:market},message:{seller:wallet}}})});
- a.state.thot={wallet,capabilities:{stream_sales:true,chain_id:31337,market}};await a.ui.handle('openrouter-open');await a.fill().submit();
+ a.state.thot={wallet,capabilities:{stream_sales:true,chain_id:31337,market}};await a.ui.handle('openrouter-open');a.fields.get('#openrouter-auto-sales').checked=true;await a.fill().submit();
  assert.equal(a.calls.filter(c=>c.path.endsWith('/connect')).length,0);assert.equal(calls.filter(c=>c.method==='eth_signTypedData_v4').length,0);assert.match(a.messages.at(-1),/does not match/);
 });
 
@@ -224,4 +224,15 @@ test('usage view reads existing reports without invoking connection or wallet wr
 
 test('usage response for an old identity cannot replace the current dialog',async()=>{
  let resolve;const pending=new Promise(r=>resolve=r);const a=fixture({status:()=>pending});const request=a.ui.handle('openrouter-usage');a.state.actor={id:'other'};a.state.generation++;resolve({requests:[{model:'private-model',usage:{cost:1}}]});await assert.rejects(request,/account changed/);assert.equal(a.dialogs.length,0);
+});
+
+
+test('stream-capable OpenRouter defaults to private recording without a sale signature',async()=>{
+ const a=fixture({provider:{request:async()=>{throw Error('Private recording must not prompt a wallet');}}});
+ a.state.thot={wallet:'0x'+'1'.repeat(40),capabilities:{stream_sales:true,chain_id:31337,market:'0x'+'2'.repeat(40)}};
+ await a.ui.handle('openrouter-open');assert.equal(a.fields.get('#openrouter-auto-sales').checked,false);await a.fill().submit();
+ const sent=a.calls.find(c=>c.path.endsWith('/connect'));
+ assert.equal(sent.options.body.recording_consent,true);assert.equal(sent.options.body.sale_policy_id,undefined);assert.equal(sent.options.body.rights_confirmed,undefined);
+ assert.equal(a.calls.some(c=>c.path==='/v1/thot/streams/prepare'),false);
+ assert.doesNotMatch(a.dialogs.at(-1).html,/automatically offered under the terms you just signed/);
 });

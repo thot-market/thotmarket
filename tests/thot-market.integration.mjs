@@ -31,7 +31,11 @@ test('v0.9 authenticated app: private trace → signed enrollment → automatic 
   const trace=await importDemo(app.service,demoUser,'coding',randomUUID());
   const metadata=await call('/v1/thot/listings/metadata',{trace_id:trace.trace_id},su);assert.equal(metadata.status,200);assert.equal(metadata.body.content,undefined);
   assert.equal((await call('/v1/thot/listings/metadata',{trace_id:trace.trace_id},bu)).status,403);
-  assert.equal((await call('/v1/thot/listings/preview',{trace_id:trace.trace_id},su)).status,404);
+  const preview=await call('/v1/thot/listings/preview',{trace_id:trace.trace_id},su);
+  assert.equal(preview.status,200);assert.equal(preview.body.content_hash,metadata.body.content_hash);
+  assert.ok(preview.body.content.turns.length);
+  const deniedPreview=await call('/v1/thot/listings/preview',{trace_id:trace.trace_id},bu);
+  assert.equal(deniedPreview.status,403);assert.equal(deniedPreview.body.content,undefined);
   const listing=await call('/v1/thot/listings',{trace_id:trace.trace_id,content_hash:metadata.body.content_hash,title:'Synthetic cache debugging trace',price_thot:'100000',license:'Synthetic content only; non-exclusive evaluation for 30 days, no onward transfer.',rights_confirmed:true,metadata_public:true,automatic_sales:true,treasury_opt_in:false},su);
   assert.equal(listing.status,200,JSON.stringify(listing.body));
   await t.test('enrollment binds exact automatic-sale terms to the contributor signature before activation',async()=>{
@@ -93,6 +97,8 @@ test('v0.9 authenticated app: private trace → signed enrollment → automatic 
    await denied('/v1/thot/offers/delivery');await denied('/v1/thot/offers/review');
    const privateMetadata=await call('/v1/thot/listings/metadata',{trace_id:trace.trace_id},op);
    assert.equal(privateMetadata.status,403);assert.equal(privateMetadata.body.release,undefined);
+   const privatePreview=await call('/v1/thot/listings/preview',{trace_id:trace.trace_id},op);
+   assert.equal(privatePreview.status,403);assert.equal(privatePreview.body.content,undefined);
    // Confirm denial is actor ownership, not a missing, deleted or expired release.
    const stillAvailable=await call('/v1/thot/offers/delivery',{id},bu);
    assert.equal(stillAvailable.status,200);assert.ok(stillAvailable.body.release.content.turns.length);

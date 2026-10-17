@@ -4,6 +4,9 @@
     "packages/capture/src/browser.ts",
     "packages/capture/src/connect.ts",
     "packages/capture/src/export.ts",
+    "packages/capture/src/history-connect.ts",
+    "packages/capture/src/history-schedule.ts",
+    "packages/capture/src/history-sync.ts",
     "packages/capture/src/index.ts",
     "packages/capture/src/limits.ts",
     "packages/capture/src/local-state.ts",
@@ -31,6 +34,7 @@
     "packages/provenance/scripts/verify_recorder.py",
     "scripts/capture-terminal-child.ts",
     "scripts/thot-capture.ts",
+    "scripts/thot-history.ts",
     "scripts/thot-setup.ts",
     "trace-vault/attestation_verify.py"
   ]

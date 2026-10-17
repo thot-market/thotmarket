@@ -5,6 +5,8 @@ import { runInNewContext } from 'node:vm';
 import { randomUUID } from 'node:crypto';
 // @ts-expect-error Production browser helper intentionally uses JavaScript.
 import {isClosedUnpaidPurchase} from '../apps/dashboard/thot-ui.js';
+// @ts-expect-error Production browser helper intentionally uses JavaScript.
+import {welcomeHTML} from '../apps/dashboard/connected-journey-ui.js';
 
 const applicationSource = await readFile(new URL('../apps/dashboard/app.js', import.meta.url), 'utf8');
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
@@ -68,7 +70,7 @@ function documentFixture() {
 }
 function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, options: { thotTransport?: (url: string, init: any)=>Promise<any>; librarySubmit?: (form:any)=>Promise<boolean>; walletAuthFactory?:(config:any)=>any; importPrivyModule?:(url?:string)=>Promise<any>; privyTimeoutMs?:number; privyResourceObserver?:any; storage?:any; hash?:string } = {}) {
   const dom = documentFixture(), calls: Array<{ url: string; init: any }> = [], timers = new Set<ReturnType<typeof setTimeout>>(), controllers = new Set<AbortController>();
-  const context: any = { isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage,PerformanceObserver:options.privyResourceObserver,performance:{now:()=>100},location:{origin:'https://workspace.example.test',hash:options.hash??'',pathname:'/app',search:''}}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
+  const context: any = { welcomeHTML,createConnectedJourneyUI:()=>({handle:async()=>false}),createHistorySyncUI:()=>({handle:async()=>false,authReady(){},authLost(){},onDialogClose(){}}),isClosedUnpaidPurchase, bindStakingPreview:()=>()=>{}, window:{addEventListener(){},sessionStorage:options.storage,PerformanceObserver:options.privyResourceObserver,performance:{now:()=>100},location:{origin:'https://workspace.example.test',hash:options.hash??'',pathname:'/app',search:''}}, createRobinhoodSetupUI:()=>({authReady(){},authLost(){},handle:async()=>false,onDialogCancel(){}}), document: dom.document, AbortController:class extends AbortController{constructor(){super();controllers.add(this);}}, URL, Blob, crypto: { randomUUID },
     setTimeout(callback: () => void, duration: number) { const delay=options.privyTimeoutMs===undefined?duration:duration===30000?options.privyTimeoutMs:duration===90000?options.privyTimeoutMs*3:duration;const timer = setTimeout(callback, delay); timers.add(timer); return timer; },
     clearTimeout(timer: ReturnType<typeof setTimeout>) { clearTimeout(timer); timers.delete(timer); },
     fetch(url: string, init: any = {}) { calls.push({ url, init }); return url==='/v1/thot/workspace'?(options.thotTransport?.(url,init)??Promise.resolve(response({capabilities:{mode:'unconfigured'}}))):url==='/v1/money/capabilities'?Promise.resolve(response({mode:'mock'})):transport(url, init); },
@@ -187,7 +189,10 @@ test('actual sign-out state transition discards a detail response whose JSON par
   a.driver.setAuthMode('external_jwt');
   const oldAction = a.driver.safely(() => a.driver.runAction('trace', { dataset: { id: 'private-old-trace' } }));
   await parsing.promise; a.document.querySelector('#wallet-summary').innerHTML='PRIVATE-BALANCE';a.document.querySelector('#wallet-summary').hidden=false;
+ a.document.querySelector('#dialog-content').innerHTML='PRIVATE-REVIEW-TEXT';a.document.querySelector('#detail-dialog').open=true;
  a.driver.showIdentityLogin('Signed out.');
+ assert.equal(a.document.querySelector('#dialog-content').innerHTML,'');
+ assert.equal(a.document.querySelector('#detail-dialog').open,false);
  assert.equal(a.document.querySelector('#wallet-summary').innerHTML,'');assert.equal(a.document.querySelector('#wallet-summary').hidden,true); const loginForm = a.document.querySelector('#identity-form');
   json.resolve({ category: 'general', status: 'AVAILABLE', provenance: { private: 'PRIVATE-TRACE-RECEIPT' }, rights: {} }); await oldAction;
   assert.equal(a.driver.state.token, null); assert.equal(a.driver.state.actor, null);
@@ -371,7 +376,10 @@ test('sign-out clears THOT balances and sidebar rendering cannot replace the log
  const a=dashboard(t,async()=>{throw new Error('No requests while signed out');});
  a.driver.state.thot={capabilities:{mode:'thot-anvil'},wallet:'PRIVATE-WALLET',account:{claimable:'123'},orders:[{title:'PRIVATE-SALE'}]};
  a.document.querySelector('#wallet-summary').innerHTML='PRIVATE-BALANCE';a.document.querySelector('#wallet-summary').hidden=false;
+ a.document.querySelector('#dialog-content').innerHTML='PRIVATE-REVIEW-TEXT';a.document.querySelector('#detail-dialog').open=true;
  a.driver.showIdentityLogin('Signed out.');
+ assert.equal(a.document.querySelector('#dialog-content').innerHTML,'');
+ assert.equal(a.document.querySelector('#detail-dialog').open,false);
  assert.equal(a.document.querySelector('#wallet-summary').innerHTML,'');assert.equal(a.document.querySelector('#wallet-summary').hidden,true);
  assert.equal(a.driver.state.thot,null);
  const login=a.document.querySelector('#main').innerHTML;
@@ -707,11 +715,36 @@ test('catalogue paints before the chain workspace and keeps private balances unk
  assert.equal(a.driver.state.loaded,true);assert.match(a.document.querySelector('#main').innerHTML,/Offers renderer/);
 });
 
-test('unrelated slow contributor reads do not hide the already loaded catalogue',async t=>{
+test('buyer navigation never starts unrelated private contributor reads',async t=>{
  const library=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):url.startsWith('/v1/contributor/library')?library.promise:response([]),{thotTransport:async()=>response({capabilities:{mode:'thot-production'},orders:[]})});
  startMarket(a);const loading=a.driver.refresh();await flush();
- assert.match(a.document.querySelector('#main').innerHTML,/Listed research/);assert.equal(a.driver.state.loaded,false);
- library.resolve(response({items:[]}));await loading;assert.equal(a.driver.state.loaded,true);
+ await loading;assert.match(a.document.querySelector('#main').innerHTML,/Offers renderer/);assert.equal(a.driver.state.loaded,true);
+ assert.equal(a.calls.some(c=>c.url.startsWith('/v1/contributor/')||['/v1/traces','/v1/earnings','/v1/candidates','/v1/inference/requests'].includes(c.url)),false);
+ library.resolve(response({items:[]}));
+});
+
+test('the retained seller link loads deferred contributor records once and opens its section',async t=>{
+ const library=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):url==='/v1/traces'?response([{trace_id:'seller-trace'}]):url==='/v1/contributor/portfolio'?response({items:[{trace_id:'seller-trace'}]}):url.startsWith('/v1/contributor/library')?library.promise:response([]),{hash:'#thot-available',thotTransport:async()=>response({capabilities:{mode:'thot-production'},orders:[]})});
+ startMarket(a);await a.driver.refresh();assert.equal(a.driver.state.contributorLoaded,false);
+ const target=a.document.createElement('seller');target.tagName='DETAILS';let scrolls=0;target.scrollIntoView=()=>scrolls++;a.elements.set('#thot-contribute',target);
+ a.browser.location.hash='#thot-contribute';assert.equal(a.driver.acceptMarketFragment(),true);await flush();
+ assert.match(a.document.querySelector('#main').innerHTML,/Reading your records/);assert.equal(target.open,false);
+ a.driver.acceptMarketFragment();await flush();
+ for(const path of ['/v1/traces','/v1/contributor/portfolio','/v1/contributor/library'])assert.equal(a.calls.filter(c=>c.url===path).length,1,'repeated navigation must not restart private reads');
+ library.resolve(response({items:[{trace_id:'seller-trace'}]}));await flush();
+ assert.equal(a.driver.state.contributorLoaded,true);assert.equal(a.driver.state.traces[0].trace_id,'seller-trace');assert.equal(a.driver.state.traceLibrary.items[0].trace_id,'seller-trace');
+ assert.equal(a.driver.state.view,'market');assert.equal(a.browser.location.hash,'#thot-contribute');assert.equal(target.open,true);assert.equal(scrolls,1);
+ const reads=a.calls.length;a.driver.acceptMarketFragment();await flush();assert.equal(a.calls.length,reads,'loaded seller navigation stays local');
+});
+
+test('account changes discard deferred records started by the retained seller link',async t=>{
+ const library=deferred(),a=dashboard(t,async url=>url.startsWith('/v1/contributor/library')?library.promise:response([{trace_id:'former-account-trace'}]),{hash:'#thot-contribute',thotTransport:async()=>response({capabilities:{mode:'thot-production'},orders:[]})});
+ a.driver.state.view='market';a.driver.acceptMarketFragment();await flush();
+ assert.ok(a.calls.some(c=>c.url==='/v1/contributor/library'));
+ a.driver.invalidatePrivateState();a.identity('new-account');a.document.querySelector('#main').innerHTML='New account';
+ library.resolve(response({items:[{trace_id:'former-account-trace'}]}));await flush();
+ assert.equal(a.driver.state.actor.id,'new-account');assert.equal(a.driver.state.contributorLoaded,false);assert.equal(a.driver.state.traces.length,0);assert.equal(a.driver.state.traceLibrary,undefined);
+ assert.equal(a.document.querySelector('#main').innerHTML,'New account');assert.equal(a.document.querySelector('#notice').hidden,true);
 });
 
 test('an accepted wallet session survives account data failure and leaves catalogue readable',async t=>{

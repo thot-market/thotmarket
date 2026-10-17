@@ -30,7 +30,7 @@ test('browser: preview cancellation, consent, persistence, deduplication and rol
   ].map(v=>JSON.stringify(v)).join('\n'));
   const cards=page.locator('[data-testid="conversation-row"]');
   const review=async(buffer=history)=>{
-    await page.locator('#conversation-library [data-action="import-research"]').click();
+    await page.locator('#conversation-library [data-action="journey-add"]').first().click();await page.locator('[data-action="journey-local"][data-client="claude"]').click();await page.locator('#detail-dialog [data-action="import-research"]').click();
     await page.locator('#research-file').setInputFiles({name:'synthetic.jsonl',mimeType:'application/x-ndjson',buffer});
     await page.locator('#research-preview-form button[type="submit"]').click();
     await page.locator('#confirm-research').waitFor();
@@ -55,10 +55,10 @@ test('browser: preview cancellation, consent, persistence, deduplication and rol
   await page.reload();await cards.first().waitFor();
   await review();const duplicate=await save();
   assert.equal(duplicate.duplicate,true);assert.equal(duplicate.trace_id,first.trace_id);assert.equal(await cards.count(),1);
-  await page.locator('#role').selectOption('buyer_admin');
+  await page.locator('.journey-menu').evaluate((e:any)=>{(e as HTMLDetailsElement).open=true;});await page.locator('#role').selectOption('buyer_admin');
   await cards.first().waitFor({state:'hidden'});
   assert.equal(await cards.count(),0);
-  await page.locator('#role').selectOption('user');await cards.first().waitFor();
+  await page.locator('.journey-menu').evaluate((e:any)=>{(e as HTMLDetailsElement).open=true;});await page.locator('#role').selectOption('user');await cards.first().waitFor();
   // Restart the actual backend, retaining only this test's private directory.
   await new Promise<void>(resolve=>server.close(()=>resolve()));await app.close();
   app=await createApplication({dataDir});server=createHttpServer(app);await listen(port);

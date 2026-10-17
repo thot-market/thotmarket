@@ -1,6 +1,16 @@
 # Thot CLI
 
-The command line client for capturing Claude Code and Codex sessions to a private Thot vault. Source lives alongside the server, capture protocol and independent verifiers in the Thot monorepo.
+The command line client for capturing Claude Code and Codex sessions or uploading selected histories to a private Thot vault. Source lives alongside the server, capture protocol and independent verifiers in the Thot monorepo.
+
+## Daily history uploads
+
+Use `thot history --help` in a built CLI package, or `thot-history --help` after
+installing the helper from a reviewed source checkout. Pair a separately scoped
+private uploader, run once, then explicitly enable its per-user daily schedule.
+See [daily history uploads](../../docs/history-uploads.md) for installation,
+folder selection, backfill, Linux/macOS scheduling, limits and revocation.
+No model calls or provider login are needed for this path. Uploading is private;
+listing requires a separate review and authorization.
 
 Requires Node.js 24+ and your existing Claude Code or Codex installation/login. Interactive capture also requires tmux. Python 3 and the reviewed hardware verifier enable independent recorder checks and are required by `--require-reference`. Provider clients are not installed by this package.
 

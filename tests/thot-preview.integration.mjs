@@ -26,10 +26,15 @@ test('ordinary buyers receive metadata and allowlisted predicates but no trace t
   const bundle=await app.privacy.createDemoBundle({turns:[{role:'user',content:secret+' debug a tenant cache'},{role:'assistant',content:'Use a tenant-scoped key and verify isolation.'}]},demoUser.id);
   const trace=await app.service.importTrace(demoUser,randomUUID(),{bundle,category:'general',rights_confirmed:true,model_output_licensed:true});
 
-  const removed=await call('/v1/thot/listings/preview',{trace_id:trace.trace_id},sellerToken);
-  assert.equal(removed.status,404);assert(!JSON.stringify(removed.body).includes(secret));
+  const ownerPreview=await call('/v1/thot/listings/preview',{trace_id:trace.trace_id},sellerToken);
+  assert.equal(ownerPreview.status,200);assert(JSON.stringify(ownerPreview.body.content).includes(secret));
+  for(const token of [buyerToken,undefined]){
+   const denied=await call('/v1/thot/listings/preview',{trace_id:trace.trace_id},token);
+   assert.equal(denied.status,token?403:401);assert(!JSON.stringify(denied.body).includes(secret));
+  }
   const metadata=await call('/v1/thot/listings/metadata',{trace_id:trace.trace_id},sellerToken);
   assert.equal(metadata.status,200);assert.equal(metadata.body.content,undefined);assert(!JSON.stringify(metadata.body).includes(secret));
+  assert.equal(ownerPreview.body.content_hash,metadata.body.content_hash);
   assert.equal((await call('/v1/thot/listings/metadata',{trace_id:trace.trace_id},buyerToken)).status,403);
 
   const stalePreview=await call('/v1/thot/listings',{trace_id:trace.trace_id,content_hash:metadata.body.content_hash,title:'Private cache research',price_thot:'100',license:'Non-exclusive evaluation license for thirty days. No onward transfer.',rights_confirmed:true,metadata_public:true,automatic_sales:true,free_preview:true},sellerToken);

@@ -79,7 +79,7 @@ test('recorded browser journey: create and fund a buy order, approve uploaded hi
     await context.addInitScript(()=>{window.ethereum={request:args=>window.anvilWalletRequest(args)};});
     const page=await context.newPage();page.setDefaultTimeout(18000);page.on('pageerror',e=>errors.push(e.message));
     await page.goto(origin+'/app');await page.locator('[data-testid="anvil-mode"]').waitFor();
-    if(role!=='user'){await page.locator('#role').selectOption(role);await page.getByRole('heading',{name:'Ask for the work you need.'}).waitFor();}
+    if(role!=='user'){await page.locator('.journey-menu>summary').click();await page.locator('#role').selectOption(role);await page.getByRole('heading',{name:'Ask for the work you need.'}).waitFor();}
     if(useX11){
       const recorder=spawn('ffmpeg',['-hide_banner','-loglevel','error','-f','x11grab','-framerate','12','-video_size','1360x1024','-i',display,'-c:v','libx264','-preset','ultrafast','-crf','26','-pix_fmt','yuv420p','-threads','2','-movflags','+faststart','-y',join(output,name+'.mp4')],{stdio:['pipe','ignore','pipe']});
       recorderStop=observeRecorder(recorder);
@@ -108,7 +108,7 @@ test('recorded browser journey: create and fund a buy order, approve uploaded hi
     {type:'user',sessionId:'anvil-browser-demo',cwd:'/synthetic/demo',message:{role:'user',content:'Compare public filings and explain valuation assumptions for a fictional company. This is synthetic example data.'}},
     {type:'assistant',sessionId:'anvil-browser-demo',message:{role:'assistant',content:[{type:'text',text:'Separate reported revenue from assumptions. Compare base, low-growth and high-growth cases; these examples are not forecasts.'}]}},
   ].map(v=>JSON.stringify(v)).join('\n'));
-  await dwell(2500);await u.locator('[data-action="import-research"]').click();
+  await dwell(2500);await u.locator('[data-action="journey-add"]').first().click();await u.locator('[data-action="journey-local"][data-client="claude"]').click();await u.locator('#detail-dialog [data-action="import-research"]').click();
   await u.locator('#research-file').setInputFiles({name:'claude-code-synthetic-example.jsonl',mimeType:'application/x-ndjson',buffer:history});await dwell(2000);
   await u.locator('#research-preview-form button[type="submit"]').click();await u.getByRole('heading',{name:'Review conversation'}).waitFor();
   await u.locator('details:has(#research-rights) > summary').click();

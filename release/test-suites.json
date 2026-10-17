@@ -41,6 +41,7 @@
         "tests/wallet-replacement.test.mjs",
         "tests/thot-purchase-status.test.ts",
         "tests/thot-valuations.test.ts",
+        "tests/release-preview.test.ts",
         "tests/staking-ui.test.mjs",
         "tests/thot-campaign-ui.test.mjs",
         "tests/near-privacy.test.ts",
@@ -51,7 +52,15 @@
         "tests/cvm-prestart.test.ts",
         "tests/encrypted-backup.test.ts",
         "tests/operator-storage-recovery.test.ts",
-        "tests/holder-fees-ui.test.mjs"
+        "tests/holder-fees-ui.test.mjs",
+        "tests/history-import.test.ts",
+        "tests/contributor-flow.test.ts",
+        "tests/trace-library.test.ts",
+        "tests/dashboard-contributor.test.ts",
+        "tests/history-devices.test.ts",
+        "tests/history-sync.test.ts",
+        "tests/history-schedule.test.ts",
+        "tests/dashboard-history-sync.test.ts"
       ]
     },
     "contracts": {
@@ -118,7 +127,8 @@
         "tests/e2e/anvil-money.browser.mjs",
         "tests/privy-auth-bridge.test.mjs",
         "tests/privy-download-browser.test.mjs",
-        "tests/dashboard-market-browser.test.mjs"
+        "tests/dashboard-market-browser.test.mjs",
+        "tests/connected-journey-browser.test.mjs"
       ],
       "node_commands": [
         [

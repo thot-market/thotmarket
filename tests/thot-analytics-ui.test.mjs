@@ -7,7 +7,7 @@ const status={network:'Robinhood Chain Testnet',test_assets:true,complete:true,t
 const money=n=>(BigInt(n)*10n**18n).toString();
 function make(state,api=async()=>({})){return createThotAnalyticsUI({state,api,escape,toast:()=>{}});}
 test('private referral view uses current contract terms and separates earned, pending and pooled claims',()=>{
- const state={thot:{account:{qualified:money(100000),seller_bps:null,referral_bps:2000,claimable:money(20),economics:{service_fee:'40000000000000000',direct_cost:'10000000000000000'}}},thotAnalytics:{status,own:{independent_seller_atoms:money(100),treasury_seller_atoms:money(50)},buyer_pricing:{configured:false,block:20},referrals:{attributed_contributors:3,pending_atoms:money(10),earned_atoms:money(20),paid_atoms:null,paid_min_atoms:'0',paid_max_atoms:money(10),pooled_paid_atoms:money(10),basis:'Claims pool all credits.',term_seconds:365*86400,activation_window_seconds:90*86400,my_referrer:null,ledger:[],next_cursor:null}}};
+ const state={thot:{account:{block:{number:20},qualified:money(100000),seller_bps:null,referral_bps:2000,claimable:money(20),economics:{service_fee:'40000000000000000',direct_cost:'10000000000000000'}}},thotAnalytics:{status,own:{independent_seller_atoms:money(100),treasury_seller_atoms:money(50)},buyer_pricing:{configured:false,block:20},referrals:{attributed_contributors:3,pending_atoms:money(10),earned_atoms:money(20),paid_atoms:null,paid_min_atoms:'0',paid_max_atoms:money(10),pooled_paid_atoms:money(10),basis:'Claims pool all credits.',term_seconds:365*86400,activation_window_seconds:90*86400,my_referrer:null,ledger:[],next_cursor:null}}};
  const html=make(state).referralsHTML();assert.match(html,/0\.0400 THOT/);assert.match(html,/0\.0100 THOT/);assert.match(html,/20% of net service contribution/);assert.match(html,/no membership surcharge/);assert.match(html,/365 days/);assert.match(html,/within 90 days of attribution/);assert.doesNotMatch(html,/70%|180 days|qualified lock tier/);assert.match(html,/Pending referral allocation/);assert.match(html,/Finalized referral earnings/);assert.match(html,/0\.0000 THOT–10\.0000 THOT/);assert.doesNotMatch(html,/undefined|NaN|\$20/);
 });
 test('leaderboard escapes pseudonyms, defaults to no identity opt-in, and clears private state on reset',()=>{
@@ -35,4 +35,49 @@ test('an empty later leaderboard page still exposes Previous after a cursor load
  const ui=make(state);await ui.handle('analytics-rank-next',{});
  state.thotLeaderboard={kind:'earners',items:[],next_cursor:null,status};
  assert.match(ui.leaderboardHTML(),/analytics-rank-previous/);
+});
+
+function salesIndexFixture(accountBlock=20){
+ return {thot:{wallet:'0x'+'a'.repeat(40),orders:[],account:{block:{number:accountBlock},claimable:money(7),economics:{service_fee:money(1),direct_cost:money(1)}}},thotAnalytics:{status:{...status},own:{independent_seller_atoms:money(12),treasury_seller_atoms:money(3)},referrals:{attributed_contributors:1,pending_atoms:money(4),earned_atoms:money(2),paid_atoms:money(1),pooled_paid_atoms:money(13),basis:'Claims pool all credits.',term_seconds:365*86400,my_referrer:null,ledger:[],next_cursor:null}}};
+}
+const finalizedSale=(id,amount,patch={})=>({id,seller:'0x'+'a'.repeat(40),receipt:{status:5,seller_amount:money(amount),independent:true,treasury:false},...patch});
+test('newer account blocks without known missing payments retain valid indexed money',()=>{
+ const state=salesIndexFixture(21),html=make(state).referralsHTML();
+ assert.match(html,/<small>Independent trace sales<\/small><strong>12\.0000 THOT<\/strong>/);
+ assert.match(html,/<small>Finalized referral earnings<\/small><strong>2\.0000 THOT<\/strong>/);
+ assert.match(html,/Pooled payments to your wallet: <strong>13\.0000 THOT<\/strong>/);
+ assert.match(html,/Recent payments may take a moment to appear/);assert.doesNotMatch(html,/Updating…/);
+ assert.match(html,/Indexed through block 20 of 20\. Account confirmed through block 21/);
+});
+test('known finalized seller receipts mark an actual indexed undershoot updating until caught up',()=>{
+ const state=salesIndexFixture(21);state.thot.orders=[finalizedSale('old-sale',8),finalizedSale('new-sale',4)];state.thotAnalytics.own.independent_seller_atoms=money(8);
+ const ui=make(state),html=ui.referralsHTML();
+ for(const label of ['Independent trace sales','Treasury trace sales','Pending referral allocation','Finalized referral earnings'])assert.ok(html.includes(`<small>${label}</small><strong>Updating…</strong>`));
+ assert.match(html,/Paid referral allocation: <strong>Updating…<\/strong>/);assert.match(html,/Pooled payments to your wallet: <strong>Updating…<\/strong>/);
+ assert.match(html,/<small>Your pooled claimable balance<\/small><strong>7\.0000 THOT<\/strong>/);
+ assert.match(html,/Your latest sale is confirmed\. Sales and referral totals are catching up/);
+ state.thotAnalytics.status={...status,through_block:21,target_block:21};state.thotAnalytics.own.independent_seller_atoms=money(12);
+ const caughtUp=ui.referralsHTML();assert.match(caughtUp,/<small>Independent trace sales<\/small><strong>12\.0000 THOT<\/strong>/);assert.doesNotMatch(caughtUp,/Updating…|catching up/);
+});
+test('receipt lower bounds deduplicate sales and preserve seller and independence scopes',()=>{
+ const state=salesIndexFixture(21),receipt={status:5,seller_amount:money(3),independent:false,treasury:true};
+ state.thot.orders=[finalizedSale('sale',12),finalizedSale('SALE',12,{seller:state.thot.wallet.toUpperCase()}),finalizedSale('foreign',100,{seller:'0x'+'b'.repeat(40)}),finalizedSale('pending',100,{receipt:{status:3,seller_amount:money(100),independent:true,treasury:false}}),finalizedSale('unreviewed',100,{receipt:{status:5,seller_amount:money(100),independent:false,treasury:false}}),finalizedSale('treasury',3,{receipt})];
+ const ui=make(state);assert.doesNotMatch(ui.referralsHTML(),/Updating…/);
+ state.thotAnalytics.own.treasury_seller_atoms='0';assert.match(ui.referralsHTML(),/<small>Treasury trace sales<\/small><strong>Updating…<\/strong>/);
+});
+test('matching confirmed account and index heads show exact indexed totals and no catch-up notice',()=>{
+ const html=make(salesIndexFixture()).referralsHTML();
+ assert.match(html,/<small>Independent trace sales<\/small><strong>12\.0000 THOT<\/strong>/);
+ assert.match(html,/<small>Finalized referral earnings<\/small><strong>2\.0000 THOT<\/strong>/);
+ assert.match(html,/Indexed through block 20 of 20/);assert.doesNotMatch(html,/Updating…|catching up|Recent payments/);
+});
+test('unknown account heads retain complete indexed totals while missing or incomplete indexes stay updating',()=>{
+ for(const accountHead of [null,undefined]){
+  const state=salesIndexFixture();state.thot.account.block.number=accountHead;
+  const html=make(state).referralsHTML();assert.match(html,/<small>Independent trace sales<\/small><strong>12\.0000 THOT<\/strong>/);assert.match(html,/Indexed through block 20 of 20/);assert.doesNotMatch(html,/Updating…|Account confirmed/);
+ }
+ for(const patch of [{through_block:null},{complete:false}]){
+  const state=salesIndexFixture();Object.assign(state.thotAnalytics.status,patch);
+  const html=make(state).referralsHTML();assert.match(html,/totals are still updating/);assert.match(html,/<small>Independent trace sales<\/small><strong>Updating…<\/strong>/);
+ }
 });

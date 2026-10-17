@@ -52,6 +52,7 @@ export class TraceLibrary {
       turn_count:preview.turn_count??0,exchanges:trace.capture_summary?.exchanges??0,
       created_at:trace.created_at,updated_at:trace.updated_at??trace.created_at,session_at:preview.source_date??(trace.agent_capture_id?trace.observed_at:null),
       last_checkpoint_at:trace.last_checkpoint_at??null,retention_expires_at:trace.retention_expires_at,
+      ...(trace.history_sync?{history_version:{version_id:trace.history_sync.version_id,...(trace.history_sync.previous_version_id?{previous_version_id:trace.history_sync.previous_version_id}:{})}}:{}),
       sale_eligibility:traceSaleEligibility(trace,this.service.now()),evidence:trace.provenance_status,model_history:trace.model_history??[],capture_model:trace.capture_model??null,private:true,segments:1,native_conversations:trace.native_session_keys?.length??0};
   }
   private async groupCard(group:Document[],captures:Map<string,Document>):Promise<Document>{

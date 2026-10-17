@@ -64,8 +64,10 @@ export class ThotService {
       if (!await tx.maybe('buyers','demo-buyer')) await tx.insert('buyers','demo-buyer','demo-buyer',{approved:true,name:'Development research buyer'});
     });
   }
-  async importTrace(actor: Actor, key: string, input: Document):Promise<{trace_id:string;status:string;duplicate?:boolean;provenance?:Document;rights?:Document}> {
+  async importTrace(actor: Actor, key: string, input: Document,trusted:{authorize?:(tx:Transaction)=>Promise<void>;historySync?:Document}={}):Promise<{trace_id:string;status:string;duplicate?:boolean;provenance?:Document;rights?:Document}> {
     roles(actor,['user']);
+    // Delegated uploads must remain authorized even on an idempotent replay.
+    if(trusted.authorize)await this.db.transaction(trusted.authorize);
     return this.staged.run(actor.id,key,{action:'import',input},'import',async stage => {
       const bundle = input.bundle_json ? JSON.parse(input.bundle_json) : input.bundle;
       ensure(bundle && typeof bundle==='object','BUNDLE_REQUIRED');
@@ -81,6 +83,7 @@ export class ThotService {
         ensure(privateHistory||(input.rights_confirmed===true&&typeof input.model_output_licensed==='boolean'),'IMPORT_RIGHTS_CONFIRMATION_REQUIRED');
       }
       const duplicate=async(tx:Transaction,verifiedContentHash?:string)=>{
+        await trusted.authorize?.(tx);
         if(historyCommitment){
           const existing=(await tx.list('traces',actor.id)).find(t=>(t.import_content_hash??t.import_preview?.content_commitment)===historyCommitment);
           if(existing){
@@ -125,6 +128,7 @@ export class ThotService {
         await tx.insert('traces',traceId,actor.id,{
           trace_id:traceId,category,source_bundle_hash:sourceHash,source_bundle_id:bundleId,...(verified.capture_model?{capture_model:verified.capture_model,model_history:verified.model_history??[]}: {}),
           import_consent_hash:importConsentHash,...(historyCommitment?{import_content_hash:historyCommitment}:{import_verified_content_hash:verifiedContentHash}),
+          ...(trusted.historySync?{history_sync:trusted.historySync}:{}),
           provenance_id:provenanceId,rights_id:assessment.rights.assessment_id,scrub_id:assessment.scrub.scrub_id,
           raw_ref:rawRef,scrub_ref:scrubRef,private_metadata_ref:privateMetadataRef,provenance_status:historyCommitment?'IMPORTED_UNVERIFIED':'VERIFIED',rights_status:assessment.rights.status,
           display_status:displayStatus,save_privately:privateHistory,credential_ids:[],outcome_ids:[],sale_count:0,

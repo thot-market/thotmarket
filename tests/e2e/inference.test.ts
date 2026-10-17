@@ -58,7 +58,7 @@ test('browser: explicitly execute synthetic inference, capture it, and inspect P
   const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
 
   await page.goto(`http://127.0.0.1:${address.port}/app`);
-  await page.locator('[data-view="earnings"]').click();
+  await page.locator('.journey-menu>summary').click();await page.locator('[data-view="earnings"]').first().click();
   await page.locator('[data-action="external-inference"]').click();
   await page.getByText('synthetic-browser-fixture / synthetic-browser-model').waitFor();
   await page.locator('#inference-prompt').fill('Synthetic browser prompt; do not send to a network.');

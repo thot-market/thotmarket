@@ -84,8 +84,8 @@ test('browser: simulated research market loop from upload through exact consent 
   ].map(value=>JSON.stringify(value)).join('\n'));
 
   await page.goto(`http://127.0.0.1:${address.port}/app`);
-  await page.locator('[data-action="import-research"]').waitFor();
-  await page.locator('[data-action="import-research"]').click();
+  await page.locator('[data-action="journey-add"]').first().waitFor();
+  await page.locator('[data-action="journey-add"]').first().click();await page.locator('[data-action="journey-local"][data-client="claude"]').click();await page.locator('#detail-dialog [data-action="import-research"]').click();
   await page.locator('#research-file').setInputFiles({name:'synthetic-research.jsonl',mimeType:'application/x-ndjson',buffer:history});
   const importPreview=page.waitForResponse(response=>response.url().endsWith('/v1/contributor/import/preview')&&response.request().method()==='POST');
   await page.locator('#research-preview-form button[type="submit"]').click();
@@ -125,7 +125,7 @@ test('browser: simulated research market loop from upload through exact consent 
 
   const worker=page.waitForResponse(response=>response.url().endsWith('/v1/dev/run-worker')&&response.request().method()==='POST');
   await page.locator('.section-head [data-action="worker"]').click();assert.equal((await worker).status(),200);
-  await page.locator('[data-view="earnings"]').click();
+  await page.locator('.journey-menu>summary').click();await page.locator('[data-view="earnings"]').first().click();
   await page.getByText('$65.00 demo allocation',{exact:true}).waitFor();
   await page.getByRole('button',{name:/Inspect allocation record/}).click();
   const receipt=page.locator('#detail-dialog');

@@ -1,3 +1,5 @@
+import {createHistorySyncUI} from './history-sync-ui.js';
+import {welcomeHTML,createConnectedJourneyUI} from './connected-journey-ui.js';
 import {createOpenRouterUI} from './openrouter-ui.js';
 import {createWalletAuth} from './wallet-auth-ui.js';
 import {createThotUI,isClosedUnpaidPurchase} from './thot-ui.js';
@@ -13,7 +15,7 @@ import { createClerkAuthUI } from './clerk-auth-ui.js';
 import { createAgentCaptureUI } from './agent-capture-ui.js';
 import { createRobinhoodSetupUI } from './robinhood-setup-ui.js';
 import { copySetupCommand } from './setup-ui.js';
-const state = { token: null, actor: null, role: 'user', view: 'vault', traces: [], candidates: [], earnings: { entitlements: [], settlements: [], burn_allocations: [] }, mandates: [], contributorPortfolio: {items:[],robinhood:{status:'not_linked'}}, loaded: false, catalogue: null, catalogueError: false, workspaceError: false, generation: 0, inferenceCapabilities: {enabled:false}, inferenceRequests: [] };
+const state = { token: null, actor: null, role: 'user', view: 'vault', traces: [], candidates: [], earnings: { entitlements: [], settlements: [], burn_allocations: [] }, mandates: [], contributorPortfolio: {items:[],robinhood:{status:'not_linked'}}, contributorLoaded: false, loaded: false, catalogue: null, catalogueError: false, workspaceError: false, generation: 0, inferenceCapabilities: {enabled:false}, inferenceRequests: [] };
 const main = document.querySelector('#main');
 bindStakingPreview(main);
 const dialog = document.querySelector('#detail-dialog');
@@ -52,11 +54,15 @@ const marketFragments=new Set(['#thot-available','#thot-purchases','#thot-histor
 function marketFragment(){const hash=window.location?.hash;return marketFragments.has(hash)&&(hash!=='#thot-contribute'||state.role==='user')?hash:null;}
 function scrollMarketFragment(){
   const hash=marketFragment();if(state.view!=='market'||!hash||scrolledMarketFragment===hash)return;
-  const target=document.querySelector(hash);if(target){target.scrollIntoView({block:'start'});scrolledMarketFragment=hash;}
+  const target=document.querySelector(hash);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView({block:'start'});scrolledMarketFragment=hash;}
 }
 function acceptMarketFragment(){
-  if(!marketFragment())return false;scrolledMarketFragment=null;
-  if(state.actor&&!signingOut){state.view='market';if(!state.loaded)void loadCatalogue();render();}
+  const hash=marketFragment();if(!hash)return false;scrolledMarketFragment=null;
+  if(state.actor&&!signingOut){
+    state.view='market';
+    if(state.loaded&&hash==='#thot-contribute'&&!state.contributorLoaded){loading();if(!fullRefreshCount)void safely(refresh);return true;}
+    if(!state.loaded)void loadCatalogue();render();
+  }
   return true;
 }
 function restoredView(){
@@ -164,6 +170,7 @@ function escape(value) {
 const json = value => escape(JSON.stringify(value, null, 2));
 const externalInference=createInferenceUI({state,api,openDialog,dialog,refresh,escape,json,money,badge});
 const thotUI=createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,download,getProvider:()=>authMode==='wallet_siwe'?walletAuth?.getProvider():window.ethereum});
+const journeyUI=createConnectedJourneyUI({state,openDialog,escape,thotUI});
 const analyticsUI=createThotAnalyticsUI({state,api,escape,toast});
 const moneyUI=createMoneyUI({state,api,openDialog,dialog,refresh,escape,json,toast});
 const mandateEditor=createMandateEditor({api,refresh,openDialog,dialog,toast,state});
@@ -177,6 +184,7 @@ const libraryUI=createLibraryUI({state,api,openDialog,dialog,escape,toast});
 const contributorUI=createContributorUI({libraryUI,state,api,openDialog,dialog,refresh,toast,escape,json,badge,date,short});
 const openrouterUI=createOpenRouterUI({state,api,openDialog,dialog,refresh,escape,toast,getProvider:()=>authMode==='wallet_siwe'?walletAuth?.getProvider():window.ethereum});
 const agentCaptureUI=createAgentCaptureUI({state,api,openDialog,dialog,refresh,toast,escape,getProvider:()=>authMode==='wallet_siwe'?walletAuth?.getProvider():window.ethereum});
+const historySyncUI=createHistorySyncUI({state,api,openDialog,dialog,escape,toast,refresh});
 const robinhoodSetupUI=createRobinhoodSetupUI({state,api,openDialog,dialog,refresh,toast,escape});
 function money(value, currency = 'USD') {
   try {
@@ -323,10 +331,11 @@ async function session(role) {
   openrouterUI.reset();
   analyticsUI.reset();
   agentCaptureUI.authLost();
+  historySyncUI.authLost();
   robinhoodSetupUI.authLost();
   contributorUI.reset();
-  resetCatalogue();state.generation++; state.loaded = false; state.token = null; state.actor = null; state.thot=null; state.thotSampling=null; state.money=null; state.canExplore=false;state.traceExplorer=null; state.role = role;state.environmentOverview=null;
-  activePreview = null; if (dialog.open) dialog.close(); loading();
+  resetCatalogue();state.contributorLoaded=false;state.traces=[];state.candidates=[];state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.generation++; state.loaded = false; state.token = null; state.actor = null; state.thot=null; state.thotSampling=null; state.money=null; state.canExplore=false;state.traceExplorer=null; state.role = role;state.environmentOverview=null;
+  activePreview = null; if (dialog.open) dialog.close();document.querySelector('#dialog-content').innerHTML='';thotUI.clearPrivateReview?.(); loading();
   document.querySelector('#role').value = role;
   const result = await api('/v1/dev/session', { method: 'POST', body: { role } });
   state.token = result.token; state.actor = result.actor;state.canExplore=result.permissions?.trace_explorer===true;
@@ -352,6 +361,7 @@ async function loadCatalogue(){
 }
 function renderCatalogue(){
   if(state.loaded||!state.actor||signingOut||state.view!=='market'||!['user','buyer_admin','buyer_member','operator_security'].includes(state.role))return false;
+  const accountMenu=document.querySelector('.journey-menu');if(accountMenu)accountMenu.hidden=false;
   const visible=renderedCatalogue?.actor===state.actor.id&&renderedCatalogue?.generation===state.generation;
   if(!visible||renderedCatalogue.catalogue!==state.catalogue){
     main.classList.toggle('thot-workspace',true);main.innerHTML=thotUI.catalogueHTML(state.catalogue,{failed:state.workspaceError,catalogueError:state.catalogueError});
@@ -363,7 +373,7 @@ function renderCatalogue(){
     const fetchStatus=main.querySelector('[data-catalogue-fetch-status]');if(fetchStatus&&!state.catalogue)fetchStatus.textContent=state.catalogueError?'Listings could not load. Use Refresh to try again.':'Loading listings…';
   }
   const summary=document.querySelector('#wallet-summary');if(summary){summary.innerHTML=`<span><small>Wallet balance</small><strong>${state.workspaceError?'Balance unavailable':'Loading balance…'}</strong></span>`;summary.hidden=false;}
-  document.title='Offers · thot market';document.querySelectorAll('[data-view].nav-item').forEach(button=>button.classList.toggle('active',button.dataset.view==='market'));
+  document.title='Buy traces · thot market';document.querySelectorAll('[data-view].nav-item').forEach(button=>button.classList.toggle('active',button.dataset.view==='market'));
   rememberView();scrollMarketFragment();return true;
 }
 async function refresh() {
@@ -385,9 +395,19 @@ async function refreshWorkspace() {
   state.money=moneyCapabilities;state.thot=thotWorkspace;state.thotSampling=sampling;state.thotDisputes=disputes;
   if (!state.loaded&&!renderCatalogue()) loading();
   if (role === 'user') {
-    const [traces, candidates, earnings, inferenceCapabilities, inferenceRequests, contributorPortfolio, traceLibrary] = await Promise.all([api('/v1/traces'), api('/v1/candidates'), api('/v1/earnings'), api('/v1/inference/capabilities'), api('/v1/inference/requests'), api('/v1/contributor/portfolio'), api('/v1/contributor/library'+libraryUI.queryString())]);
-    if (generation !== state.generation) return;
-    Object.assign(state, { traces, candidates, earnings, inferenceCapabilities, inferenceRequests, contributorPortfolio, traceLibrary });
+    if(isThotMode(thotWorkspace?.capabilities.mode)){
+      // The buyer and earnings views need the guarded wallet snapshot, not a
+      // contributor's private history or the separate legacy demo ledgers.
+      if(state.view==='vault'||marketFragment()==='#thot-contribute'){
+        const [traces,contributorPortfolio,traceLibrary]=await Promise.all([api('/v1/traces'),api('/v1/contributor/portfolio'),api('/v1/contributor/library'+libraryUI.queryString())]);
+        if(generation!==state.generation)return;
+        Object.assign(state,{traces,contributorPortfolio,traceLibrary,contributorLoaded:true});
+      }
+    }else{
+      const [traces, candidates, earnings, inferenceCapabilities, inferenceRequests, contributorPortfolio, traceLibrary] = await Promise.all([api('/v1/traces'), api('/v1/candidates'), api('/v1/earnings'), api('/v1/inference/capabilities'), api('/v1/inference/requests'), api('/v1/contributor/portfolio'), api('/v1/contributor/library'+libraryUI.queryString())]);
+      if (generation !== state.generation) return;
+      Object.assign(state, { traces, candidates, earnings, inferenceCapabilities, inferenceRequests, contributorPortfolio, traceLibrary, contributorLoaded:true });
+    }
     earningsUpdatedAt=new Date();earningsRefreshError=false;
   } else if(role==='operator_security'){state.traceExplorer=await api('/v1/operator/trace-explorer');
   } else if (role === 'buyer_admin'||role==='buyer_member') {
@@ -395,7 +415,7 @@ async function refreshWorkspace() {
     if (generation !== state.generation) return; state.mandates = mandates;
   }
   if(state.view==='explorer'&&state.canExplore)state.traceExplorer=await api('/v1/operator/trace-explorer');
-  state.loaded = true;state.workspaceError=false; document.querySelector('#notice').hidden = true; render(); libraryUI.ready(); agentCaptureUI.authReady(); robinhoodSetupUI.authReady();
+  state.loaded = true;state.workspaceError=false; document.querySelector('#notice').hidden = true; render(); libraryUI.ready(); agentCaptureUI.authReady(); robinhoodSetupUI.authReady(); historySyncUI.authReady();
   }catch(error){if(generation===state.generation){state.workspaceError=true;renderCatalogue();}throw error;}
 }
 function heading(eyebrow, title, description, action = '') { return `<section class="page-heading"><div><p class="eyebrow">${escape(eyebrow)}</p><h1>${escape(title)}</h1><p>${escape(description)}</p></div>${action}</section>`; }
@@ -539,16 +559,17 @@ function render() {
   const catalogueReading=renderedCatalogue&&state.loaded&&state.view==='market'?captureCatalogueReading():null;renderedCatalogue=null;
   const walletSummary=document.querySelector('#wallet-summary');if(walletSummary){walletSummary.innerHTML=state.loaded&&!signingOut?thotUI.walletSummaryHTML():'';walletSummary.hidden=!walletSummary.innerHTML;}
   if (!state.loaded || !state.actor || (!state.token && !['clerk','wallet_siwe'].includes(authMode)) || signingOut) { stopEarningsRefresh(); return; }
+  document.querySelector('.journey-menu')?.removeAttribute?.('hidden');
   rememberView();schedulePurchasesRefresh();
   main.classList.toggle('thot-workspace',(isThotMode(state.thot?.capabilities.mode)&&['thot','market','earnings','vault'].includes(state.view))||(isThotMode(state.thotSampling?.capabilities.mode)&&state.view==='operator'));
   const operationsLink=document.querySelector('#operations-console-link');if(operationsLink)operationsLink.hidden=state.role!=='operator_security';
   const treasuryNav=document.querySelector('[data-view=operator].nav-item');if(treasuryNav)treasuryNav.hidden=!(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer);
-  document.title=({vault:'Your traces',market:'Offers',earnings:'Earnings',thot:'THOT',operator:'Treasury',receipts:'Receipts',explorer:'Trace explorer',referrals:'Referrals',leaderboard:'Market activity'}[state.view]??'Your workspace')+' · thot market';
+  document.title=({vault:'My work',market:'Buy traces',earnings:'Earnings',thot:'THOT',operator:'Treasury',receipts:'Receipts',explorer:'Trace explorer',referrals:'Referrals',leaderboard:'Market activity'}[state.view]??'Your workspace')+' · thot market';
   for(const view of ['referrals','leaderboard']){const nav=document.querySelector(`[data-view=${view}].nav-item`);if(nav)nav.hidden=!isThotMode(state.thot?.capabilities.mode);}
   scheduleEarningsRefresh();
   const explorerNav=document.querySelector('#trace-explorer-nav');if(explorerNav){explorerNav.hidden=!(state.canExplore||state.role==='operator_security');explorerNav.classList.toggle('active',state.view==='explorer');}
   if(state.view==='explorer'){main.innerHTML=(state.canExplore||state.role==='operator_security')?traceExplorerUI.sectionHTML():empty('Trace explorer unavailable.','This account does not have permission to view operational inventory.');return;}
-  document.querySelectorAll('[data-view].nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === state.view));
+  document.querySelectorAll('[data-view].nav-item').forEach(button => {const active=button.dataset.view===state.view||(button.dataset.view==='vault'&&['earnings','receipts'].includes(state.view));button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
   if(['referrals','leaderboard'].includes(state.view)&&isThotMode(state.thot?.capabilities.mode)){
     main.innerHTML=state.view==='referrals'?heading('YOUR NETWORK','Referrals','Follow attributed contributors, finalized referral credits and payments.')+analyticsUI.referralsHTML():analyticsUI.leaderboardHTML();
     void safely(()=>analyticsUI.ready());return;
@@ -558,7 +579,7 @@ function render() {
     main.innerHTML = heading('SCOPED WORKSPACES', 'Your role keeps records separate.', `You are viewing as ${roleName(state.role)}. Private traces, earnings and contributor receipts belong to the contributor workspace.`) + `<div class="panel">${authMode==='development'?empty('Open the contributor workspace.', 'Changing the local role selects the separate development account for that role.', '<button class="button" data-action="contributor-role">Switch to contributor</button>'):empty('A contributor identity is required.', 'Sign out and connect an authorized contributor identity to access its private workspace.')}</div>`; return;
   }
   main.innerHTML = state.view==='vault'&&state.role==='user'
-    ? contributorUI.sectionHTML()+openrouterUI.intro()+thotUI.valuationsHTML()+(isThotMode(state.thot?.capabilities.mode)?analyticsUI.portfolioHTML():'')+(authMode==='development'&&!isThotMode(state.thot?.capabilities.mode)?`<details class="technical-details"><summary>Developer demo tools</summary>${vault()}</details>`:'')
+    ? contributorUI.sectionHTML()+openrouterUI.intro()+(authMode==='development'&&!isThotMode(state.thot?.capabilities.mode)?`<details class="technical-details"><summary>Developer demo tools</summary>${vault()}</details>`:'')
     : ({ vault, market, earnings, receipts, operator, thot }[state.view] ?? vault)();
   if(state.view==='earnings'&&isThotMode(state.thot?.capabilities.mode))main.insertAdjacentHTML('beforeend',analyticsUI.referralsHTML());
   if(isThotMode(state.thot?.capabilities.mode))void safely(()=>analyticsUI.ready());
@@ -617,6 +638,8 @@ function download(value, filename) {
 }
 async function runAction(action, button) {
   if(state.actor&&!state.loaded&&!['refresh','thot-refresh','thot-copy-seller-wallet','identity-sign-out','dismiss-notice','close-dialog'].includes(action))throw Error('Account details are still loading. Wait for them or use Refresh to retry.');
+  if(await historySyncUI.handle(action,button))return;
+  if(await journeyUI.handle(action,button))return;
   if(await analyticsUI.handle(action,button))return;
   if(action==='open-trace-explorer'){
     state.traceExplorer=await api('/v1/operator/trace-explorer');state.view='explorer';render();return;
@@ -729,15 +752,18 @@ async function safely(task, button) {
 document.addEventListener('click', event => {
   const button = event.target.closest('button'); if (!button || button.disabled) return;
   if (button.dataset.view) {
+    if(dialog.open)dialog.close();
+    const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;
     state.view = button.dataset.view;purchasesAttempts=0;
     if(state.view!=='market'&&marketFragment()){window.history?.replaceState(window.history.state,'',window.location.pathname+window.location.search);scrolledMarketFragment=null;}
+    if(state.actor&&state.role==='user'&&state.view==='vault'&&!state.contributorLoaded){loading();void safely(refresh);return;}
     if(!state.loaded&&state.actor){if(state.view==='market')void loadCatalogue();else loading();}
     render(); return;
   }
-  if (button.dataset.action) void safely(() => runAction(button.dataset.action, button), button);
+  if (button.dataset.action) {const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;void safely(() => runAction(button.dataset.action, button), button);}
 });
 // The brand returns to the public homepage; app navigation preserves its own state.
-document.querySelector('#role').addEventListener('change', event => { const select = event.target; select.disabled = true; void safely(() => session(select.value)).finally(() => { select.disabled = false; }); });
+document.querySelector('#role').addEventListener('change', event => { const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;const select = event.target; select.disabled = true; void safely(() => session(select.value)).finally(() => { select.disabled = false; }); });
 document.addEventListener('input',event=>{thotUI.onInput?.(event.target);});
 document.addEventListener('change', event => {
   if(agentCaptureUI.onChange(event.target))return;
@@ -763,7 +789,7 @@ document.addEventListener('submit', event => {
     dialog.close(); await refresh(); toast(result.duplicate ? 'This conversation already exists in your vault. No duplicate trace was created. No duplicate trace was created.' : 'Source bundle imported. Inspect the returned claims and rights assessment.');
   }, button);
 });
-dialog.addEventListener('close', () => { activePreview = null; activeInference = null; contributorUI.resetPreview(); agentCaptureUI.onDialogClose(); });
+dialog.addEventListener('close', () => { activePreview = null; activeInference = null; contributorUI.resetPreview(); agentCaptureUI.onDialogClose(); historySyncUI.onDialogClose(); });
 function invalidatePrivateState(){
   clearWalletSummary();
   analyticsUI.reset();
@@ -772,11 +798,13 @@ function invalidatePrivateState(){
   stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;earningsUpdatedAt=null;earningsRefreshError=false;
   openrouterUI.reset();
   agentCaptureUI.authLost();
+  historySyncUI.authLost();
   robinhoodSetupUI.authLost();
   const accountControl=document.querySelector('#clerk-user-button');
   if(accountControl){clerkAuth?.unmountUserButton(accountControl);accountControl.remove();}
-  contributorUI.reset();state.generation++;state.token=null;state.actor=null;state.canExplore=false;state.traceExplorer=null;state.loaded=false;state.traces=[];state.candidates=[];state.mandates=[];state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.inferenceRequests=[];
+  contributorUI.reset();state.generation++;state.token=null;state.actor=null;state.canExplore=false;state.traceExplorer=null;state.loaded=false;state.contributorLoaded=false;state.traces=[];state.candidates=[];state.mandates=[];state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.inferenceRequests=[];
   if(dialog.open)dialog.close();
+  document.querySelector('#dialog-content').innerHTML='';thotUI.clearPrivateReview?.();
 }
 async function loadPrivyAuth() {
   if(privyAuth)return privyAuth;
@@ -871,14 +899,15 @@ function showIdentityLogin(message='Use a short-lived access token from your con
   const explorerNav=document.querySelector('#trace-explorer-nav');if(explorerNav)explorerNav.hidden=true;
   const treasuryNav=document.querySelector('[data-view=operator].nav-item');if(treasuryNav)treasuryNav.hidden=true;
   invalidatePrivateState();document.querySelector('#role').disabled=true;
+  const menu=document.querySelector('.journey-menu');if(menu){menu.open=false;menu.hidden=true;}
   document.querySelector('.local-tools').hidden=true;
   if(authMode==='wallet_siwe'){
     if(privyConfig){
       const feedback=['Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.','Connect your EVM wallet to continue.','Connect your wallet to continue.'].includes(message)?'':message;
       const status=privyLoginPhase||feedback;
-      main.innerHTML=`<section class="page-heading"><div><p class="eyebrow">YOUR PRIVATE WORKSPACE</p><h1>Your work. Your wallet.</h1></div></section><section aria-label="Sign in"><button class="button" data-privy-login${privyLoginBusy?' disabled aria-busy="true"':''}>${privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in'}</button><p id="privy-login-status" role="status" aria-live="polite"${status?'':' hidden'}>${escape(status)}</p><div id="privy-wallet-choices"></div></section>`;
+      main.innerHTML=welcomeHTML(`<section aria-label="Sign in"><button class="button" data-privy-login${privyLoginBusy?' disabled aria-busy="true"':''}>${privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in'}</button><p id="privy-login-status" role="status" aria-live="polite"${status?'':' hidden'}>${escape(status)}</p><div id="privy-wallet-choices"></div></section>`);
     }else{
-      main.innerHTML=heading('YOUR PRIVATE WORKSPACE','Sign in with your wallet.',message==='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'?'Connect an EVM wallet and sign a one-time login message.':message)+`<section class="panel audit-card"><h2>Your wallet is your account.</h2><p>Sign-in does not approve a token transfer or authorize a trace sale.</p><div class="actions"><button class="button secondary" data-wallet-login="metamask">MetaMask</button><button class="button secondary" data-wallet-login="phantom">Phantom · EVM</button><button class="button secondary" data-wallet-login="injected">Other EVM wallet</button></div></section>`;
+      main.innerHTML=welcomeHTML(heading('YOUR PRIVATE WORKSPACE','Sign in with your wallet.',message==='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'?'Connect an EVM wallet and sign a one-time login message.':message)+`<section class="panel audit-card"><h2>Your wallet is your account.</h2><p>Sign-in does not approve a token transfer or authorize a trace sale.</p><div class="actions"><button class="button secondary" data-wallet-login="metamask">MetaMask</button><button class="button secondary" data-wallet-login="phantom">Phantom · EVM</button><button class="button secondary" data-wallet-login="injected">Other EVM wallet</button></div></section>`);
     }
     const privyButton=main.querySelector('[data-privy-login]');if(privyButton)privyButton.addEventListener('click',()=>void safely(openPrivyLogin));
     privyAuth?.mount(document.querySelector('#privy-wallet-choices'));
@@ -913,8 +942,9 @@ async function acceptClerkSession({actor,permissions}){
   state.thot=null;state.thotSampling=null;state.thotDisputes=null;state.money=null;resetCatalogue();
   stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;earningsUpdatedAt=null;earningsRefreshError=false;
   signingOut=false;
-  contributorUI.reset();state.generation++;state.loaded=false;state.token=null;state.actor=actor;state.role=actor.role;state.canExplore=permissions?.trace_explorer===true;
+  contributorUI.reset();state.generation++;state.loaded=false;state.contributorLoaded=false;state.token=null;state.actor=actor;state.role=actor.role;state.canExplore=permissions?.trace_explorer===true;
   state.view=restoredView();
+  const accountMenu=document.querySelector('.journey-menu');if(accountMenu)accountMenu.hidden=false;
   if(dialog.open)dialog.close();
   document.querySelector('#role').innerHTML=`<option>${escape(state.role.replaceAll('_',' '))}</option>`;
   document.querySelector('#role').disabled=true;document.querySelector('.local-tools').hidden=true;
@@ -950,7 +980,7 @@ async function startAuthentication(){
 }
 void safely(startAuthentication);
 
-window.addEventListener('hashchange',()=>{acceptMarketFragment();void libraryUI.acceptFragment();agentCaptureUI.acceptFragment();robinhoodSetupUI.acceptFragment();});
+window.addEventListener('hashchange',()=>{acceptMarketFragment();void libraryUI.acceptFragment();agentCaptureUI.acceptFragment();robinhoodSetupUI.acceptFragment();historySyncUI.acceptFragment?.();});
 document.addEventListener('visibilitychange',()=>{scheduleEarningsRefresh();schedulePurchasesRefresh();});
 window.addEventListener('pagehide',()=>{stopEarningsRefresh();stopPurchasesRefresh();});
 
