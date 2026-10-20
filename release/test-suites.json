@@ -161,6 +161,8 @@
         "tests/private-image-bootstrap.test.mjs",
         "tests/private-image-package.test.mjs",
         "tests/private-anvil-automine.test.mjs",
+        "tests/hosted-startup-diagnostic.test.mjs",
+        "tests/hosted-storage-metadata.test.mjs",
         "tests/thot-build-snapshot.test.mjs",
         "tests/cvm-image-provenance.test.mjs",
         "tests/thot-cli-package.test.mjs",
