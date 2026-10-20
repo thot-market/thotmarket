@@ -1,4 +1,5 @@
 import {renderOpenRouterUsage} from '../apps/dashboard/openrouter-usage.js';
+import {feePolicyCopy} from '../apps/dashboard/fee-policy-ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -36,7 +37,7 @@ function fixture(overrides = {}) {
     if (overrides.status) return overrides.status(path, options); return structuredClone(status);
   };
   const escape = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-  const context = { renderOpenRouterUsage, location: { origin: 'https://thot.example.test' }, navigator: { clipboard: { async writeText(value) { clipboard.push(value); } } }, Date, Error, console: { log() { throw Error('credentials must never be logged'); } }, globalThis: {} };
+  const context = { renderOpenRouterUsage, feePolicyCopy, location: { origin: 'https://thot.example.test' }, navigator: { clipboard: { async writeText(value) { clipboard.push(value); } } }, Date, Error, console: { log() { throw Error('credentials must never be logged'); } }, globalThis: {} };
   for (const storage of ['localStorage', 'sessionStorage']) Object.defineProperty(context, storage, { get() { throw Error('credentials must never enter browser persistence'); } });
   runInNewContext(source.replace(/^import .*;\r?\n/gm,'').replace('export function createOpenRouterUI', 'function createOpenRouterUI') + '\nglobalThis.factory = createOpenRouterUI;', context);
   const ui = context.globalThis.factory({ state, api, openDialog, dialog, escape, toast: value => messages.push(value), refresh: async () => {}, getProvider:()=>overrides.provider });
@@ -235,4 +236,20 @@ test('stream-capable OpenRouter defaults to private recording without a sale sig
  assert.equal(sent.options.body.recording_consent,true);assert.equal(sent.options.body.sale_policy_id,undefined);assert.equal(sent.options.body.rights_confirmed,undefined);
  assert.equal(a.calls.some(c=>c.path==='/v1/thot/streams/prepare'),false);
  assert.doesNotMatch(a.dialogs.at(-1).html,/automatically offered under the terms you just signed/);
+});
+
+test('OpenRouter automatic-sale terms show the configured tariff without changing accepted policy controls',async()=>{
+ for(const economics of [
+  {policy:'percentage/1',fee_bps:100,service_fee:'10000000000000000',direct_cost:'0'},
+  {policy:'quoted-cost/1',fee_bps:null,service_fee:'40000000000000000',direct_cost:'10000000000000000'},
+ ]){
+  const a=fixture();a.state.thot={capabilities:{stream_sales:true},account:{economics},holder_rewards:{mode:'upfront-discount',policy:{}}};
+  await a.ui.handle('openrouter-open');const html=a.dialogs.at(-1).html;
+  if(economics.policy==='percentage/1'){assert.match(html,/1% of the listed trace price/);assert.doesNotMatch(html,/0\.0100 THOT per purchase/);}
+  else assert.match(html,/0\.0400 THOT per purchase, including 0\.0100 THOT/);
+  assert.match(html,/funding quote fixes the exact buyer payment and seller proceeds/);
+  assert.match(html,/Estimates do not guarantee a sale or payout/);
+  assert.equal(a.fields.get('#openrouter-auto-sales').checked,false);
+  assert.equal(a.calls.some(call=>call.options.method),false);
+ }
 });

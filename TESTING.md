@@ -9,6 +9,7 @@ not silently add a provider call or operator task to CI.
 | --- | --- |
 | `pnpm build` | Strict types and browser authentication bundle |
 | `pnpm test` | Authentication, wallet/consent UI, privacy, storage/migrations, capture and recovery, log hygiene |
+| `pnpm test:qc` | Local quality engine, synthetic judge adapter, owner API/races and standalone CLI (also included in unit) |
 | `pnpm test:contracts` | Local contracts, governance, reserve, accounting and paid-delivery integration |
 | `pnpm test:evidence` | Genuine historical DCAP fixtures, portable verification, evidence tampering and synthetic Python trade verification, capture and account linking |
 | `pnpm test:browser` | Current THOT purchase, licensed delivery, recovery and payout in both fee modes, plus the older AtomicTraceMarket journey |
@@ -35,6 +36,13 @@ quoted-cost and percentage-fee fixtures. To run just one, use
 `pnpm test:thot:browser` or `pnpm test:thot:browser:percentage`. See
 [the local purchase demo](docs/local-purchase-demo.md) for the evidence format and
 limits: local time acceleration does not prove a hosted payout deadline elapsed.
+
+The focused QC browser flow needs Chromium but no Anvil:
+`node --test tests/trace-auto-qc-browser.test.mjs`. It uses synthetic records and a
+development identity; outbound requests are blocked. See
+[the QC contract](docs/reusable-qc.md) for the scope and provider-test limitations.
+Use a disk-backed `TMPDIR` if the system temporary filesystem has less than the
+vault's required free-space reserve; do not disable the storage guard for tests.
 
 For evidence tests, create three isolated Python environments, using Python 3.12:
 

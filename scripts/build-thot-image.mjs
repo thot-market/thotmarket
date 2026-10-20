@@ -20,6 +20,11 @@ const runtimeScripts = new Set(['build-privy-auth.mjs', 'cvm-prestart.ts', 'capt
   'robinhood-browser-link.mjs', 'thot-link.ts', 'thot-capture.ts', 'thot-setup.ts', 'thot-history.ts',
   'install-capture-helper.ts', 'migrate-vault-objects.ts', 'storage-backup.ts', 'storage-restore.ts', 'storage-orphans.ts', 'tee-capture-server.ts']);
 const privateAnvilScripts = new Set(['private-anvil-app.mjs', 'private-anvil-bootstrap.mjs', 'private-anvil-fund.mjs', 'private-anvil-rpc.mjs']);
+// QC is a standalone package, so its runtime is outside the usual src/ tree.
+// Keep the adapted implementations and their required attribution together.
+const qcRuntime = new Set(['index.ts', 'canonical.ts', 'types.ts', 'semantic.ts',
+  'vendor/data-juicer-tool-result.ts', 'vendor/openjudge-accuracy.ts',
+  'vendor/data-juicer.LICENSE', 'vendor/openjudge.LICENSE', 'vendor/NOTICE', 'vendor/sources.json']);
 const profiles = new Set(['public', 'private-anvil']);
 
 function permitted(path, profile = 'public') {
@@ -34,6 +39,7 @@ function permitted(path, profile = 'public') {
   if (/^apps\/dashboard\/[^/]+\.(?:js|html|css)$/.test(path)) return true;
   if (/^apps\/site\/[^/]+\.(?:ts|js|html|css)$/.test(path)) return true;
   if (/^apps\/site\/assets\/(?:[^/]+\.(?:png|jpg|jpeg|webp|svg)|fonts\/[^/]+\.(?:woff2|txt))$/.test(path)) return true;
+  if (path.startsWith('packages/qc/')) return qcRuntime.has(path.slice('packages/qc/'.length));
   if (/^packages\/[a-z0-9-]+\/src\/(?:[a-z0-9_-]+\/)*[^/]+\.(?:ts|mjs|js)$/.test(path)) return true;
   if (/^packages\/chain\/[^/]+\.ts$/.test(path)) return true;
   if (/^packages\/provenance\/(?:scripts\/[^/]+\.py|vendor\/[^/]+\.ts)$/.test(path)) return true;
@@ -57,7 +63,7 @@ async function readRegular(root, path) {
 }
 
 function screenSource(path, bytes) {
-  if (!/\.(?:ts|mjs|js|py|sh|json|yaml|yml|sql|html|css|txt)$/.test(path) && !fixed.has(path)) return;
+  if (!/\.(?:ts|mjs|js|py|sh|json|yaml|yml|sql|html|css|txt)$/.test(path) && !fixed.has(path) && !path.startsWith('packages/qc/')) return;
   const text = bytes.toString('utf8');
   fail(!/-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|\bsk_(?:live|test)_[A-Za-z0-9_-]{24,}|\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}|\bprivy_app_secret_[A-Za-z0-9_-]{24,}|\bgh[pousr]_[A-Za-z0-9]{30,}|\b(?:private_key|api_key|secret_key)\s*[:=]\s*["'][A-Za-z0-9_\/-]{32,}["']/i.test(text), 'POSSIBLE_SECRET_IN_BUILD_SOURCE:' + path);
 }
@@ -78,8 +84,10 @@ export async function createThotBuildSnapshot({sourceRoot = REPO, outputDir, ver
       .split('\0').filter(path => path && !deleted.has(path) && permitted(path, profile)))].sort();
   };
   const paths = sourcePaths();
+  const requiresQc = paths.includes('packages/market/src/trace-qc.ts') || paths.some(path => path.startsWith('packages/qc/'));
   for (const required of ['Dockerfile', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'apps/api/server.ts', 'scripts/cvm-prestart.ts',
     ...(profile === 'private-anvil' ? [...privateAnvilScripts].map(name => 'scripts/' + name) : []),
+    ...(requiresQc ? [...qcRuntime].map(path => 'packages/qc/' + path) : []),
     'contracts/package.json', 'contracts/pnpm-lock.yaml',
     'contracts/scripts/thot-local-fixture.mjs', 'contracts/src/ThotMarket.sol',
     'deploy/thot-config.trade-candidate.example.json']) fail(paths.includes(required), 'REQUIRED_BUILD_SOURCE_MISSING:' + required);

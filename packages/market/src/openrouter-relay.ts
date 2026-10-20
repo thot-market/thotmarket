@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { canonicalHash, uuidv7, validateProvenanceReceipt } from '../../protocol/src/index.ts';
 import { ensure, type Document, type Transaction } from '../../storage/src/index.ts';
 import type { Actor, ThotService } from './service.ts';
+import { enqueueTraceQc } from './trace-qc-state.ts';
 
 export const OPENROUTER_RECORDING_NOTICE_VERSION='thot.openrouter-recording/2';
 export const OPENROUTER_RECORDING_NOTICE='Requests sent through this relay use your OpenRouter key and are billed to your OpenRouter account. THOT stores their request and response content privately, including submitted conversation history and tool calls. Recording is automatic after this consent. When you also sign a connection-level sale policy, subsequent completed traces are automatically offered under that policy after content filtering. Without that separate signed policy they remain private. Recording alone does not grant rewards or prove human authorship. Disconnect revokes this relay token and removes the saved provider key. Existing recordings follow your vault retention and deletion settings. Cancellation may still incur provider charges. Disable automatic client retries or send an Idempotency-Key to avoid duplicate billing.';
@@ -172,7 +173,7 @@ export class OpenRouterRelay {
       catch{
         // Never repeat a billed request because a projection or vault write failed.
         // Preserve whatever encrypted source bytes are durable and fail closed.
-        await this.service.db.transaction(async tx=>{const r=await tx.get('thot_records',state.request_id);if(r.status==='INFLIGHT'){r.status='INTERRUPTED';r.failure_code='OPENROUTER_CAPTURE_FINALIZATION_FAILED';r.finished_at=this.service.now();await tx.update('thot_records',r.id,r);const trace=await tx.get('traces',r.trace_id,r.owner_id);if(!trace.deleted){trace.projection={status:'UNREADABLE'};trace.capture_state='INTERRUPTED';await tx.update('traces',r.trace_id,trace);}}}).catch(()=>{});return false;
+        await this.service.db.transaction(async tx=>{const r=await tx.get('thot_records',state.request_id);if(r.status==='INFLIGHT'){r.status='INTERRUPTED';r.failure_code='OPENROUTER_CAPTURE_FINALIZATION_FAILED';r.finished_at=this.service.now();await tx.update('thot_records',r.id,r);const trace=await tx.get('traces',r.trace_id,r.owner_id);if(!trace.deleted){trace.projection={status:'UNREADABLE'};trace.capture_state='INTERRUPTED';await tx.update('traces',r.trace_id,trace);await enqueueTraceQc(tx,trace,this.service.now());}}}).catch(()=>{});return false;
       }finally{this.active.delete(state.request_id);finishActive();}
     };
     let upstream:Response;
@@ -258,6 +259,7 @@ export class OpenRouterRelay {
       r.stored_bytes+=Buffer.byteLength(JSON.stringify(content));
       if(response?.usage){const usage=response.usage;r.usage=Object.fromEntries(['prompt_tokens','completion_tokens','total_tokens','cost'].filter(k=>typeof usage[k]==='number'&&Number.isFinite(usage[k])&&usage[k]>=0).map(k=>[k,usage[k]]));}
       await tx.update('traces',r.trace_id,trace);
+      await enqueueTraceQc(tx,trace,this.service.now());
     }
     await tx.update('thot_records',id,r);await tx.audit(r.owner_id,'OpenRouterRequestFinished',{request_id:id,trace_id:r.trace_id,status});
   });}
@@ -301,6 +303,7 @@ export class OpenRouterRelay {
           t.capture_summary??={exchanges:1,completed:1,interrupted:0};
           r.requested_model=request.model;r.returned_model=metadata.returned_model;r.provider_name=metadata.provider_name;r.model_metadata_version=1;
           await tx.update('traces',t.trace_id,t);await tx.update('thot_records',r.id,r);
+          await enqueueTraceQc(tx,t,this.service.now());
         });
       }catch{/* Missing/deleted private objects remain unknown; never call a provider to reconstruct them. */}
     }

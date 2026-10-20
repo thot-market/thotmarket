@@ -13,6 +13,7 @@ const prompt={model:'anthropic/claude-sonnet-4:exacto',messages:[{role:'user',co
 const completion=(content='PRIVATE ANSWER: use a bounded mutex.')=>({id:'gen-synthetic',object:'chat.completion',model:prompt.model,choices:[{index:0,message:{role:'assistant',content},finish_reason:'stop'}],usage:{prompt_tokens:10,completion_tokens:8,total_tokens:18,cost:0.001}});
 async function fixture(t:any,options:OpenRouterRelayOptions={}){const dir=await mkdtemp(join(tmpdir(),'thot-openrouter-'));const app=await createApplication({dataDir:dir,memory:true,openrouter:{enabled:true,transport:async()=>Response.json(completion()),...options}});t.after(async()=>{await app.close();await rm(dir,{recursive:true,force:true});});return app;}
 async function state(app:Awaited<ReturnType<typeof fixture>>,id:string){return app.db.transaction(tx=>tx.get('thot_records',id));}
+async function qualityJobs(app:Awaited<ReturnType<typeof fixture>>,traceId:string){return (await app.db.query("SELECT id,owner_id,payload,status FROM outbox_events WHERE event_type='CheckTraceQuality' AND payload->>'trace_id'=$1",[traceId])).rows;}
 
 test('setup requires one explicit recording consent, only returns relay token once, and defaults disabled',async t=>{
   const app=await fixture(t,{enabled:false});assert.equal(app.openrouter.capabilities().enabled,false);
@@ -35,11 +36,14 @@ test('fixed-origin BYOK keeps credentials and full content encrypted, saves priv
   const id=response.headers.get('x-thot-request-id')!,traceId=response.headers.get('x-thot-trace-id')!;
   const r=await state(app,id);assert.equal(r.status,'COMPLETED');
   const trace=await app.db.transaction(tx=>tx.get('traces',traceId));assert.equal(trace.display_status,'PRIVATE');assert.equal(trace.save_privately,true);
+  const jobs=await qualityJobs(app,traceId);assert.equal(jobs.length,1);assert.equal(jobs[0].owner_id,owner.id);assert.equal(jobs[0].payload.scope,'private');assert.equal(jobs[0].status,'pending');
+  assert.equal(jobs[0].payload.source_version,trace.quality_checks.private.source_version);
   const view=await app.library.item(owner,traceId);assert.match(view.content.turns[0].content,/PRIVATE QUESTION/);assert.match(view.content.turns[1].content,/PRIVATE ANSWER/);
   assert.equal((await app.db.query('SELECT count(*)::int n FROM sale_authorizations')).rows[0].n,0);
   const persisted=JSON.stringify((await app.db.query("SELECT document FROM thot_records UNION ALL SELECT document FROM traces UNION ALL SELECT document FROM trace_bundles UNION ALL SELECT payload FROM audit_events")).rows);
   for(const secret of [providerKey,key.token,'PRIVATE QUESTION','PRIVATE ANSWER'])assert.ok(!persisted.includes(secret),secret+' leaked into plaintext persistence');
   const again=await app.openrouter.relay(key.token,prompt,{idempotencyKey:'stable-request-001'});assert.equal(again.headers.get('x-thot-replayed'),'true');assert.deepEqual(await again.json(),completion());assert.equal(calls,1);
+  assert.deepEqual(await qualityJobs(app,traceId),jobs,'Provider replay does not queue a second QC job or grant release scope.');
   await assert.rejects(app.openrouter.relay(key.token,{...prompt,temperature:0.4},{idempotencyKey:'stable-request-001'}),/IDEMPOTENCY_CONFLICT/);assert.equal(calls,1);
 });
 
@@ -123,6 +127,7 @@ test('stream truncation and midstream errors retain partial history and never re
     let calls=0;const app=await fixture(t,{transport:async()=>{calls++;return new Response(wire,{headers:{'content-type':'text/event-stream'}});}}),key=await app.openrouter.connect(owner,consent());
     const response=await app.openrouter.relay(key.token,{...prompt,stream:true},{idempotencyKey:'partial-request-001'}),text=await response.text();assert.match(text,/OPENROUTER_OUTCOME_UNCERTAIN/);assert.ok(!text.includes(providerKey));
     const r=await state(app,response.headers.get('x-thot-request-id')!);assert.equal(r.status,'INTERRUPTED');assert.match((await app.library.item(owner,r.trace_id)).content.turns.at(-1).content,/Partial useful answer/);
+    const jobs=await qualityJobs(app,r.trace_id);assert.equal(jobs.length,1);assert.equal(jobs[0].payload.scope,'private');assert.equal(jobs[0].status,'pending');
     assert.equal((await app.openrouter.relay(key.token,{...prompt,stream:true},{idempotencyKey:'partial-request-001'})).status,409);assert.equal(calls,1);
   }
 });
@@ -166,6 +171,7 @@ test('a billed reply survives optional assessment failure; failed final vault wr
   const original=app.privacy.seal.bind(app.privacy);app.privacy.seal=async(owner,value)=>{if((value as any)?.turns?.length===2)throw Error('synthetic storage failure');return original(owner,value);};
   const failed=await app.openrouter.relay(key.token,prompt,{idempotencyKey:'final-vault-failed'});assert.equal(failed.status,409);assert.equal(failed.headers.get('x-should-retry'),'false');
   const r=await state(app,failed.headers.get('x-thot-request-id')!);assert.equal(r.status,'INTERRUPTED');assert.equal(r.failure_code,'OPENROUTER_CAPTURE_FINALIZATION_FAILED');assert.ok(r.parts.length);
+  const jobs=await qualityJobs(app,r.trace_id);assert.equal(jobs.length,1);assert.equal(jobs[0].payload.scope,'private');assert.equal(jobs[0].status,'pending');
   const retained=await app.privacy.open(owner.id,r.parts[0].ref);assert.match(Buffer.from(retained.bytes_b64,'base64').toString(),/PRIVATE ANSWER/);
   assert.equal((await app.openrouter.relay(key.token,prompt,{idempotencyKey:'final-vault-failed'})).status,409);assert.equal(calls,2);
 });
@@ -185,11 +191,16 @@ test('persistent restart recovers interrupted encrypted parts without resubmitti
   let app=await createApplication({dataDir:dir,openrouter:{enabled:true,transport}});t.after(async()=>{await app.close();await rm(dir,{recursive:true,force:true});});const key=await app.openrouter.connect(owner,consent());
   const good=await app.openrouter.relay(key.token,prompt,{idempotencyKey:'completed-before-restart'});await good.text();
   const interrupted=await app.openrouter.relay(key.token,prompt,{idempotencyKey:'crash-before-finalization'});await interrupted.text();const id=interrupted.headers.get('x-thot-request-id')!;
+  const beforeRecovery=await qualityJobs(app,interrupted.headers.get('x-thot-trace-id')!);assert.equal(beforeRecovery.length,1);
   // Model the crash boundary after durable source receipt but before final state
   // commits. This preserves real encrypted request/response objects from the relay.
   await app.db.transaction(async tx=>{const r=await tx.get('thot_records',id);r.status='INFLIGHT';delete r.finished_at;delete r.response_ref;await tx.update('thot_records',id,r);});
   await app.close();app=await createApplication({dataDir:dir,openrouter:{enabled:true,transport}});
   assert.equal(calls,2);const r=await state(app,id);assert.equal(r.status,'INTERRUPTED');assert.equal(r.failure_code,'OPENROUTER_RESTART_OUTCOME_UNCERTAIN');
+  const jobs=await qualityJobs(app,r.trace_id),trace=await app.db.transaction(tx=>tx.get('traces',r.trace_id,owner.id));
+  assert.equal(jobs.length,1);assert.equal(jobs[0].payload.scope,'private');assert.equal(jobs[0].status,'pending');
+  assert.notEqual(jobs[0].payload.source_version,beforeRecovery[0].payload.source_version,'Restart recovery replaces the superseded completion source.');
+  assert.equal(jobs[0].payload.source_version,trace.quality_checks.private.source_version);
   assert.match((await app.library.item(owner,r.trace_id)).content.turns.at(-1).content,/PRIVATE ANSWER/);
   const replay=await app.openrouter.relay(key.token,prompt,{idempotencyKey:'completed-before-restart'});assert.equal(replay.headers.get('x-thot-replayed'),'true');await replay.text();
   assert.equal((await app.openrouter.relay(key.token,prompt,{idempotencyKey:'crash-before-finalization'})).status,409);assert.equal(calls,2);

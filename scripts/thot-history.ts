@@ -9,6 +9,11 @@ import {connectHistory} from '../packages/capture/src/history-connect.ts';
 import {installHistorySchedule,removeHistorySchedule} from '../packages/capture/src/history-schedule.ts';
 
 const argv=process.argv.slice(2),command=argv.shift();
+const shellQuote=(value:string)=>"'"+value.replaceAll("'","'\"'\"'")+"'";
+// The packaged entry point dispatches "history"; source helpers do not. Keep
+// follow-up commands executable in a new shell even without the helper on PATH.
+const entry=resolve(process.argv[1]!),invoke=shellQuote(process.execPath)+' '+shellQuote(entry)+(/\/bin\/thot(?:\.js)?$/.test(entry.replaceAll('\\','/'))?' history':'');
+if(Number(process.versions.node.split('.')[0])<24){console.error('Node.js 24 or later is required. Install it, check node --version, then run the helper again.');process.exit(1);}
 if(!command||command==='--help'||command==='-h'){
   console.log(`Usage: thot-history connect --client claude|codex --source DIRECTORY [--source DIRECTORY] [--thot-url ORIGIN] [--backfill] [--time HH:MM] [--gate-config FILE]
        thot-history run|status|pause|resume|enable|disable|disconnect --id CONNECTION_ID
@@ -42,7 +47,7 @@ try{
       for(const source of state.sources)console.log('Local scope: '+source.path);
       await connectHistory(state,dir,{...(noOpen?{open:async()=>false}:{})});await pauseHistoryLocally(dir,false);
     });
-    console.log('Private history connection: '+state.id+'\nUpload once: thot-history run --id '+state.id+'\nEnable daily uploads: thot-history enable --id '+state.id+'\nNo upload or schedule has started yet.');
+    console.log('Private history connection: '+state.id+'\nUpload once: '+invoke+' run --id '+state.id+'\nCheck status: '+invoke+' status --id '+state.id+'\nEnable daily uploads: '+invoke+' enable --id '+state.id+'\nNo upload or schedule has started yet.');
   }else{
     if(sources.length||backfill||flags.has('--client')||flags.has('--time')||flags.has('--thot-url')||flags.has('--gate-config'))throw Error('HISTORY_CONNECT_FLAGS_ONLY');
     const dir=historyDirectory(root,flags.get('--id')??''),state=await loadHistoryState(dir);
@@ -67,4 +72,26 @@ try{
       console.log('Disconnected. Upload access and local reads are stopped. Saved vault histories are unchanged.'+(schedulerFailed?' Scheduler removal needs attention; any remaining job is blocked by the local pause marker.':''));
     }else throw Error('INVALID_HISTORY_COMMAND');
   }
-}catch(error){console.error(error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'HISTORY_COMMAND_FAILED');process.exitCode=1;}
+}catch(error){
+  const code=error instanceof Error&&/^[A-Z0-9_]{1,100}$/.test(error.message)?error.message:'HISTORY_COMMAND_FAILED';
+  const next:Record<string,string>={
+    HISTORY_ORIGIN_REQUIRED:'Connect with --thot-url https://YOUR-THOT-APP-ORIGIN, or rerun the installer with that origin.',
+    HISTORY_DIRECTORY_NOT_FOUND:'Choose an existing history directory with --source. Check its path and keep paths with spaces in quotes.',
+    HISTORY_DIRECTORY_REQUIRED_NO_SYMLINKS:'Choose a real directory with no symbolic links in its path.',
+    HISTORY_DIRECTORY_UNREADABLE:'Check that your account can read the selected history directory.',
+    INVALID_HISTORY_SOURCES:'Choose --client claude or codex and at least one existing directory with --source.',
+    INVALID_HISTORY_CONNECTION_ID:'Use the connection ID printed after browser approval.',
+    HISTORY_PAIRING_EXPIRED:'Run connect again, sign in to THOT and approve private history uploads while the helper is open.',
+    HISTORY_NETWORK_UNAVAILABLE:'Check your connection and the selected THOT site, then retry. Saved versions will not be duplicated.',
+    HISTORY_ALREADY_CONNECTED_DISCONNECT_FIRST:'Use status with the existing connection ID. Disconnect it before choosing new folders or backfill.',
+    HISTORY_SCHEDULER_UNAVAILABLE:'The daily schedule is not confirmed. Linux needs a working systemd user session (check systemctl --user status); macOS needs a logged-in user session. Use run to upload manually, then retry enable when the scheduler is available.',
+    HISTORY_SCHEDULER_PLATFORM_UNSUPPORTED:'Daily schedules are supported on Linux with systemd and macOS. Use run for a manual upload on this platform.',
+    HISTORY_RESUME_BEFORE_SCHEDULING:'Run resume with this connection ID, then retry enable.',
+    HISTORY_DEVICE_PAUSED:'Run resume with this connection ID before uploading.',
+    HISTORY_DEVICE_REVOKED:'This upload permission was revoked. Run connect and approve a new private-upload permission.',
+    HISTORY_DEVICE_EXPIRED:'This upload permission expired. Run connect and approve a new private-upload permission.',
+    HISTORY_DISCONNECTED:'Run connect and approve a new private-upload permission.',
+  };
+  console.error(code+(next[code]?'\nNext: '+next[code]:''));
+  process.exitCode=1;
+}

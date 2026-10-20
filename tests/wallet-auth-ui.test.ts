@@ -34,7 +34,7 @@ function fixture(overrides: any = {}) {
     if (path.endsWith('/challenge')) return response(challenge(JSON.parse(init.body).address, overrides.chainId ?? 46630));
     return response({ actor: { id: 'alice', role: 'user' }, wallet_address: state.address, chain_id: overrides.chainId ?? 46630, permissions: { contributor: true } });
   };
-  const ui = createWalletAuth({ window, fetch, chainId:overrides.chainId, rpcUrl:overrides.rpcUrl, additionalProviders:overrides.additionalProviders, requestTimeoutMs:overrides.requestTimeoutMs, providerTimeoutMs:overrides.providerTimeoutMs, additionalProvidersTimeoutMs:overrides.additionalProvidersTimeoutMs, onSession(value: any) { sessions.push(value); }, onIdentityChanging() { changes.push(true); }, onSignedOut() { signedOut.push(true); }, onError(error: Error) { errors.push(error); } });
+  const ui = createWalletAuth({ window, fetch, chainId:overrides.chainId, rpcUrl:overrides.rpcUrl, additionalProviders:overrides.additionalProviders, requestTimeoutMs:overrides.requestTimeoutMs, walletPromptTimeoutMs:overrides.walletPromptTimeoutMs, providerTimeoutMs:overrides.providerTimeoutMs, additionalProvidersTimeoutMs:overrides.additionalProvidersTimeoutMs, onSession(value: any) { sessions.push(value); }, onIdentityChanging() { changes.push(true); }, onSignedOut() { signedOut.push(true); }, onError(error: Error) { errors.push(error); } });
   return { ui, window, p, state, calls, sessions, changes, signedOut, errors };
 }
 
@@ -287,4 +287,15 @@ for (const action of ['signOut', 'destroy']) test(`queued early login is cancell
   await a.ui[action](); release(response({}, 401)); await restore;
   assert.equal(await login, false); assert.equal(a.sessions.length, 0);
   assert.equal(a.calls.filter(call => call.path.endsWith('/challenge')).length, 0); a.ui.destroy();
+});
+
+for(const method of ['personal_sign','eth_requestAccounts','wallet_switchEthereumChain'])test(`expired ${method} returns to retry and ignores its late completion`,async()=>{
+ const a=fixture({walletPromptTimeoutMs:15});let release!:(value:any)=>void;const original=a.p.request;
+ if(method==='wallet_switchEthereumChain')a.state.chain='0x1';
+ a.p.request=(input:any)=>input.method===method?new Promise(resolve=>{release=resolve;}):original(input);
+ assert.equal(await a.ui.signIn(),false);assert.match(a.errors.at(-1)!.message,/expired/);
+ assert.equal(a.sessions.length,0);assert.equal(a.calls.some(call=>call.path.endsWith('/verify')),false);
+ a.p.request=original;a.state.chain='0xb626';assert.equal(await a.ui.signIn(),true);
+ release(method==='personal_sign'?'0x'+'12'.repeat(65):method==='eth_requestAccounts'?[alice]:null);await tick();
+ assert.equal(a.sessions.length,1);assert.equal(a.calls.filter(call=>call.path.endsWith('/verify')).length,1);a.ui.destroy();
 });

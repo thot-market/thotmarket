@@ -115,7 +115,7 @@ test('symlinks, hardlinks, loose backup permissions, and unknown data entries fa
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('orphan dry-run preserves all data; outbox/idempotency/inference/capture/THOT refs protect objects; quarantine is recoverable', async () => {
+test('orphan dry-run preserves all data; outbox/idempotency/inference/capture/THOT/QC refs protect objects; quarantine is recoverable', async () => {
   const root = await temporary(); const dataDir = join(root, 'data');
   try {
     const a = await createApplication({ dataDir });
@@ -125,17 +125,21 @@ test('orphan dry-run preserves all data; outbox/idempotency/inference/capture/TH
     const inference = await a.privacy.seal(demoUser.id, { text: 'inference only' });
     const capture = await a.privacy.seal(demoUser.id, { text: 'capture maintenance reference only' });
     const thot = await a.privacy.seal(demoUser.id, { text: 'THOT release retained for existing offers after unlisting' });
+    const qcReport = await a.privacy.seal(demoUser.id, { text: 'Owner-only QC report' });
+    const qcReview = await a.privacy.seal(demoUser.id, { text: 'Owner-only QC reviewer assertion' });
     await a.db.query('INSERT INTO outbox_events(id,owner_id,event_type,payload) VALUES($1,$2,$3,$4)', ['storage-outbox', demoUser.id, 'storage-test', { nested: { object_ref: outbox } }]);
     await a.db.query('INSERT INTO idempotency_keys(actor_id,key,request_hash,response) VALUES($1,$2,$3,$4)', [demoUser.id, 'storage-idempotency', 'hash', { nested: [idempotency] }]);
     await a.db.query('INSERT INTO inference_requests(id,owner_id,document) VALUES($1,$2,$3)', ['storage-inference', demoUser.id, { status: 'COMPLETED', prompt_ref: inference, output_ref: inference }]);
     await a.db.query('INSERT INTO agent_captures(id,owner_id,document) VALUES($1,$2,$3)', ['storage-capture', demoUser.id, { capture_id: 'storage-capture', status: 'AWAITING_UPLOAD', maintenance_fixture_ref: capture }]);
     await a.db.query('INSERT INTO thot_records(id,owner_id,document) VALUES($1,$2,$3)', ['storage-thot', demoUser.id, { kind: 'listing', active: false, release_ref: thot }]);
+    await a.db.query('INSERT INTO trace_qc_runs(id,owner_id,document) VALUES($1,$2,$3)', ['storage-qc-report', demoUser.id, { trace_id: 'storage-trace', object_ref: qcReport }]);
+    await a.db.query('INSERT INTO trace_qc_reviews(id,owner_id,document) VALUES($1,$2,$3)', ['storage-qc-review', demoUser.id, { trace_id: 'storage-trace', run_id: 'storage-qc-report', object_ref: qcReview }]);
     await assert.rejects(inventoryOrphans({ dataDir }), /LEASE_HELD/); await a.close();
     await writeFile(join(dataDir, 'objects', 'malformed.sealed'), '{broken', { mode: 0o600 });
     await writeFile(join(dataDir, 'objects', 'unknown.file'), 'unknown data', { mode: 0o600 });
     const before = await readdir(join(dataDir, 'objects')); const inventory = await inventoryOrphans({ dataDir });
     assert.equal(inventory.mode, 'dry-run'); assert.deepEqual(await readdir(join(dataDir, 'objects')), before);
-    assert.deepEqual(inventory.candidates.map(v => v.objectId), [orphan.objectId]); assert.equal(inventory.referencedPresent, 5); assert.equal(inventory.review.length, 2);assert.equal(inventory.quarantineBlocked,false);
+    assert.deepEqual(inventory.candidates.map(v => v.objectId), [orphan.objectId]); assert.equal(inventory.referencedPresent, 7); assert.equal(inventory.review.length, 2);assert.equal(inventory.quarantineBlocked,false);
     const quarantine = await inventoryOrphans({ dataDir, quarantine: true });
     assert.deepEqual(quarantine.quarantined, [orphan.objectId]); assert(quarantine.quarantineId);
     assert.equal(await readFile(join(dataDir, 'objects', 'unknown.file'), 'utf8'), 'unknown data');
@@ -147,7 +151,25 @@ test('orphan dry-run preserves all data; outbox/idempotency/inference/capture/TH
     const vault = new VaultStore(join(dataDir, 'objects'), new LocalMasterKeyProvider(await readFile(join(dataDir, 'local-vault.key'))));
     assert.match((await vault.get({ ownerUserId: demoUser.id, objectId: orphan.objectId })).toString('utf8'), /UNREFERENCED SYNTHETIC/);
     assert.match((await vault.get({ ownerUserId: demoUser.id, objectId: thot.objectId })).toString('utf8'), /THOT release retained/);
+    assert.match((await vault.get({ ownerUserId: demoUser.id, objectId: qcReport.objectId })).toString('utf8'), /Owner-only QC report/);
+    assert.match((await vault.get({ ownerUserId: demoUser.id, objectId: qcReview.objectId })).toString('utf8'), /Owner-only QC reviewer assertion/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('malformed QC object or owner references block quarantine while preserving genuine orphan candidates',async()=>{
+  for(const table of ['trace_qc_runs','trace_qc_reviews']){
+    const root=await temporary(),dataDir=join(root,'data');
+    try{
+      const app=await createApplication({dataDir}),orphan=await app.privacy.seal(demoUser.id,{text:'Preserve while QC references require review'});
+      const object_ref=table==='trace_qc_runs'?{objectId:'unknown-report-reference'}:{ownerUserId:demoUser.id,objectId:'../unknown-review-reference'};
+      await app.db.query('INSERT INTO '+table+'(id,owner_id,document) VALUES($1,$2,$3)',['malformed-qc',demoUser.id,{trace_id:'synthetic-trace',object_ref}]);
+      await app.close();
+      const result=await inventoryOrphans({dataDir,quarantine:true});
+      assert.equal(result.quarantineBlocked,true);assert.deepEqual(result.quarantined,[]);
+      assert.deepEqual(result.candidates.map(candidate=>candidate.objectId),[orphan.objectId]);
+      assert((await lstat(join(dataDir,'objects',orphan.objectId+'.sealed'))).isFile());
+    }finally{await rm(root,{recursive:true,force:true});}
+  }
 });
 
 test('malformed THOT release references alone block all quarantine moves', async () => {

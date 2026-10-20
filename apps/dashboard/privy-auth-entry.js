@@ -11,7 +11,7 @@ const chains = {
 };
 
 /** Privy supplies wallets. Only our server's signed SIWE challenge opens the private vault. */
-export function createPrivyAuth({document, window, config, walletAuth, onError = () => {}}) {
+export function createPrivyAuth({document, window, config, walletAuth, onError = () => {}, onProgress = () => {}, walletSetupTimeoutMs = 120000}) {
   const publicConfig = validatePrivyConfig(config);
   const chain = {...chains[publicConfig.chainId], rpcUrls:{default:{http:[publicConfig.rpcUrl]}}};
   const providerConfig = {appId: publicConfig.appId, ...(publicConfig.clientId ? {clientId: publicConfig.clientId} : {})};
@@ -66,6 +66,12 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
   }
   const changed = () => {generation++; settleLoginOpening(); selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; void walletAuth.signOut().catch(fail);};
 
+  async function walletSetup(promise) {
+    let timer;
+    try{return await Promise.race([promise,new Promise((_,reject)=>{timer=window.setTimeout(()=>reject(new Error('Wallet connection expired. Close its old request and try sign-in again.')),walletSetupTimeoutMs);})]);}
+    finally{window.clearTimeout(timer);}
+  }
+
   async function useWallet(address) {
     if (signing || destroyed || !current?.ready || !current.walletsReady || !current.authenticated) return false;
     const wallet = selectPrivyWallet(current.user, current.wallets, address);
@@ -74,8 +80,8 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
     const check = () => {if (destroyed || epoch !== generation || current?.user?.id !== userId || !eligiblePrivyWallets(current.user, current.wallets).some(w => w.address.toLowerCase() === wallet.address.toLowerCase())) throw new Error('The Privy account changed. Sign in again.');};
     signing = true; openRequested = false; loginAttempt = false; renderTick();
     try {
-      await wallet.switchChain(chain.id); check();
-      const provider = await wallet.getEthereumProvider(); check();
+      await walletSetup(wallet.switchChain(chain.id)); check();
+      const provider = await walletSetup(wallet.getEthereumProvider()); check();
       const ok = await walletAuth.signInProvider(provider, wallet.address); check();
       if (ok) selectedAddress = wallet.address.toLowerCase();
       return ok;
@@ -86,7 +92,7 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
   function Bridge() {
     const auth = usePrivy(), walletState = useWallets(), modal = useModalStatus(), [, tick] = useState(0);
     const {createWallet} = useCreateWallet();
-    const {login} = useLogin({onComplete: ({loginAccount}) => {if (!loginAttempt || destroyed) return; loginAddress = loginAccount?.type === 'wallet' && loginAccount.chainType === 'ethereum' ? loginAccount.address : null; openRequested = true; tick(n => n + 1);}, onError: () => {openRequested = false; loginAttempt = false; settleLoginOpening(); fail(new Error('Privy login was cancelled or could not complete.'));}});
+    const {login} = useLogin({onComplete: ({loginAccount}) => {if (!loginAttempt || destroyed) return; loginAddress = loginAccount?.type === 'wallet' && loginAccount.chainType === 'ethereum' ? loginAccount.address : null; openRequested = true; onProgress('Wallet connected. Finishing sign-in…'); tick(n => n + 1);}, onError: () => {openRequested = false; loginAttempt = false; settleLoginOpening(); fail(new Error('Privy login was cancelled or could not complete.'));}});
     renderTick = () => {if (!destroyed) tick(n => n + 1);};
     useEffect(() => {
       current = {...auth, wallets: walletState.wallets, walletsReady: walletState.ready, login};
@@ -105,7 +111,10 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
       if (!auth.authenticated || walletState.ready) {window.clearTimeout(timer); readyResolve();}
       if (!walletState.ready) return;
       if (selectedAddress && !eligiblePrivyWallets(auth.user, walletState.wallets).some(w => w.address.toLowerCase() === selectedAddress)) changed();
-      if (openRequested && auth.authenticated && !signing) {
+      // Privy's success screen describes only its own connection. Finish that
+      // dialog before asking for the separate THOT ownership signature, so a
+      // rejection cannot sit underneath a conflicting connected-success screen.
+      if (openRequested && auth.authenticated && !modal.isOpen && !signing) {
         try {const selected = selectPrivyWallet(auth.user, walletState.wallets, loginAddress); if (selected) void useWallet(selected.address);}
         catch (error) {openRequested = false; fail(error);}
       }

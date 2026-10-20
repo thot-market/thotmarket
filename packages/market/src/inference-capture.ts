@@ -1,6 +1,7 @@
 import { canonicalHash, uuidv7, validateProvenanceReceipt } from '../../protocol/src/index.ts';
 import { ensure, type Document } from '../../storage/src/index.ts';
 import type { Actor, ThotService } from './service.ts';
+import { enqueueTraceQc } from './trace-qc-state.ts';
 
 const INPUT_KEYS=new Set(['rights_confirmed','model_output_licensed','category']);
 
@@ -59,13 +60,14 @@ export class InferencePortfolioCapture {
       await tx.insert('scrub_receipts',assessment.scrub.scrub_id,actor.id,{trace_id:traceId,receipt:assessment.scrub});
       await tx.insert('trace_features',traceId,actor.id,assessment.features);
       const eligible=['eligible','eligible_with_restrictions'].includes(assessment.rights.status);
-      await tx.insert('traces',traceId,actor.id,{trace_id:traceId,category,source_bundle_hash:sourceHash,source_bundle_id:bundleId,
+      const savedTrace=await tx.insert('traces',traceId,actor.id,{trace_id:traceId,category,source_bundle_hash:sourceHash,source_bundle_id:bundleId,
         provenance_id:receiptId,rights_id:assessment.rights.assessment_id,scrub_id:assessment.scrub.scrub_id,raw_ref:rawRef,scrub_ref:scrubRef,
         provenance_status:'OPERATOR_CAPTURED',rights_status:assessment.rights.status,display_status:eligible?'AVAILABLE':'REJECTED',
         credential_ids:[],outcome_ids:[],sale_count:0,deleted:false,created_at:capturedAt,observed_at:request.finished_at,observed_end:request.finished_at,
         retention_expires_at:this.service.future((this.service.config.privateRetentionDays??30)*86400),normalized_hash:canonicalHash(assessment.content),
         capture_preview:{title:'THOT inference conversation',source:'THOT inference',source_date:request.finished_at,size_bytes:Buffer.byteLength(JSON.stringify(trace)),turn_count:2,content_commitment:contentCommitment,privacy_flags:[]},
         inference_request_id:requestId,capture_consent_hash:consentHash});
+      await enqueueTraceQc(tx,savedTrace,this.service.now());
       request.capture_trace_id=traceId;request.capture_provenance_id=receiptId;request.capture_consent_hash=consentHash;
       await tx.update('inference_requests',requestId,request);
       await tx.audit(actor.id,'InferenceOutputCaptured',{request_id:requestId,trace_id:traceId,provenance_receipt_id:receiptId,content_commitment:contentCommitment});

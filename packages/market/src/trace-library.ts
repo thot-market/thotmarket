@@ -1,3 +1,4 @@
+import {qcCardSummary} from './trace-qc-state.ts';
 import {canonicalHash} from '../../protocol/src/index.ts';
 import {ensure,type Document,type Transaction} from '../../storage/src/index.ts';
 import type {Actor,ThotService} from './service.ts';
@@ -53,13 +54,13 @@ export class TraceLibrary {
       created_at:trace.created_at,updated_at:trace.updated_at??trace.created_at,session_at:preview.source_date??(trace.agent_capture_id?trace.observed_at:null),
       last_checkpoint_at:trace.last_checkpoint_at??null,retention_expires_at:trace.retention_expires_at,
       ...(trace.history_sync?{history_version:{version_id:trace.history_sync.version_id,...(trace.history_sync.previous_version_id?{previous_version_id:trace.history_sync.previous_version_id}:{})}}:{}),
-      sale_eligibility:traceSaleEligibility(trace,this.service.now()),evidence:trace.provenance_status,model_history:trace.model_history??[],capture_model:trace.capture_model??null,private:true,segments:1,native_conversations:trace.native_session_keys?.length??0};
+      quality_check:qcCardSummary([trace],this.service.now()),sale_eligibility:traceSaleEligibility(trace,this.service.now()),evidence:trace.provenance_status,model_history:trace.model_history??[],capture_model:trace.capture_model??null,private:true,segments:1,native_conversations:trace.native_session_keys?.length??0};
   }
   private async groupCard(group:Document[],captures:Map<string,Document>):Promise<Document>{
     const cards:Document[]=[];for(const trace of group)cards.push(await this.card(trace,captures.get(trace.agent_capture_id)));
     const first=cards[0],last=cards.at(-1)!;
     const projection=groupProjection(cards.map(c=>c.projection));
-    return {...first,...(group.length>1?{sale_eligibility:{status:'REVIEW_REQUIRED',reason_code:'GROUPED_RELEASE_REVIEW_REQUIRED',can_prepare_sale:false,can_list:false}}:{}),answer_preview:last.answer_preview,segments:group.length,updated_at:cards.map(c=>c.updated_at).sort().at(-1),
+    return {...first,quality_check:qcCardSummary(group,this.service.now()),...(group.length>1?{sale_eligibility:{status:'REVIEW_REQUIRED',reason_code:'GROUPED_RELEASE_REVIEW_REQUIRED',can_prepare_sale:false,can_list:false}}:{}),answer_preview:last.answer_preview,segments:group.length,updated_at:cards.map(c=>c.updated_at).sort().at(-1),
       last_checkpoint_at:cards.map(c=>c.last_checkpoint_at).filter(Boolean).sort().at(-1)??null,
       state:groupState(cards.map(c=>c.state)),
       projection,display_issues:cards.reduce((n,c)=>n+c.display_issues,0),exchanges:cards.reduce((n,c)=>n+c.exchanges,0),

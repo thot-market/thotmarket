@@ -14,7 +14,7 @@
   <header class="site-header wrap">
     <a class="brand" href="/"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
     <nav class="main-nav" aria-label="Main navigation"><a href="/#how-it-works">How it works</a><a href="/read">The idea</a><a href="/tutorial">Trade proof</a><a href="/mechanism" aria-current="page">Mechanism</a></nav>
-    <a class="button button-small" href="/app">Open app</a>
+    <a class="button button-small" href="https://app.thot.market/app" data-workspace-link>Open app</a>
   </header>
   <main class="reading-main wrap" id="main">
     <p class="reading-topline">The token &amp; the market</p>
@@ -22,7 +22,7 @@
       <aside class="reading-aside"><p>On this page</p><nav aria-label="On this page"><a href="#sale">A trace sale</a><a href="#lock">Locking THOT</a><a href="#buyer-access">Buyer pricing</a><a href="#referrals">Referral economics</a><a href="#reserve">The first buyer</a><a href="#sampling">DAO sampling</a><a href="#campaign">The first campaign</a><a href="#feedback">How the market could grow</a><a href="#fees">Where fees go</a><a href="#today">What works today</a><a href="#roadmap">Enclave appraiser roadmap</a></nav><a class="reading-aside-bottom" href="/whitepaper">Full whitepaper</a></aside>
       <article class="reading-prose">
         <h1>Useful work.<br>A buyer.<br>Your cut.</h1>
-        <p>THOT is intended to connect people who produce useful AI research with buyers who want to learn from it. The token pays for licensed traces. The seller receives the purchase price minus a disclosed service fee. This page describes proposed launch terms; the <a href="/app">workspace page</a> shows current availability.</p>
+        <p>THOT is intended to connect people who produce useful AI research with buyers who want to learn from it. The token pays for licensed traces. The seller receives the purchase price minus a disclosed service fee. This page describes the market design; check the applicable quote and terms in the <a href="https://app.thot.market/app" data-workspace-link>workspace</a>.</p>
         <h2 id="sale">Start with an actual purchase.</h2>
         <ol>
           <li>A contributor saves supported AI work in a private library.</li>
@@ -36,7 +36,7 @@
           <tr><th scope="row">Service fee</th><td>The fee shown before funding, including any qualifying referral.</td></tr>
           <tr><th scope="row">Contributor’s proceeds</th><td>The posted price minus the disclosed service fee.</td></tr>
         </tbody></table>
-        <p>The fee supports delivery, operations and eligible referrals. The production tariff will be published before purchases open. Governance publishes prospective changes; funded purchases keep their original tariff.</p>
+        <p>The fee supports delivery, operations and eligible referrals. Your purchase quote shows the applicable tariff before you authorize payment. Governance publishes prospective changes; funded purchases keep their original tariff.</p>
         <p>Enrollment shows the authorized price and minimum seller proceeds. A purchase that violates that signed floor cannot complete. Future unfunded sales can be stopped; already purchased rights remain in force. The seller’s proceeds are the payment for that purchase, not a bonus added on top.</p>
         <p>The proposed launch terms give buyers <strong>12 hours after recorded delivery to raise an eligible dispute</strong>. The service then finalizes an undisputed sale and pays the seller’s wallet. Manual claiming remains available if the service is delayed. Delivery is intended to occur with the purchase; the failure timeout remains two days. Delayed delivery, disputes or delayed finalization can extend the wait. An accepted order without an onchain delivery acknowledgment becomes refundable after the delivery timeout. Once availability is acknowledged onchain, that refund path closes. Subjective disputes have separate eligibility requirements; under the current policy, a buyer win refunds 50% and burns 50%, rather than providing a universal full refund. See the <a href="/whitepaper#2-a-purchase-from-offer-to-payment">whitepaper’s dispute terms</a>. Sale proceeds have no extra vesting period and are separate from the THOT a participant has locked.</p>
         <p>The app records a durable delivery job and withholds plaintext until the matching release hash is acknowledged onchain. The operator attests availability, not that the buyer read the trace. Licensed retrieval ends 30 days after the automatic sale. Deleted or expired sources stop new listings; copies supporting unexpired committed rights are retained until those rights expire.</p>
@@ -48,7 +48,7 @@
         <p>A buyer with little or no qualifying THOT can still buy, provided they fund the purchase. There is no membership surcharge. Checkout shows the gross price, service fee and seller proceeds before funding, and the signed review binds the tariff.</p>
         <p>Public descriptions and supported property results remain free to browse. Ordinary buyers receive no trace excerpt before payment, at any balance. The disclosed acquisition vault pays the same service tariff and follows its separate campaign caps.</p>
         <h2 id="referrals">Introduce useful contributors. Share the contribution.</h2>
-        <p>One accepted direct referrer can earn <strong>20% of net service contribution</strong> from the referred contributor’s reviewed independent sales. Net contribution is the service fee minus the quoted direct-cost allowance; the contributor’s proceeds stay unchanged.</p>
+        <p>One accepted direct referrer can earn <strong>20% of net service contribution</strong> from the referred contributor’s reviewed independent sales. Net contribution is the base service fee minus the quoted direct-cost allowance, before holder discounts; the contributor’s proceeds stay unchanged.</p>
         <p>The referral comes from the disclosed service fee. It does not add another charge to the buyer or reduce the contributor’s quoted proceeds. The protocol retains the rest of the fee to cover costs and operations; that receipt is revenue before expenses.</p>
         <p>Register the contributor-approved referrer before the contributor’s first sale. The first reviewed independent order must be funded within <strong>90 days of attribution</strong>; this opens a <strong>365-day funding window</strong>. The funding-time terms survive settlement. A refunded order earns no referral, even if it started the clock. Treasury-funded, self, affiliated and reimbursed purchases are excluded. There is one referral level, with no recursive rewards or payments for signups, token purchases or idle holdings.</p>
         <h2 id="reserve">The treasury can be the first buyer.</h2>
@@ -81,7 +81,7 @@
         <h2 id="today">From your work to a payment.</h2>
         <ol><li><strong>Capture privately.</strong> Use a supported CLI capture, import a history or configure an available API connection in your workspace.</li><li><strong>Authorize a release.</strong> Choose the research, THOT price and license once. Opt into treasury sampling if you want the reserve to consider it.</li><li><strong>A buyer funds the purchase.</strong> Property checks can run before payment; the complete purchased release becomes available after funding.</li><li><strong>Your share becomes payable.</strong> Under the proposed launch terms, an undisputed purchase settles after the 12-hour filing window. The worker sends the proceeds to your linked wallet; you can also claim them yourself.</li></ol>
         <p>Subjective disputes require the buyer to meet the reviewed independent-purchase eligibility terms disclosed before funding; treasury purchases cannot use this route. Under the proposed launch terms, an eligible buyer files within 12 hours after recorded delivery. The seller has <strong>24 hours to respond</strong> privately and may separately choose to close that period early after responding. Otherwise it remains open for the full 24 hours. Non-conflicted DAO reviewers then have <strong>up to seven days</strong> to decide under the published reviewer threshold. A buyer win refunds 50% of the total escrowed payment and burns the other 50%. Without the required decision by the deadline, the original sale settles. Objective delivery failure has a separate full-refund path.</p>
-        <a class="button" href="/app">Open your workspace →</a>
+        <a class="button" href="https://app.thot.market/app" data-workspace-link>Open your workspace →</a>
         <h2>An estimate, a funded offer, and a payment.</h2>
         <p><strong>Estimated value</strong> compares what similar research has sold for, even before your own trace has sold. It needs sufficient evidence and does not guarantee a buyer. <strong>Purchase escrow</strong> holds a buyer’s funded payment under the acquisition terms. <strong>Sale proceeds</strong> are the seller’s share of a completed purchase. Treasury funding changes who buys the trace; it does not create an extra reward to count twice.</p>
         <p>Borrowing against future trace revenue would require a lender, a repayment agreement, and a basis for underwriting. There is no borrowing facility in the launch app.</p>
@@ -92,5 +92,5 @@
       </article>
     </div>
   </main>
-  <footer class="site-footer wrap"><a class="footer-brand" href="/">thot market</a><nav aria-label="Footer navigation"><a href="/read">The idea</a><a href="/tutorial">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/app">App</a></nav><p>Independent of Robinhood. Don’t get distilled for free.</p></footer>
+  <footer class="site-footer wrap"><a class="footer-brand" href="/">thot market</a><nav aria-label="Footer navigation"><a href="/read">The idea</a><a href="/tutorial">Trade proof</a><a href="/mechanism">Mechanism</a><a href="https://app.thot.market/app" data-workspace-link>App</a></nav><p>Independent of Robinhood. Don’t get distilled for free.</p></footer>
 </body></html>

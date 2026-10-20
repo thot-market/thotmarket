@@ -5,8 +5,12 @@
   const helperNote = document.getElementById('helper-note');
   const migration = document.getElementById('access-migration');
   // A helper capability belongs to its original app. Never relay it to another origin.
-  if (/^#(?:thot|thot-robinhood|trace)=/.test(window.location.hash)) helperNote.hidden = false;
-  if (window.location.hash || window.location.search) history.replaceState(history.state, '', window.location.pathname);
+  const helper = /^#(?:thot|thot-robinhood|thot-history|trace)=/.test(window.location.hash);
+  if (helper) helperNote.hidden = false;
+  const navigationFragments = new Set(['', '#referrals', '#thot-available', '#thot-purchases', '#thot-history', '#thot-contribute', '#my-work', '#earnings', '#receipts', '#thot', '#leaderboard']);
+  // Only these non-secret view names may move to the configured application.
+  // Keep every capability, OAuth query and unknown fragment on its original host.
+  const ordinaryEntry = !window.location.search && navigationFragments.has(window.location.hash);
 
   function showMigration() {
     document.getElementById('access-workspace').hidden = true;
@@ -56,10 +60,22 @@
       link.href = target;
       link.hidden = false;
       if (wallet) {
-        copy('access-intro', 'The wallet workspace is open.');
-        copy('access-description', 'Sign in with your EVM wallet to upload conversations, connect OpenRouter and manage the traces you choose to sell.');
+        if (target === window.location.origin + window.location.pathname.replace(/\/$/, '')) {
+          link.hidden = true;
+          link.removeAttribute('href');
+          status.textContent = 'Workspace access is unavailable: the configured destination returns to this access page.';
+          return;
+        }
+        if (ordinaryEntry) {
+          window.location.replace(target + window.location.hash);
+          return;
+        }
+        copy('access-intro', 'Your workspace is available.');
+        copy('access-description', 'Sign in to import conversations, connect your tools and manage the work you choose to sell.');
         copy('access-link-label', 'Open workspace');
-        status.textContent = 'Robinhood testnet preview. Payments use test tokens; holding THOT alone does not earn rewards.';
+        status.textContent = helper
+          ? 'This connection link belongs to its original app. Its capability has not been forwarded.'
+          : 'Open the workspace to continue. Sign-in and connection data stay on their original origin.';
       } else {
         copy('access-intro', 'The app is in private preview.');
         copy('access-title', 'For invited reviewers.');

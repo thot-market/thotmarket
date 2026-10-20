@@ -25,7 +25,7 @@
   <header class="site-header wrap">
     <a class="brand" href="/" aria-label="thot market home"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
     <nav class="main-nav" aria-label="Main navigation"><a href="/read">The idea</a><a href="/tutorial" aria-current="page">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/whitepaper">Whitepaper</a></nav>
-    <div class="header-actions"><a class="trade-link" data-token-link href="/#token" hidden>Trade THOT <span aria-hidden="true">↗</span></a><a class="button button-small" href="/app">Open app</a></div>
+    <div class="header-actions"><a class="trade-link" data-token-link href="/#token" hidden>Trade THOT <span aria-hidden="true">↗</span></a><a class="button button-small" href="https://app.thot.market/app" data-workspace-link>Open app</a></div>
   </header>
   <main class="reading-main wrap" id="main">
     <div class="reading-topline"><a href="/">Back to thot market</a><span>Trade-proof tutorial</span></div>
@@ -35,14 +35,14 @@
         <ol>
           <li><a href="#before-you-upload-or-start-recording">Before you upload or start recording</a></li>
           <li><a href="#what-the-proof-says">What the proof says</a></li>
-          <li><a href="#add-a-trade-proof-in-a-configured-test-workspace">Add a trade proof in a configured test workspace</a></li>
+          <li><a href="#add-a-trade-proof-in-a-configured-test-workspace">Add a trade proof in a configured workspace</a></li>
           <li><a href="#what-happens-inside-the-private-path">What happens inside the private path</a></li>
           <li><a href="#what-remains-private">What remains private</a></li>
           <li><a href="#how-a-buyer-uses-it">How a buyer uses it</a></li>
           <li><a href="#current-limits">Current limits</a></li>
           <li><a href="#what-has-been-demonstrated">What has been demonstrated</a></li>
         </ol>
-        <a class="reading-aside-bottom" href="/app">Open the test app</a>
+        <a class="reading-aside-bottom" href="https://app.thot.market/app" data-workspace-link>Open the app</a>
       </aside>
       <div>
         <article class="reading-prose" aria-labelledby="article-title" id="trade-proof-tutorial">
@@ -73,13 +73,13 @@
 </blockquote>
 <p>The proof does <strong>not</strong> say that the research caused the trade, that the research came first, or that the trade was profitable. It does not establish a balance, return, Sharpe ratio, complete account history, or continuing control of the same account.</p>
 <p>That narrowness is useful. A buyer can ask for an observable property without receiving an account statement or trusting a profile claim.</p>
-<h2 id="add-a-trade-proof-in-a-configured-test-workspace">Add a trade proof in a configured test workspace</h2>
+<h2 id="add-a-trade-proof-in-a-configured-test-workspace">Add a trade proof in a configured workspace</h2>
 <ol type="1">
 <li><p>Open <strong>Market</strong>, choose one of your traces, and select <strong>Add trade proof</strong>.</p></li>
 <li><p>Enter a ticker and a window from 1 to 365 days.</p></li>
-<li><p>Open the <a href="/app">test workspace</a> for its one-time helper setup, then run the scoped command shown by thot market on the computer where you already use Robinhood. Use the native app origin shown in your workspace, not the public landing-page domain. It follows this form:</p>
+<li><p>Open the <a href="https://app.thot.market/app" data-workspace-link>workspace</a> for its one-time helper setup, then run the scoped command shown by thot market on the computer where you already use Robinhood. Use the app origin shown in your workspace; the helper link and its capability belong to that origin. It follows this form:</p>
 <pre class="sh"><code>thot-link robinhood \
-  --thot-url https://YOUR-NATIVE-PHALA-APP-ORIGIN \
+  --thot-url https://YOUR-APP-ORIGIN \
   --trade-trace TRACE_ID \
   --symbol F \
   --window-days 30</code></pre></li>
@@ -160,7 +160,7 @@ maximum price = 20,000 THOT</code></pre>
   </main>
   <footer class="site-footer wrap">
     <a class="footer-brand" href="/">thot market</a>
-    <nav aria-label="Footer navigation"><a href="/read">The idea</a><a href="/tutorial" aria-current="page">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/whitepaper">Whitepaper</a><a href="/app">App</a></nav>
+    <nav aria-label="Footer navigation"><a href="/read">The idea</a><a href="/tutorial" aria-current="page">Trade proof</a><a href="/mechanism">Mechanism</a><a href="/whitepaper">Whitepaper</a><a href="https://app.thot.market/app" data-workspace-link>App</a></nav>
     <p>Independent of Robinhood. No endorsement or account access is implied.</p>
     <span class="footer-motto">Don’t get distilled for free.</span>
   </footer>

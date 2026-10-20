@@ -19,6 +19,11 @@ const state = { token: null, actor: null, role: 'user', view: 'vault', traces: [
 const main = document.querySelector('#main');
 bindStakingPreview(main);
 const dialog = document.querySelector('#detail-dialog');
+let dialogReturnFocus = null;
+function rememberDialogTrigger(element){
+  if(!element)return;
+  dialogReturnFocus={element,actor:state.actor?.id,generation:state.generation,action:element.dataset?.action,id:element.dataset?.id,client:element.dataset?.client,inMain:main.contains?.(element)===true};
+}
 const pendingKeys = new Map();
 const sessionRecoveries = new Map();
 const inferenceFlows = new Map();
@@ -43,12 +48,50 @@ const rememberedViewKey='thot.workspace-view.v1';
 function allowedView(view){
   return ['market','thot','referrals','leaderboard'].includes(view)||
     (state.role==='user'&&['vault','earnings','receipts'].includes(view))||
-    (state.role==='operator_security'&&view==='operator')||
+    (view==='operator'&&(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer))||
     (state.canExplore&&view==='explorer');
 }
 function rememberView(){
   if(!state.actor||!allowedView(state.view))return;
   try{window.sessionStorage?.setItem(rememberedViewKey,JSON.stringify({actor:state.actor.id,role:state.role,view:state.view}));}catch{}
+  // Seed the initial entry so Back returns to that view, rather than restoring
+  // whichever view was most recently saved. Never overwrite a capability link.
+  if(!window.location?.hash)writeViewRoute(state.view,'replaceState');
+}
+const viewRoutes={vault:'#my-work',market:'#thot-available',earnings:'#earnings',receipts:'#receipts',thot:'#thot',referrals:'#referrals',leaderboard:'#leaderboard',operator:'#operator',explorer:'#explorer'};
+function routeView(){
+  if(marketFragment())return 'market';
+  return Object.entries(viewRoutes).find(([,hash])=>hash===window.location?.hash)?.[0]??null;
+}
+function writeViewRoute(view,method='pushState'){
+  const hash=viewRoutes[view];
+  if(!hash||window.location?.hash===hash)return;
+  window.history?.[method]?.(null,'',window.location.pathname+window.location.search+hash);
+}
+function navigateView(view,{fromHistory=false}={}){
+  if(signingOut||!allowedView(view))return false;
+  if(!state.actor){if(!fromHistory)writeViewRoute(view);return true;}
+  if(dialog.open)dialog.close();
+  const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;
+  state.view=view;purchasesAttempts=0;scrolledMarketFragment=null;
+  if(!fromHistory)writeViewRoute(view);
+  rememberView();
+  if(state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){state.loaded=false;loading();if(!fullRefreshCount)void safely(refresh);return true;}
+  if(state.role==='user'&&!state.contributorLoaded&&(view==='vault'||(view==='market'&&marketFragment()==='#thot-contribute'))){
+    if(view==='vault')renderContributorLoading();else loading();
+    void safely(loadContributorRecords);return true;
+  }
+  if(!state.loaded){if(view==='market')void loadCatalogue();else loading();}
+  render();return true;
+}
+function acceptViewRoute(){
+  if(!state.actor||signingOut)return false;
+  const view=routeView();
+  if(view)return navigateView(allowedView(view)?view:initialView(state.role),{fromHistory:true});
+  // Capability fragments have their own handlers and must never be interpreted
+  // as a workspace view or copied to another origin.
+  if(/^#(?:thot(?:-(?:capture|history|robinhood|import))?|trace)=/.test(window.location?.hash??''))return false;
+  return navigateView(initialView(state.role),{fromHistory:true});
 }
 const marketFragments=new Set(['#thot-available','#thot-purchases','#thot-history','#thot-contribute']);
 function marketFragment(){const hash=window.location?.hash;return marketFragments.has(hash)&&(hash!=='#thot-contribute'||state.role==='user')?hash:null;}
@@ -56,18 +99,10 @@ function scrollMarketFragment(){
   const hash=marketFragment();if(state.view!=='market'||!hash||scrolledMarketFragment===hash)return;
   const target=document.querySelector(hash);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView({block:'start'});scrolledMarketFragment=hash;}
 }
-function acceptMarketFragment(){
-  const hash=marketFragment();if(!hash)return false;scrolledMarketFragment=null;
-  if(state.actor&&!signingOut){
-    state.view='market';
-    if(hash==='#thot-contribute'&&state.thot?.workspace_scope==='buyer'){state.loaded=false;loading();if(!fullRefreshCount)void safely(refresh);return true;}
-    if(state.loaded&&hash==='#thot-contribute'&&!state.contributorLoaded){loading();void safely(loadContributorRecords);return true;}
-    if(!state.loaded)void loadCatalogue();render();
-  }
-  return true;
-}
+function acceptMarketFragment(){return marketFragment()?navigateView('market',{fromHistory:true}):false;}
+
 function restoredView(){
-  if(marketFragment()&&allowedView('market'))return 'market';
+  const routed=routeView();if(routed&&allowedView(routed))return routed;
   try{const saved=JSON.parse(window.sessionStorage?.getItem(rememberedViewKey)??'null');
     if(saved?.actor===state.actor?.id&&saved?.role===state.role&&allowedView(saved.view))return saved.view;
   }catch{}
@@ -354,7 +389,7 @@ async function loadContributorRecords(){
   request.promise=(async()=>{
     try{
       const library=api('/v1/contributor/library'+libraryUI.queryString()).then(traceLibrary=>{
-        current();state.traceLibrary=traceLibrary;state.libraryLoaded=true;if(state.view==='vault')render();
+        current();state.traceLibrary=traceLibrary;state.libraryLoaded=true;if(state.view==='vault')render();libraryUI.ready();
       });
       const [traces,contributorPortfolio]=await Promise.all([api('/v1/traces'),api('/v1/contributor/portfolio'),library]);current();
       Object.assign(state,{traces,contributorPortfolio,contributorLoaded:true});render();libraryUI.ready();
@@ -653,7 +688,10 @@ function openDialog(title, subtitle, body, footer = '') {
     for(const element of document.querySelectorAll('.dialog-body > h3,.dialog-body > .legal-note,.dialog-body > .sample-grid,.dialog-body > .divider'))element.remove();
     document.querySelector('.dialog-head p').textContent='Import a supported source bundle. Its claims must still pass verification.';
   }
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) {
+    if(!dialogReturnFocus)rememberDialogTrigger(document.activeElement);
+    dialog.showModal();
+  }
 }
 function importDialog() {
   if (state.role !== 'user') return session('user').then(importDialog);
@@ -680,6 +718,7 @@ function download(value, filename) {
 }
 async function runAction(action, button) {
   const privateLibraryAction=state.role==='user'&&state.libraryLoaded&&[
+    'qc-review','qc-retry',
     'journey-add','journey-local','journey-connections','library-open','library-earlier','library-later','library-bookmark','library-next','library-previous','library-filter-bookmarks','library-connections','import-research','confirm-research',
     'history-sync-open','history-sync-manage','history-sync-cancel','copy-setup-command','start-agent-capture','setup-codex','setup-claude','setup-zai','capture-start-codex','capture-start-claude','capture-start-zai','cancel-agent-capture','openrouter-open','openrouter-usage'
   ].includes(action);
@@ -788,7 +827,7 @@ async function runAction(action, button) {
   if (action === 'audit') { download(await api('/v1/audit/export'), `thot-audit-${new Date().toISOString().slice(0, 10)}.json`); toast('Your scoped audit export has been downloaded.'); }
 }
 async function safely(task, button) {
-  if (button) button.disabled = true;
+  if (button) {if(!dialog.open)rememberDialogTrigger(button);button.disabled = true;}
   try { await task(); }
   catch (error) {
     if(error.name==='StaleWorkspaceError')return;
@@ -800,14 +839,7 @@ async function safely(task, button) {
 document.addEventListener('click', event => {
   const button = event.target.closest('button'); if (!button || button.disabled) return;
   if (button.dataset.view) {
-    if(dialog.open)dialog.close();
-    const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;
-    state.view = button.dataset.view;purchasesAttempts=0;
-    if(state.view!=='market'&&marketFragment()){window.history?.replaceState(window.history.state,'',window.location.pathname+window.location.search);scrolledMarketFragment=null;}
-    if(state.actor&&state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){state.loaded=false;loading();if(!fullRefreshCount)void safely(refresh);return;}
-    if(state.actor&&state.role==='user'&&state.view==='vault'&&!state.contributorLoaded){renderContributorLoading();void safely(loadContributorRecords);return;}
-    if(!state.loaded&&state.actor){if(state.view==='market')void loadCatalogue();else loading();}
-    render(); return;
+    navigateView(button.dataset.view);return;
   }
   if (button.dataset.action) {const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;void safely(() => runAction(button.dataset.action, button), button);}
 });
@@ -815,6 +847,7 @@ document.addEventListener('click', event => {
 document.querySelector('#role').addEventListener('change', event => { const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;const select = event.target; select.disabled = true; void safely(() => session(select.value)).finally(() => { select.disabled = false; }); });
 document.addEventListener('input',event=>{thotUI.onInput?.(event.target);});
 document.addEventListener('change', event => {
+  if(libraryUI.onChange(event.target))return;
   if(agentCaptureUI.onChange(event.target))return;
   if(contributorUI.onChange(event.target))return;
   if (event.target.id === 'sale-consent') document.querySelector('#approve-sale').disabled = !event.target.checked;
@@ -838,7 +871,17 @@ document.addEventListener('submit', event => {
     dialog.close(); await refresh(); toast(result.duplicate ? 'This conversation already exists in your vault. No duplicate trace was created. No duplicate trace was created.' : 'Source bundle imported. Inspect the returned claims and rights assessment.');
   }, button);
 });
-dialog.addEventListener('close', () => { activePreview = null; activeInference = null; contributorUI.resetPreview(); agentCaptureUI.onDialogClose(); historySyncUI.onDialogClose(); });
+dialog.addEventListener('close', () => {
+  activePreview = null; activeInference = null; contributorUI.resetPreview(); agentCaptureUI.onDialogClose(); historySyncUI.onDialogClose(); libraryUI.onDialogClose();
+  const saved=dialogReturnFocus;dialogReturnFocus=null;
+  if(!saved||saved.actor!==state.actor?.id||saved.generation!==state.generation)return;
+  let target=saved.element;
+  // Background refresh can replace the original button while the modal is open.
+  // Restore its current equivalent only within the same account and view scope.
+  if(!target?.isConnected&&saved.action)target=[...(saved.inMain?main:document).querySelectorAll('button[data-action]')].find(button=>button.dataset.action===saved.action&&button.dataset.id===saved.id&&button.dataset.client===saved.client);
+  const disclosure=target?.closest?.('details');if(disclosure&&!disclosure.open)target=disclosure.querySelector('summary');
+  if(target?.isConnected&&!target.disabled)target.focus?.({preventScroll:true});
+});
 function invalidatePrivateState(){
   clearWalletSummary();
   analyticsUI.reset();
@@ -903,7 +946,7 @@ async function loadPrivyAuth() {
       const {createPrivyAuth}=await downloadModule();
       if(expired)throw new Error('Email wallet loading expired.');
       if(privyLoginBusy)setPrivyLoginPhase('Connecting to sign-in…');
-      candidate=createPrivyAuth({window,document,config:privyConfig,walletAuth,onError:error=>{if(privyAuth===candidate){privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);}}});
+      candidate=createPrivyAuth({window,document,config:privyConfig,walletAuth,onProgress:message=>setPrivyLoginPhase(message),onError:error=>{if(privyAuth===candidate){privyLoginRetry=true;privyLoginPhase='';showIdentityLogin(error.message);}}});
       // Download time must not consume the authentication service's budget.
       await withinDeadline(candidate.initialize(),'The sign-in service is taking too long to respond. Please try again.');
       if(expired)throw new Error('Email wallet loading expired.');
@@ -1014,7 +1057,7 @@ async function startAuthentication(){
   if(authMode==='development')return session('user');
   if(authMode==='wallet_siwe'){
     privyConfig=capability.privy??null;
-    walletAuth=createWalletAuth({window,fetch,chainId:capability.wallet.chain_id,rpcUrl:capability.wallet.rpc_url,onSession:acceptClerkSession,onIdentityChanging:({restoring}={})=>{if(restoring)showIdentityLogin('Checking your saved wallet session…');else{invalidatePrivateState();loading();}},onSignedOut:()=>showIdentityLogin('Connect your wallet to continue.'),onError:error=>showIdentityLogin(error.message),additionalProviders:async address=>privyConfig?(await loadPrivyAuth()).providers(address):[]});
+    walletAuth=createWalletAuth({window,fetch,chainId:capability.wallet.chain_id,rpcUrl:capability.wallet.rpc_url,onSession:async session=>{privyLoginPhase='';await acceptClerkSession(session);},onIdentityChanging:({restoring}={})=>{if(restoring)showIdentityLogin('Checking your saved wallet session…');else if(privyConfig)showIdentityLogin('Continue in your wallet to open your workspace.');else{invalidatePrivateState();loading();}},onProgress:message=>setPrivyLoginPhase(message),onSignedOut:()=>{privyLoginPhase='';showIdentityLogin('Connect your wallet to continue.');},onError:error=>{privyLoginPhase='';privyLoginRetry=true;showIdentityLogin(error.message);},additionalProviders:async address=>privyConfig?(await loadPrivyAuth()).providers(address):[]});
     showIdentityLogin('Connect your EVM wallet to continue.');
     await walletAuth.restore();return;
   }
@@ -1029,7 +1072,8 @@ async function startAuthentication(){
 }
 void safely(startAuthentication);
 
-window.addEventListener('hashchange',()=>{acceptMarketFragment();void libraryUI.acceptFragment();agentCaptureUI.acceptFragment();robinhoodSetupUI.acceptFragment();historySyncUI.acceptFragment?.();});
+window.addEventListener('popstate',()=>acceptViewRoute());
+window.addEventListener('hashchange',()=>{acceptViewRoute();void libraryUI.acceptFragment();agentCaptureUI.acceptFragment();robinhoodSetupUI.acceptFragment();historySyncUI.acceptFragment?.();});
 document.addEventListener('visibilitychange',()=>{scheduleEarningsRefresh();schedulePurchasesRefresh();});
 window.addEventListener('pagehide',()=>{stopEarningsRefresh();stopPurchasesRefresh();});
 

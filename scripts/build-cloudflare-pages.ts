@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { publicLaunchConfig, readPublicMarketProof, type LaunchConfiguration } from '../apps/api/public-site.ts';
+import { publicLaunchConfig, publicWorkspaceLinks, readPublicMarketProof, type LaunchConfiguration } from '../apps/api/public-site.ts';
 import { publicSiteConfig, reviewerOrigin, workspaceUrl } from '../apps/site/server.ts';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,14 +108,16 @@ export async function buildCloudflarePages(options: { outputParent?: string; rev
   if (options.appUrl !== undefined && !workspaceUrl(options.appUrl)) throw Error('INVALID_WORKSPACE_URL');
   const accessConfig = options.migration
     ? { appUrl: null, reviewerUrl: null, access: 'migration', privateAppHosted: false }
-    : publicSiteConfig(options);
+    : publicSiteConfig({ publicOrigin: 'https://thot.market', ...options });
   const launch = publicLaunchConfig(options.launch);
   if (options.launch?.state === 'launched' && launch.state !== 'launched') throw Error('INCOMPLETE_LAUNCH_CONFIGURATION');
   const files = new Map<string, Buffer>();
   for (const [target, source] of Object.entries(publicFiles)) {
     const path = join(siteRoot, source);
     if (!(await lstat(path)).isFile()) throw Error('PUBLIC_SOURCE_MUST_BE_REGULAR_FILE');
-    files.set(target, await readFile(path));
+    const bytes = await readFile(path);
+    const appUrl = 'appUrl' in accessConfig && accessConfig.appUrl ? accessConfig.appUrl : '/app';
+    files.set(target, target.endsWith('.html') ? Buffer.from(publicWorkspaceLinks(bytes.toString('utf8'), appUrl)) : bytes);
   }
   if (options.migration) {
     const page = files.get('app.html')!.toString('utf8');

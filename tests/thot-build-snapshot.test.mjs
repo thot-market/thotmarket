@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, writeFile, readFile, rm, chmod, symlink} from 'node:fs/promises';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -59,6 +60,48 @@ test('snapshot includes dirty tracked and new runtime code, but excludes credent
     const changed = await createThotBuildSnapshot(f.options('changed-bytes'));
     assert.notEqual(changed.source_sha256, result.source_sha256);
     await assert.rejects(createThotBuildSnapshot(f.options('snapshot')), /EEXIST/);
+  } finally {await rm(f.root, {recursive: true, force: true});}
+});
+
+test('both image profiles retain runnable QC with upstream attribution and exclude unrelated package files', async () => {
+  const f = await fixture();
+  const qcPaths = ['index.ts', 'canonical.ts', 'types.ts', 'semantic.ts',
+    'vendor/data-juicer-tool-result.ts', 'vendor/openjudge-accuracy.ts',
+    'vendor/data-juicer.LICENSE', 'vendor/openjudge.LICENSE', 'vendor/NOTICE', 'vendor/sources.json'];
+  try {
+    await f.put('package.json', '{"type":"module"}\n');
+    const original = new Map();
+    for (const path of qcPaths) {
+      const bytes = await readFile(new URL('../packages/qc/' + path, import.meta.url));
+      original.set(path, bytes); await f.put('packages/qc/' + path, bytes);
+    }
+    await f.put('packages/market/src/trace-qc.ts', 'export {runTraceQc} from "../../qc/index.ts";\n');
+    for (const path of ['README.md', 'fixture.json', 'fixtures/session.json', 'test-fixtures/session.ts',
+      'tests/check.test.ts', 'src/unreviewed.ts', 'vendor/unreviewed.ts', 'vendor/extra.LICENSE', '.env']) {
+      await f.put('packages/qc/' + path, 'synthetic excluded package sentinel');
+    }
+    for (const profile of ['public', 'private-anvil']) {
+      const result = await createThotBuildSnapshot({...f.options('qc-' + profile), profile});
+      const {manifest} = await verifyThotBuildSnapshot(result.output, result.manifest_sha256);
+      const included = manifest.source_files.filter(file => file.path.startsWith('packages/qc/'));
+      assert.deepEqual(included.map(file => file.path).sort(), qcPaths.map(path => 'packages/qc/' + path).sort());
+      for (const path of qcPaths) {
+        const bytes = await readFile(join(result.output, 'source/packages/qc', path));
+        assert.deepEqual(bytes, original.get(path), 'snapshot preserves runtime and attribution bytes: ' + path);
+      }
+      // Execute imports from the isolated snapshot itself so a missing transitive
+      // adapter dependency fails even if the file list appears plausible.
+      const {runTraceQc} = await import(pathToFileURL(join(result.output, 'source/packages/market/src/trace-qc.ts')).href);
+      const {runSemanticQc} = await import(pathToFileURL(join(result.output, 'source/packages/qc/semantic.ts')).href);
+      const trace = {turns: [{role: 'user', content: 'Explain this synthetic queue.'}, {role: 'assistant', content: 'The synthetic queue drains in FIFO order.'}]};
+      assert.equal(runTraceQc(trace, {scope: 'private'}).status, 'pass');
+      assert.equal((await runSemanticQc(trace, undefined, {scope: 'private'})).status, 'not_run');
+    }
+    await rm(join(f.source, 'packages/qc/vendor/openjudge.LICENSE'));
+    await assert.rejects(createThotBuildSnapshot(f.options('qc-missing-attribution')), /REQUIRED_BUILD_SOURCE_MISSING:packages\/qc\/vendor\/openjudge\.LICENSE/);
+    await f.put('packages/qc/vendor/openjudge.LICENSE', original.get('vendor/openjudge.LICENSE'));
+    await rm(join(f.source, 'packages/qc/canonical.ts'));
+    await assert.rejects(createThotBuildSnapshot(f.options('qc-missing-runtime')), /REQUIRED_BUILD_SOURCE_MISSING:packages\/qc\/canonical\.ts/);
   } finally {await rm(f.root, {recursive: true, force: true});}
 });
 

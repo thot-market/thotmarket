@@ -1,3 +1,4 @@
+import {enqueueTraceQc,QC_EVENT} from './trace-qc-state.ts';
 import { StagedStorage } from './staged-storage.ts';
 import { canonicalHash, canonicalJson, parseMoney, uuidv7, validateUserPolicy, validateBuyerMandate } from '../../protocol/src/index.ts';
 import { Database, Transaction, DomainError, ensure, wire, type Document, type TransactionTimingCollector } from '../../storage/src/index.ts';
@@ -101,7 +102,7 @@ export class ThotService {
         return undefined;
       };
       if(await this.db.transaction(tx=>duplicate(tx),'import'))return async tx=>{
-        const current=await duplicate(tx);ensure(current,'STAGED_STATE_CHANGED',409);return current;
+        const current=await duplicate(tx);ensure(current,'STAGED_STATE_CHANGED',409);await enqueueTraceQc(tx,await tx.get('traces',current.trace_id,actor.id),this.now());return current;
       };
       const traceId=uuidv7();
       const verified = await this.privacy.verify(bundle,traceId,actor.id);
@@ -117,7 +118,7 @@ export class ThotService {
       const privateMetadataRef=await stage.seal({answer_preview:String(verified.content.turns.findLast((t:Document)=>t.role==='assistant')?.content??'').replace(/\s+/g,' ').slice(0,220)});
       return async tx=>{
         const duplicateResult=await duplicate(tx,verifiedContentHash);
-        if(duplicateResult){stage.discard();return duplicateResult;}
+        if(duplicateResult){stage.discard();await enqueueTraceQc(tx,await tx.get('traces',duplicateResult.trace_id,actor.id),this.now());return duplicateResult;}
         const bundleId=uuidv7(), provenanceId=verified.receipt.receipt_id;
         await tx.insert('trace_bundles',bundleId,actor.id,{trace_id:traceId,source_bundle_hash:sourceHash,source_bundle_format:['thot.development-bundle/1','thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(bundle.format)?bundle.format:'attest-proxy-external-verifier/1',object_ref:sourceRef});
         await tx.insert('provenance_receipts',provenanceId,actor.id,{trace_id:traceId,receipt:verified.receipt});
@@ -134,6 +135,7 @@ export class ThotService {
           display_status:displayStatus,save_privately:privateHistory,credential_ids:[],outcome_ids:[],sale_count:0,
           deleted:false,created_at:this.now(),observed_at:verified.receipt.temporal.observed_start,observed_end:verified.receipt.temporal.observed_end??verified.receipt.temporal.observed_start,retention_expires_at:this.future((this.config.privateRetentionDays??30)*86400), normalized_hash:canonicalHash(assessment.content)
         });
+        await enqueueTraceQc(tx,await tx.get('traces',traceId,actor.id),this.now());
         for (const event of ['TraceReceived','ProvenanceVerified','TraceSealed','RightsAssessmentCompleted','TraceFeatured']) await tx.audit(actor.id,event,{trace_id:traceId,source_hash:sourceHash});
         if(eligible)await this.enqueueMatching(tx);
         return {trace_id:traceId,status:displayStatus,provenance:verified.receipt,rights:assessment.rights};
@@ -422,6 +424,13 @@ export class ThotService {
   }
   async deleteTraceObjects(tx:Transaction,id:string) {
     const t=await tx.get('traces',id);ensure(t.deleted,'DELETION_NOT_AUTHORIZED');
+    await tx.sql.query("DELETE FROM outbox_events WHERE event_type=$1 AND owner_id=$2 AND payload->>'trace_id'=$3",[QC_EVENT,t.owner_id,id]);
+    delete t.quality_checks;
+    for(const table of ['trace_qc_runs','trace_qc_reviews']){
+      const rows=(await tx.sql.query('SELECT id,document FROM '+table+" WHERE owner_id=$1 AND document->>'trace_id'=$2",[t.owner_id,id])).rows;
+      for(const row of rows)await this.privacy.remove(t.owner_id,row.document.object_ref);
+      await tx.sql.query('DELETE FROM '+table+" WHERE owner_id=$1 AND document->>'trace_id'=$2",[t.owner_id,id]);
+    }
     for(const ref of [t.raw_ref,t.scrub_ref,t.private_metadata_ref,t.context_ref,t.personal_ref,...(t.projection_refs??[])].filter(Boolean))await this.privacy.remove(t.owner_id,ref);
     for(const bundle of await tx.list('trace_bundles',t.owner_id))if(bundle.trace_id===id)await this.privacy.remove(t.owner_id,bundle.object_ref);
     for(const c of await tx.list('mandate_candidates',t.owner_id))if(c.trace_id===id&&c.status!=='LICENSED') {
@@ -435,7 +444,7 @@ export class ThotService {
   async sweepRetention() {
     return this.db.transaction(async tx=>{
       let queued=0;
-      for(const c of await tx.list('agent_captures'))if(c.status==='AWAITING_UPLOAD'&&c.expires_at<=this.now()){c.status='EXPIRED';await tx.update('agent_captures',c.capture_id,c);if(c.result?.trace_id){const t=await tx.get('traces',c.result.trace_id,c.owner_id);if(!t.deleted){t.capture_state='INTERRUPTED';await tx.update('traces',t.trace_id,t);}}else await tx.enqueue(c.owner_id,'DeleteExpiredCapture',{capture_id:c.capture_id});queued++;}
+      for(const c of await tx.list('agent_captures'))if(c.status==='AWAITING_UPLOAD'&&c.expires_at<=this.now()){c.status='EXPIRED';await tx.update('agent_captures',c.capture_id,c);if(c.result?.trace_id){const t=await tx.get('traces',c.result.trace_id,c.owner_id);if(!t.deleted){t.capture_state='INTERRUPTED';await tx.update('traces',t.trace_id,t);await enqueueTraceQc(tx,t,this.now());}}else await tx.enqueue(c.owner_id,'DeleteExpiredCapture',{capture_id:c.capture_id});queued++;}
       for(const t of await tx.list('traces'))if(!t.deleted&&t.retention_expires_at<=this.now()) {
         t.deleted=true;t.display_status='EXPIRED';await tx.update('traces',t.trace_id,t);
         await tx.enqueue(t.owner_id,'DeleteTraceObjects',{trace_id:t.trace_id});queued++;
@@ -611,7 +620,7 @@ export class ThotService {
       let jobId:string|undefined,jobToken:string|null=null;
       try {
         const result=await this.db.transaction(async tx=>{
-        const job=(await tx.sql.query("SELECT * FROM outbox_events WHERE status='pending' AND available_at<=now() ORDER BY created_at,id LIMIT 1 FOR UPDATE")).rows[0];
+        const job=(await tx.sql.query("SELECT * FROM outbox_events WHERE status='pending' AND event_type<>'CheckTraceQuality' AND available_at<=now() ORDER BY created_at,id LIMIT 1 FOR UPDATE")).rows[0];
         if(!job)return false;
         jobId=job.id;
         if(['ProjectAgentCapture','DeleteSupersededProjections'].includes(job.event_type)){

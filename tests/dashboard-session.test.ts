@@ -12,7 +12,7 @@ const applicationSource = await readFile(new URL('../apps/dashboard/app.js', imp
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
 // replaced by inert collaborators and only the automatic initial network bootstrap is disabled.
 const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace('import(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)', 'globalThis.importPrivyModule(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
-globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, refreshPurchases, pendingPurchases, refresh, acceptClerkSession, loadCatalogue, renderCatalogue, acceptMarketFragment, invalidatePrivateState,loadContributorRecords,
+globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, navigateView, acceptViewRoute, routeView, refreshPurchases, pendingPurchases, refresh, acceptClerkSession, loadCatalogue, renderCatalogue, acceptMarketFragment, invalidatePrivateState,loadContributorRecords,
   makeDeferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; },
   setAuthMode(value) { authMode = value; }, setClerkAuth(value) { clerkAuth = value; } };
 `;
@@ -84,7 +84,7 @@ function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, 
     createWalletAuth: options.walletAuthFactory??(() => ({})), importPrivyModule:options.importPrivyModule??(()=>{throw Error('Unexpected Privy import');}),
     createOpenRouterUI: () => ({reset(){},intro:()=>'',handle:async()=>false}),
     createAgentCaptureUI: () => ({ authReady() {}, authLost() {}, onDialogClose() {}, handle: async () => false, onChange: () => false }),
-    createLibraryUI: ({state}:any) => ({ reset() {}, ready() {}, queryString: () => '', sectionHTML: () => '<section id="conversation-library">'+(state.traceLibrary?.items??[]).map((i:any)=>i.title??i.trace_id).join('|')+'</section>', handle: async () => false, onChange: () => false, onSubmit: options.librarySubmit??(async () => false), acceptFragment: async () => {} }),
+    createLibraryUI: ({state}:any) => ({ reset() {}, ready() {}, onDialogClose() {}, queryString: () => '', sectionHTML: () => '<section id="conversation-library">'+(state.traceLibrary?.items??[]).map((i:any)=>i.title??i.trace_id).join('|')+'</section>', handle: async () => false, onChange: () => false, onSubmit: options.librarySubmit??(async () => false), acceptFragment: async () => {} }),
     createTraceExplorerUI: () => ({ reset() {}, sectionHTML: () => '', handle: async () => false, onChange: () => false }),
   };
   runInNewContext(source, context, { filename: 'apps/dashboard/app.js', timeout: 1000 });
@@ -724,11 +724,12 @@ test('buyer navigation never starts unrelated private contributor reads',async t
  library.resolve(response({items:[]}));
 });
 
-test('the retained seller link loads deferred contributor records once and opens its section',async t=>{
+test('seller fragment navigation loads deferred contributor records once from a full workspace and opens its section',async t=>{
  const library=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):url==='/v1/traces'?response([{trace_id:'seller-trace'}]):url==='/v1/contributor/portfolio'?response({items:[{trace_id:'seller-trace'}]}):url.startsWith('/v1/contributor/library')?library.promise:response([]),{hash:'#thot-available',thotTransport:async()=>response({capabilities:{mode:'thot-production'},orders:[]})});
  startMarket(a);await a.driver.refresh();assert.equal(a.driver.state.contributorLoaded,false);
  const target=a.document.createElement('seller');target.tagName='DETAILS';let scrolls=0;target.scrollIntoView=()=>scrolls++;a.elements.set('#thot-contribute',target);
- a.browser.location.hash='#thot-contribute';assert.equal(a.driver.acceptMarketFragment(),true);await flush();
+ a.driver.state.view='earnings';a.driver.state.thot.workspace_scope='full';
+ a.browser.location.hash='#thot-contribute';assert.equal(a.driver.acceptViewRoute(),true);await flush();
  assert.match(a.document.querySelector('#main').innerHTML,/Reading your records/);assert.equal(target.open,false);
  a.driver.acceptMarketFragment();await flush();
  for(const path of ['/v1/traces','/v1/contributor/portfolio','/v1/contributor/library'])assert.equal(a.calls.filter(c=>c.url===path).length,1,'repeated navigation must not restart private reads');
@@ -874,4 +875,27 @@ test('buyer snapshots do not fetch an authorized reviewer’s unrelated governan
  const a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):Promise.reject(Error('Unrelated request '+url)),{thotTransport:async()=>response({capabilities:{mode:'thot-production'},workspace_scope:'buyer',reserve_buyer:true,account:{dispute_reviewer:true},orders:[]})});
  startMarket(a);await a.driver.refresh();assert.equal(a.driver.state.loaded,true);
  assert.equal(a.calls.some(c=>['/v1/thot/capabilities','/v1/thot/sampling','/v1/thot/disputes'].includes(c.url)),false);
+});
+
+
+test('workspace links push view history and browser traversal restores the intended view',t=>{
+ const a=dashboard(t,async()=>response([]));Object.assign(a.driver.state,{contributorLoaded:true,libraryLoaded:true,thot:{capabilities:{mode:'thot-anvil'}}});
+ const urls:string[]=[];
+ a.browser.history={pushState(_state:any,_title:any,url:string){urls.push(url);a.browser.location.hash=new URL(url,a.browser.location.origin).hash;},replaceState(_state:any,_title:any,url:string){a.browser.location.hash=new URL(url,a.browser.location.origin).hash;}};
+ a.driver.rememberView();assert.equal(a.browser.location.hash,'#my-work');
+ a.driver.navigateView('market');assert.equal(a.browser.location.hash,'#thot-available');
+ a.driver.navigateView('thot');assert.equal(a.browser.location.hash,'#thot');assert.equal(urls.length,2);
+ a.browser.location.hash='#thot-purchases';a.driver.acceptViewRoute();assert.equal(a.driver.state.view,'market');assert.equal(urls.length,2,'history traversal does not create another entry');
+ a.browser.location.hash='#my-work';a.driver.acceptViewRoute();assert.equal(a.driver.state.view,'vault');
+ a.browser.location.hash='#referrals';assert.equal(a.driver.restoredView(),'referrals');
+});
+
+test('routing preserves setup capabilities and denies private views outside current permissions',t=>{
+ const a=dashboard(t,async()=>response([]));Object.assign(a.driver.state,{contributorLoaded:true,libraryLoaded:true,view:'market'});
+ for(const hash of ['#thot=private-capability','#thot-history=private-capability','#thot-robinhood=private-capability','#trace=retained-private-source']){
+  a.browser.location.hash=hash;a.driver.rememberView();assert.equal(a.driver.acceptViewRoute(),false);assert.equal(a.browser.location.hash,hash);assert.equal(a.driver.state.view,'market');
+ }
+ assert.equal(a.driver.navigateView('explorer'),false);assert.equal(a.driver.navigateView('operator'),false);
+ a.browser.location.hash='#operator';a.driver.acceptViewRoute();assert.equal(a.driver.state.view,'vault');
+ a.identity('other','buyer_member');a.browser.location.hash='#earnings';a.driver.acceptViewRoute();assert.equal(a.driver.state.view,'market');
 });

@@ -32,10 +32,21 @@ test('ordinary repeated requests exceed the old cumulative budget, survive clear
     await app.agentCapture.part(connection.capture_id,connection.upload_token,'part-test-'+i,{part});
   }
   const bundle=await proxy.finishManifest();assert.equal(calls,32);assert.ok(rawBytes>6*1024*1024);assert.ok(Buffer.byteLength(JSON.stringify(bundle))<8000);
+  const checkpoint=await app.agentCapture.checkpoint(connection.capture_id,connection.upload_token,'incremental-checkpoint',{bundle});
+  const checkpointTrace=await app.db.transaction(tx=>tx.get('traces',checkpoint.trace_id,actor.id));
+  assert.equal(checkpointTrace.capture_state,'RECORDING');assert.ok(checkpointTrace.raw_ref);
+  const qualityJobs=()=>app.db.query("SELECT owner_id,payload,status FROM outbox_events WHERE event_type='CheckTraceQuality' AND payload->>'trace_id'=$1",[checkpoint.trace_id]);
+  assert.equal((await qualityJobs()).rows.length,0,'A readable live checkpoint must not enqueue QC.');
   const saved=await app.agentCapture.complete(connection.capture_id,connection.upload_token,'incremental-complete',{bundle});assert.equal(saved.status,'SAVED');assert.equal(saved.capture_summary.exchanges,32);assert.equal(saved.capture_summary.interrupted,0);
+  const terminalTrace=await app.db.transaction(tx=>tx.get('traces',saved.trace_id,actor.id)),jobs=(await qualityJobs()).rows;
+  assert.deepEqual(terminalTrace.raw_ref,checkpointTrace.raw_ref,'Same-root completion reuses the existing readable source.');
+  assert.equal(terminalTrace.capture_state,'COMPLETED');assert.equal(jobs.length,1);
+  assert.equal(jobs[0].owner_id,actor.id);assert.equal(jobs[0].payload.scope,'private');assert.equal(jobs[0].status,'pending');
+  assert.equal(jobs[0].payload.source_version,terminalTrace.quality_checks.private.source_version);
   const proof=await app.agentCapture.proof(actor,connection.capture_id);const verified=await verifyProxyCapture(proof.bundle,async(n:number)=>(await app.agentCapture.proofPart(actor,connection.capture_id,n)).part);assert.equal(verified.exchanges,32);
   await assert.rejects(app.agentCapture.proofPart({id:'other-user',role:'user'},connection.capture_id,1));
   const replay=await app.agentCapture.complete(connection.capture_id,connection.upload_token,'incremental-retry',{bundle});assert.equal(replay.trace_id,saved.trace_id);
+  assert.equal((await qualityJobs()).rows.length,1,'Finalization replay must not duplicate QC.');
   await app.service.deleteTrace(actor,'delete-incremental-trace',saved.trace_id);
   await app.db.transaction(tx=>app.service.deleteTraceObjects(tx,saved.trace_id));
   await assert.rejects(app.agentCapture.proofPart(actor,connection.capture_id,1),/CAPTURE_CONTENT_UNAVAILABLE/);
@@ -63,6 +74,8 @@ test('an interrupted response preserves completed turns and is explicit in the r
   for(const part of records)await app.agentCapture.part(c.capture_id,c.upload_token,'partial-part-'+part.sequence,{part});
   const saved=await app.agentCapture.complete(c.capture_id,c.upload_token,'partial-complete',{bundle:manifest(c.capture_id,records)});
   assert.equal(saved.capture_summary.interrupted,1);assert.equal(saved.capture_summary.normalized,1);assert.match(saved.capture_receipt.limitations.join(' '),/1 interrupted.*retained.*excluded/);
+  const jobs=(await app.db.query("SELECT payload,status FROM outbox_events WHERE event_type='CheckTraceQuality' AND owner_id=$1 AND payload->>'trace_id'=$2",[actor.id,saved.trace_id])).rows;
+  assert.equal(jobs.length,1);assert.equal(jobs[0].payload.scope,'private');assert.equal(jobs[0].status,'pending');
   const proof=await app.agentCapture.proof(actor,c.capture_id);const checked=await verifyProxyCapture(proof.bundle,async(n:number)=>(await app.agentCapture.proofPart(actor,c.capture_id,n)).part);assert.equal(checked.interrupted,1);
 });
 

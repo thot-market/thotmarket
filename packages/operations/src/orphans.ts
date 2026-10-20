@@ -9,6 +9,9 @@ import { requireLocalLayout } from './backup.ts';
 import { assert, checkedDirectory, digestFile, ENTRY_LIMIT, readBounded, writeNew } from './paths.ts';
 
 const knownTables = new Set(('schema_versions service_lock users user_wallets buyers buyer_members trace_bundles traces trace_objects provenance_receipts credential_receipts outcome_receipts rights_assessments scrub_receipts trace_features user_policies sale_authorizations mandates mandate_funding mandate_candidates assay_receipts release_artifacts licenses deliveries contributor_entitlements inference_credit_reservations market_purchase_orders token_transfers burn_allocations chain_transactions chain_event_cursor sale_settlements ledger_accounts ledger_transactions ledger_entries audit_events outbox_events idempotency_keys inference_requests inference_billing_evidence inference_billing_reviews auth_access operational_controls agent_captures thot_records storage_command_claims storage_write_attempts').split(' '));
+// QC report and human-review refs use the same owner/object envelope validation
+// and conservative document traversal as every other private vault artifact.
+knownTables.add('trace_qc_runs');knownTables.add('trace_qc_reviews');
 const objectIdPattern = /^[A-Za-z0-9_-]{1,128}$/;
 const specialColumns: Record<string, string[]> = {
   schema_versions: ['version', 'sha256', 'applied_at'], service_lock: ['id'],
@@ -27,7 +30,7 @@ async function collectReferences(db: PGlite): Promise<References> {
   const tables = (await db.query<{ table_name: string }>("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")).rows;
   let ambiguous = tables.some(row => !knownTables.has(row.table_name));
   if (!tables.some(row => row.table_name === 'schema_versions')) ambiguous = true;
-  else if ((await db.query<{ version: string }>('SELECT version FROM schema_versions')).rows.some(row => !['001', '002', '003', '004', '005', '006'].includes(row.version))) ambiguous = true;
+  else if ((await db.query<{ version: string }>('SELECT version FROM schema_versions')).rows.some(row => !['001', '002', '003', '004', '005', '006', '007'].includes(row.version))) ambiguous = true;
   const schema = (await db.query<{ table_name: string; column_name: string; data_type: string }>("SELECT table_name,column_name,data_type FROM information_schema.columns WHERE table_schema='public'")).rows;
   for (const table of tables) {
     if (!knownTables.has(table.table_name)) continue;

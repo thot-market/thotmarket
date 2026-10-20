@@ -109,9 +109,9 @@ test('public proof selection uses only configured stable app URLs and does not e
     assert.equal(response.headers['content-type'], 'application/json; charset=utf-8');
     assert.equal(response.headers['cache-control'], 'no-store');
     const proof = JSON.parse(response.body.toString());
-    const environment = appUrl === 'https://app.test.thot.market/app' ? 'dev' : appUrl === 'https://app.staging.thot.market/app' ? 'staging' : undefined;
-    assert.equal(proof.status, environment ? 'available' : 'unavailable');
-    assert.equal(proof.environment, environment);
+    // No reviewed snapshot files are tracked in this checkout; absence must stay unavailable.
+    assert.equal(proof.status, 'unavailable');
+    assert.equal(proof.environment, undefined);
     assert.deepEqual(JSON.parse((await call('/v1/public/market-proof.json')).body.toString()), proof);
     for (const source of ['/assets/market-proof-dev.json', '/assets/market-proof-staging.json', '/v1/public/market-proof/../../.env']) assert.equal((await call(source)).status, 404);
     assert.equal((await call('/v1/public/market-proof', 'POST')).status, 405);
@@ -163,7 +163,7 @@ test('access UI requires an explicit reviewer click and never forwards helper fr
     });
     await new Promise<void>(resolve => setImmediate(resolve));
     assert.deepEqual(redirects, []);
-    assert.deepEqual(historyChanges, ['/app']);
+    assert.deepEqual(historyChanges, []);
     assert.equal(nodes['helper-note']!.hidden, false);
     if (reviewerUrl === 'https://review.example') {
       assert.equal(nodes['reviewer-link']!.href, reviewerUrl);
@@ -185,7 +185,7 @@ test('wallet workspace configuration accepts only the exact HTTPS origin or app 
   assert.deepEqual(JSON.parse((await invalid('/v1/public/site-config')).body.toString()), { appUrl: null, reviewerUrl: null, access: 'unavailable', privateAppHosted: false });
 });
 
-test('wallet access UI opens only its configured workspace, keeps helper secrets local, and states the testnet scope', async () => {
+test('wallet access UI keeps capabilities on their original host without asserting a network', async () => {
   const source = await readFile(new URL('../apps/site/access.js', import.meta.url), 'utf8');
   for (const appUrl of ['https://workspace.example/app', 'https://workspace.example/app?token=private', 'https://workspace.example/app#secret', 'https://localhost/app', 'https://workspace.example/other']) {
     const nodes: Record<string, { hidden: boolean; textContent: string; href?: string }> = Object.fromEntries(['reviewer-link', 'access-status', 'helper-note', 'access-intro', 'access-title', 'access-description', 'access-link-label'].map(id => [id, { hidden: id === 'reviewer-link' || id === 'helper-note', textContent: '' }]));
@@ -197,13 +197,73 @@ test('wallet access UI opens only its configured workspace, keeps helper secrets
       fetch: async (_url: string, options: any) => { assert.equal(options.credentials, 'omit'); return { ok: true, json: async () => ({ access: 'wallet', appUrl, reviewerUrl: 'https://old-review.example' }) }; }, URL, AbortSignal,
     });
     await new Promise<void>(resolve => setImmediate(resolve));
-    assert.deepEqual(replaced, ['/app']); assert.deepEqual(navigation, []); assert.equal(nodes['helper-note']!.hidden, false);
+    assert.deepEqual(replaced, []); assert.deepEqual(navigation, []); assert.equal(nodes['helper-note']!.hidden, false);
     if (appUrl === 'https://workspace.example/app') {
       assert.equal(nodes['reviewer-link']!.href, appUrl); assert.equal(nodes['reviewer-link']!.hidden, false);
-      assert.match(nodes['access-description']!.textContent, /EVM wallet/); assert.match(nodes['access-status']!.textContent, /testnet/);
-      assert.doesNotMatch(nodes['access-status']!.textContent, /invited|email/);
+      assert.match(nodes['access-description']!.textContent, /Sign in/); assert.match(nodes['access-status']!.textContent, /original app/);
+      assert.doesNotMatch(nodes['access-status']!.textContent, /testnet|test tokens|invited|email/);
     } else {
       assert.equal(nodes['reviewer-link']!.href, undefined); assert.equal(nodes['reviewer-link']!.hidden, true);
     }
   }
+});
+
+test('ordinary app entry continues directly, with only known non-secret view fragments', async () => {
+  const source = await readFile(new URL('../apps/site/access.js', import.meta.url), 'utf8');
+  for (const [hash, search, expected] of [
+    ['', '', 'https://app.thot.market/app'],
+    ['#referrals', '', 'https://app.thot.market/app#referrals'],
+    ['#thot-available', '', 'https://app.thot.market/app#thot-available'],
+    ['#thot-purchases', '', 'https://app.thot.market/app#thot-purchases'],
+    ['#thot=synthetic-capability', '', null],
+    ['#thot-history=synthetic-capability', '', null],
+    ['#trace=synthetic-trace', '', null],
+    ['#unknown=synthetic-secret', '', null],
+    ['', '?oauth_state_id=synthetic', null],
+    ['#referrals', '?redirect=https://outside.invalid', null],
+  ]) {
+    const nodes: Record<string, { hidden: boolean; textContent: string; href?: string }> = Object.fromEntries(
+      ['reviewer-link', 'access-status', 'helper-note', 'access-intro', 'access-title', 'access-description', 'access-link-label'].map(id => [id, { hidden: true, textContent: '' }]));
+    const navigation: string[] = [];
+    runInNewContext(source, {
+      document: { getElementById: (id: string) => nodes[id] },
+      window: { location: { hash, search, pathname: '/app', replace: (url: string) => navigation.push(url) } },
+      fetch: async () => ({ ok: true, json: async () => ({ access: 'wallet', appUrl: 'https://app.thot.market/app' }) }), URL, AbortSignal,
+    });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.deepEqual(navigation, expected ? [expected] : [], String(hash) + String(search));
+  }
+});
+
+test('configured production homepage and article CTAs bypass the access page without reflecting request state', async t => {
+  const call = await fixture(t, { publicOrigin: 'https://thot.market' });
+  const headers = { Host: 'thot.market' };
+  assert.deepEqual(JSON.parse((await call('/v1/public/site-config', 'GET', headers)).body.toString()),
+    { appUrl: 'https://app.thot.market/app', reviewerUrl: null, access: 'wallet', privateAppHosted: false });
+  for (const path of ['/', '/read', '/tutorial', '/mechanism', '/whitepaper', '/affiliates']) {
+    const response = await call(path + '?appUrl=https://outside.invalid&token=synthetic', 'GET', headers);
+    assert.equal(response.status, 200);
+    const html = response.body.toString();
+    const links = html.match(/<a\b[^>]*\bdata-workspace-link\b[^>]*>/g);
+    assert.ok(links?.length, path);
+    for (const link of links) assert.match(link, /href="https:\/\/app\.thot\.market\/app(?:#[a-z-]+)?"/);
+    assert.doesNotMatch(html, /outside.invalid|token=synthetic/);
+  }
+});
+
+test('an access page configured as its own destination reports unavailable without a redirect loop', async () => {
+  const source = await readFile(new URL('../apps/site/access.js', import.meta.url), 'utf8');
+  const link = { hidden: true, href: '', removeAttribute(name: string) { if (name === 'href') this.href = ''; } };
+  const status = { textContent: '' };
+  const navigation: string[] = [];
+  runInNewContext(source, {
+    document: { getElementById: (id: string) => id === 'reviewer-link' ? link : id === 'access-status' ? status : null },
+    window: { location: { origin: 'https://app.example', pathname: '/app/', hash: '', search: '', replace: (url: string) => navigation.push(url) } },
+    fetch: async () => ({ ok: true, json: async () => ({ access: 'wallet', appUrl: 'https://app.example/app' }) }), URL, AbortSignal,
+  });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.deepEqual(navigation, []);
+  assert.equal(link.hidden, true);
+  assert.equal(link.href, '');
+  assert.match(status.textContent, /unavailable.*returns to this access page/);
 });

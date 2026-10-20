@@ -8,6 +8,7 @@ import type { RobinhoodLinks } from './robinhood-link.ts';
 import type { PlaidLinks } from './plaid-link.ts';
 import { demoBuyer, mandateInput, policyInput } from './fixtures.ts';
 import { traceSaleEligibility } from './trace-library.ts';
+import { enqueueTraceQc } from './trace-qc-state.ts';
 
 export class ContributorPortfolio {
   readonly service:ThotService; readonly robinhood:RobinhoodLinks; readonly plaid:PlaidLinks;
@@ -67,6 +68,7 @@ export class ContributorPortfolio {
       // Only a subsequent, separately signed THOT listing may authorize its sale.
       trace.thot_listing_only=true;trace.updated_at=this.service.now();
       await tx.update('traces',traceId,trace);
+      await enqueueTraceQc(tx,trace,this.service.now(),['release']);
       await tx.audit(actor.id,'PrivateImportReleasePrepared',{trace_id:traceId,rights_status:trace.rights_status,model_output_licensed:input.model_output_licensed});
       return {trace_id:traceId,status:trace.display_status,rights_status:trace.rights_status,listed:false};
     });

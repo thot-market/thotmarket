@@ -5,11 +5,12 @@ import type { ThotChainConfig } from '../../packages/chain/thot.ts';
 import { loadThotChainConfig } from '../../packages/chain/thot-config.ts';
 import { ensure } from '../../packages/storage/src/index.ts';
 
-type WorkerApplication = Pick<Awaited<ReturnType<typeof createApplication>>, 'inference' | 'service' | 'thot' | 'close'> & Partial<Pick<Awaited<ReturnType<typeof createApplication>>,'thotAnalytics'>>;
+type WorkerApplication = Pick<Awaited<ReturnType<typeof createApplication>>, 'inference' | 'service' | 'thot' | 'close'> & Partial<Pick<Awaited<ReturnType<typeof createApplication>>,'thotAnalytics'|'qc'>>;
 type CycleApplication = {
   inference: { sweep(): Promise<unknown> };
   service: { sweepRetention(): Promise<unknown>; runWorker(limit?: number): Promise<unknown> };
   thot: { sweepRetention(): Promise<unknown>; processSales?(): Promise<unknown> };
+  qc?: {processPending(limit?:number):Promise<unknown>};
   thotAnalytics?: { refresh(): Promise<{complete?:boolean;configured?:boolean}> };
 };
 
@@ -21,6 +22,16 @@ export function startWorkerLoop(app: CycleApplication, options: { intervalMs?: n
   let stopped = false, timer: ReturnType<typeof setTimeout> | undefined, analyticsTimer: ReturnType<typeof setTimeout> | undefined;
   let pending: Promise<void> = Promise.resolve();
   let analyticsPending: Promise<void> = Promise.resolve();
+  let qcPending:Promise<void>=Promise.resolve(),qcTimer:ReturnType<typeof setTimeout>|undefined;
+  // Independent of chain/retention availability; vault work happens outside the DB lock.
+  function qcTick(){
+    if(stopped||!app.qc)return;
+    qcPending=(async()=>{
+      try{await app.qc!.processPending(2);}
+      catch{try{onError(new Error('TRACE_QC_PENDING'));}catch{/* Diagnostics cannot stop other lanes. */}}
+      finally{if(!stopped)qcTimer=setTimeout(qcTick,Math.min(intervalMs,3000));}
+    })();
+  }
   // Read-only backfill is bounded and independent: an index outage cannot delay a
   // funded delivery or payout. Catch-up is faster than the transaction worker.
   function indexTick() {
@@ -51,7 +62,8 @@ export function startWorkerLoop(app: CycleApplication, options: { intervalMs?: n
   }
   tick();
   indexTick();
-  return { close: async () => { stopped = true; clearTimeout(timer);clearTimeout(analyticsTimer); await Promise.all([pending,analyticsPending]); } };
+  qcTick();
+  return { close: async () => { stopped = true; clearTimeout(timer);clearTimeout(analyticsTimer);clearTimeout(qcTimer); await Promise.all([pending,analyticsPending,qcPending]); } };
 }
 
 export async function startStandaloneWorker(options: {

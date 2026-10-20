@@ -137,6 +137,9 @@ test('Privy public onboarding config preserves SIWE ownership and enables only t
   assert.equal(capabilities.body.mode, 'wallet_siwe'); assert.equal(capabilities.body.bearer_required, false);
   const policy = capabilities.headers['content-security-policy'];
   assert.match(policy, /connect-src[^;]+https:\/\/auth\.privy\.io/); assert.match(policy, /frame-src[^;]+https:\/\/auth\.privy\.io/);
+  assert.equal(policy.split(';').find((directive: string) => directive.trim().startsWith('img-src'))?.trim(),
+    "img-src 'self' data: blob: https://explorer-api.walletconnect.com/v3/logo/");
+  assert.doesNotMatch(policy.split(';').find((directive: string) => directive.trim().startsWith('script-src')) ?? '', /walletconnect|unsafe-inline|\*/);
   assert.ok(!policy.includes("'unsafe-eval'")); assert.ok(!policy.includes("script-src 'self' 'unsafe-inline'"));
   const wallet = Wallet.createRandom(), first = await login(wallet), again = await login(wallet);
   assert.equal(first.result.body.actor.id, again.result.body.actor.id);
@@ -179,6 +182,23 @@ test('stable-host sign-in opens the existing vault while native callbacks keep t
   assert.equal(capture.status,200);
   const saved=await app.agentCapture.authenticate(capture.body.capture_id,capture.body.upload_token);
   assert.equal(saved.owner_id,existing.result.body.actor.id);
+});
+
+test('explicit production app alias selects ordinary public CTAs without changing cookie or capability origins', async t => {
+  const alias='https://app.thot.market', stable={origin:alias,host:new URL(alias).host};
+  const {call,login}=await setup(t,undefined,[alias],false,4663);
+  for(const request of [{},stable]){
+    const page=await call('/',request);
+    assert.equal(page.status,200);
+    assert.match(page.body,/href="https:\/\/app\.thot\.market\/app" data-workspace-link/);
+    assert.equal((await call('/v1/public/site-config',request)).body.appUrl,alias+'/app');
+    assert.equal((await call('/v1/public/market-proof',request)).body.status,'unavailable');
+  }
+  assert.equal((await call('/v1/auth/capabilities')).body.wallet.origin,origin);
+  assert.equal((await call('/v1/auth/capabilities',stable)).body.wallet.origin,alias);
+  const account=await login();
+  for(const cookie of account.result.headers['set-cookie'])assert.ok(!cookie.includes('Domain='));
+  assert.equal((await call('/v1/contributor/portfolio',stable)).status,401);
 });
 
 test('known aliases cannot cross the Host/Origin boundary or smuggle forwarded origins', async t => {

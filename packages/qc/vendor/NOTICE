@@ -1,0 +1,14 @@
+THOT trace QC includes adapted material from:
+
+Data-Juicer tool_success_tagger_mapper.py
+Copyright 2025 The Data-Juicer Authors. All rights reserved.
+Apache License 2.0; see data-juicer.LICENSE and sources.json.
+
+OpenJudge trajectory_accuracy.py English evaluation rubric
+Apache License 2.0; see openjudge.LICENSE and sources.json.
+
+The exact source paths, pinned commits, original file hashes and modifications
+are recorded in sources.json. Neither upstream repository supplies a root NOTICE
+file at these commits. This notice was added for this adaptation. Upstream license
+files are retained unmodified, including their existing third-party notices.
+This package does not imply endorsement by either upstream project.

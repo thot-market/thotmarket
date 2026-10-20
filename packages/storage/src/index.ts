@@ -22,6 +22,7 @@ for (const table of ['inference_billing_evidence','inference_billing_reviews','a
 mutable.add('auth_access'); mutable.add('operational_controls');
 tables.add('agent_captures'); mutable.add('agent_captures');
 tables.add('thot_records'); mutable.add('thot_records');
+for(const table of ['trace_qc_runs','trace_qc_reviews'])tables.add(table);
 function tableName(table: string): string {
   ensure(tables.has(table), 'UNKNOWN_TABLE'); return table;
 }
@@ -93,7 +94,7 @@ export class Database {
     return this.pool!.query(sql, params) as unknown as Promise<{rows:T[]}>;
   }
   private async migrate(): Promise<void> {
-    const migrations=await Promise.all(['001_initial.sql','002_inference.sql','003_operations.sql','004_agent_capture.sql','005_thot.sql','006_staged_storage.sql'].map(async name=>{
+    const migrations=await Promise.all(['001_initial.sql','002_inference.sql','003_operations.sql','004_agent_capture.sql','005_thot.sql','006_staged_storage.sql','007_trace_qc.sql'].map(async name=>{
       const sql=await readFile(new URL('../../../migrations/'+name,import.meta.url),'utf8');
       return {version:name.slice(0,3),sql,digest:createHash('sha256').update(sql).digest('hex')};
     }));

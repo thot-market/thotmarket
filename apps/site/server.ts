@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { publicLaunchConfig, readPublicAsset, readPublicMarketProof, type LaunchConfiguration } from '../api/public-site.ts';
+import { canonicalApplicationUrl, publicLaunchConfig, readPublicAsset, readPublicMarketProof, type LaunchConfiguration } from '../api/public-site.ts';
 
 export type SiteServerOptions = {
   publicOrigin?: string;
@@ -35,11 +35,14 @@ export function workspaceUrl(value?: string): string | null {
   } catch { return null; }
 }
 
-export function publicSiteConfig(options: Pick<SiteServerOptions, 'reviewerUrl' | 'appUrl'> = {}) {
+export function publicSiteConfig(options: Pick<SiteServerOptions, 'reviewerUrl' | 'appUrl' | 'publicOrigin'> = {}) {
   // An explicit new app setting must never silently fall back to the old reviewer app.
   if (options.appUrl !== undefined) {
     const app = workspaceUrl(options.appUrl);
     return { appUrl: app, reviewerUrl: null, access: app ? 'wallet' : 'unavailable', privateAppHosted: false };
+  }
+  if (options.reviewerUrl === undefined && ['https://thot.market', 'https://www.thot.market'].includes(options.publicOrigin ?? '')) {
+    return { appUrl: canonicalApplicationUrl, reviewerUrl: null, access: 'wallet', privateAppHosted: false };
   }
   const review = reviewerOrigin(options.reviewerUrl);
   return { reviewerUrl: review, access: review ? 'invited-reviewers' : 'unavailable', privateAppHosted: false };
@@ -111,7 +114,7 @@ export function createSiteServer(options: SiteServerOptions = {}) {
       const access = accessAssets[path];
       const asset = access
         ? { body: await readFile(new URL(access[0], import.meta.url)), contentType: access[1] }
-        : await readPublicAsset(path);
+        : await readPublicAsset(path, 'appUrl' in accessConfig && accessConfig.appUrl ? accessConfig.appUrl : '/app');
       if (!asset) { send(404, '{"error":"NOT_FOUND"}'); return; }
       const cache = asset.contentType.startsWith('text/html') ? 'no-store' : 'public, max-age=3600';
       send(200, asset.body, asset.contentType, cache);

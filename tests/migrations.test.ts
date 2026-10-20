@@ -15,11 +15,12 @@ const thirdSql = await readFile(new URL('../migrations/003_operations.sql', impo
 const fourthSql = await readFile(new URL('../migrations/004_agent_capture.sql', import.meta.url), 'utf8');
 const fifthSql = await readFile(new URL('../migrations/005_thot.sql', import.meta.url), 'utf8');
 const sixthSql = await readFile(new URL('../migrations/006_staged_storage.sql', import.meta.url), 'utf8');
+const seventhSql = await readFile(new URL('../migrations/007_trace_qc.sql', import.meta.url), 'utf8');
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
-const versions = [{ version: '001', sha256: hash(firstSql) }, { version: '002', sha256: hash(secondSql) }, { version: '003', sha256: hash(thirdSql) }, { version: '004', sha256: hash(fourthSql) }, { version: '005', sha256: hash(fifthSql) }, { version: '006', sha256: hash(sixthSql) }];
+const versions = [{ version: '001', sha256: hash(firstSql) }, { version: '002', sha256: hash(secondSql) }, { version: '003', sha256: hash(thirdSql) }, { version: '004', sha256: hash(fourthSql) }, { version: '005', sha256: hash(fifthSql) }, { version: '006', sha256: hash(sixthSql) }, { version: '007', sha256: hash(seventhSql) }];
 test('published migration bytes remain compatible with existing databases', async () => {
-  const names = ['001_initial.sql', '002_inference.sql', '003_operations.sql', '004_agent_capture.sql', '005_thot.sql', '006_staged_storage.sql'];
-  const sql = [firstSql, secondSql, thirdSql, fourthSql, fifthSql, sixthSql];
+  const names = ['001_initial.sql', '002_inference.sql', '003_operations.sql', '004_agent_capture.sql', '005_thot.sql', '006_staged_storage.sql', '007_trace_qc.sql'];
+  const sql = [firstSql, secondSql, thirdSql, fourthSql, fifthSql, sixthSql, seventhSql];
   // The private tree projects THOT identifiers into the published THOT source.
   // The exported tree has already been projected and contains this suite manifest.
   const published = existsSync(new URL('../release/test-suites.json', import.meta.url))
@@ -36,6 +37,7 @@ test('published migration bytes remain compatible with existing databases', asyn
     { version: '004', sha256: '334a94903c53dae306e287af7ee6b31c6ff1f410fc45398c98673a47170de80c' },
     { version: '005', sha256: '0e82cf32e92b2f2af0dcf916ba1dcb8d944d6499a05f53bbd0f87fe1385f3852' },
     { version: '006', sha256: '2a70ccc5cbe8d68cd494e850a76ac22497e7b5834d3817d2316227ab6bdaa631' },
+    { version: '007', sha256: 'cae4192701aa51bc700f5584b89757a9d956131e3356de4d7419d6927e1e004a' },
   ]);
 });
 async function directory(t: any) {
@@ -151,7 +153,7 @@ test('missing prefix and a database newer than the application are rejected with
     const dataDir = join(await directory(t), kind); await seedV1(dataDir); const raw = await PGlite.create(dataDir);
     if (kind === 'missing-prefix') await raw.query("UPDATE schema_versions SET version='002'");
     else {
-      await raw.query('INSERT INTO schema_versions(version,sha256) VALUES($1,$2),($3,$4),($5,$6),($7,$8),($9,$10),($11,$12)', ['002', hash(secondSql), '003', hash(thirdSql), '004', hash(fourthSql), '005', hash(fifthSql), '006', hash(sixthSql), '007', 'future']);
+      await raw.query('INSERT INTO schema_versions(version,sha256) VALUES($1,$2),($3,$4),($5,$6),($7,$8),($9,$10),($11,$12),($13,$14)', ['002', hash(secondSql), '003', hash(thirdSql), '004', hash(fourthSql), '005', hash(fifthSql), '006', hash(sixthSql), '007', hash(seventhSql), '008', 'future']);
     }
     await raw.close(); await assert.rejects(Database.open({ dataDir }), kind === 'newer' ? /DATABASE_VERSION_NEWER/ : /MIGRATION_DRIFT/);
     const check = await PGlite.create(dataDir);

@@ -20,6 +20,10 @@ a private library, and authorize selected research for sale. Buyers inspect
 listing metadata and supported property results before purchasing a licensed
 release. Saving privately and authorizing a sale are separate actions.
 
+Owners can run [quality checks](docs/reusable-qc.md) on a selected saved trace,
+review findings and save feedback. The same bounded engine is available as a
+standalone CLI; quality signals do not determine prices or trigger purchases.
+
 ## Use Thot Market
 
 Open the **[production app](https://484da3c15305127b71262614961583a8f473e00d-4318.dstack-base-prod5.phala.network)**

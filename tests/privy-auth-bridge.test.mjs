@@ -13,7 +13,8 @@ const address='0x'+'a'.repeat(40), other='0x'+'b'.repeat(40);
 const listeners=new Set();
 const calls={login:0,signOut:0,signIn:0,provider:0,switchChain:0,createWallet:0};
 const provider={fixture:true};
-const wallet={address,walletClientType:'privy',switchChain:async()=>{calls.switchChain++;},getEthereumProvider:async()=>{calls.provider++;return provider;}};
+let switchGate=null,releaseSwitch=null;
+const wallet={address,walletClientType:'privy',switchChain:async()=>{calls.switchChain++;await switchGate;},getEthereumProvider:async()=>{calls.provider++;return provider;}};
 const user={id:'synthetic-a',linkedAccounts:[{type:'wallet',chainType:'ethereum',address}]};
 let snapshot={auth:{ready:false,authenticated:false,user:null,logout:async()=>{},linkWallet(){}},wallet:{ready:false,wallets:[]},modal:{isOpen:false}};
 let loginHooks, controller, modalBehavior='ready';
@@ -27,7 +28,7 @@ globalThis.__sdk=sdk;
 let initialized='pending',providers='idle',opening='idle',errors=[];
 function setState(patch){snapshot={auth:{...snapshot.auth,...(patch.ready===undefined?{}:{ready:patch.ready}),...(patch.authenticated===undefined?{}:{authenticated:patch.authenticated,user:patch.authenticated?user:null}),...(patch.otherUser?{user:{...user,id:'synthetic-b',linkedAccounts:[{type:'wallet',chainType:'ethereum',address:other}]}}:{})},wallet:{ready:patch.walletsReady??snapshot.wallet.ready,wallets:patch.hasWallet===undefined?snapshot.wallet.wallets:patch.hasWallet?[wallet]:[]},modal:{isOpen:patch.modalOpen??snapshot.modal.isOpen}};for(const listener of listeners)listener();}
 const target=document.querySelector('#choices');
-window.fixture={calls,errors,setState,async start({deadline=5000,modal='ready',...state}={}){modalBehavior=modal;setState(state);controller=createPrivyAuth({document,window:{setTimeout:(callback,ms)=>window.setTimeout(callback,ms===30000?deadline:ms),clearTimeout:window.clearTimeout.bind(window)},config:{app_id:'syntheticprivyapplication123456',chain_id:31337,rpc_url:'https://rpc.example.test'},walletAuth:{async signOut(){calls.signOut++;},async signInProvider(){calls.signIn++;return true;}},onError:error=>errors.push(error.message)});controller.mount(target);controller.initialize().then(()=>{initialized='ready';},error=>{initialized=error.message;});},modalContent,beginLogin(){opening='pending';controller.login().then(()=>{opening='resolved';},error=>{opening={message:error.message,code:error.code};});},login:()=>controller.login(),destroy:()=>controller.destroy(),complete:()=>loginHooks.onComplete({loginAccount:{type:'email'}}),get status(){return{initialized,providers,opening,calls:{...calls},errors:[...errors]};},providers(){providers='pending';controller.providers(address).then(value=>{providers=value.length;},error=>{providers=error.message;});}};
+window.fixture={calls,errors,setState,blockSwitch(){switchGate=new Promise(resolve=>{releaseSwitch=resolve;});},unblockSwitch(){releaseSwitch?.();switchGate=null;},async start({deadline=5000,modal='ready',...state}={}){modalBehavior=modal;setState(state);controller=createPrivyAuth({document,window:{setTimeout:(callback,ms)=>window.setTimeout(callback,ms===30000?deadline:ms),clearTimeout:window.clearTimeout.bind(window)},config:{app_id:'syntheticprivyapplication123456',chain_id:31337,rpc_url:'https://rpc.example.test'},walletAuth:{async signOut(){calls.signOut++;},async signInProvider(){calls.signIn++;return true;}},onError:error=>errors.push(error.message),walletSetupTimeoutMs:deadline});controller.mount(target);controller.initialize().then(()=>{initialized='ready';},error=>{initialized=error.message;});},modalContent,beginLogin(){opening='pending';controller.login().then(()=>{opening='resolved';},error=>{opening={message:error.message,code:error.code};});},login:()=>controller.login(),destroy:()=>controller.destroy(),complete:()=>loginHooks.onComplete({loginAccount:{type:'email'}}),get status(){return{initialized,providers,opening,calls:{...calls},errors:[...errors]};},providers(){providers='pending';controller.providers(address).then(value=>{providers=value.length;},error=>{providers=error.message;});}};
 `;
 const mockSdk = `
 import React, {useSyncExternalStore} from 'react';
@@ -172,4 +173,25 @@ test('already authenticated wallet selection is independent of the anonymous mod
   await page.evaluate(()=>window.fixture.beginLogin());
   await page.waitForFunction(()=>window.fixture.status.opening==='resolved'&&window.fixture.status.calls.signIn===1);
   assert.equal((await status(page)).calls.login,0);assert.deepEqual((await status(page)).errors,[]);
+});
+
+
+test('THOT ownership signature waits until the Privy connection success modal closes',async t=>{
+ const page=await pageFor(t,{ready:true});await page.waitForFunction(()=>window.fixture.status.initialized==='ready');
+ await page.evaluate(()=>window.fixture.login());
+ await page.evaluate(()=>{window.fixture.setState({authenticated:true,walletsReady:true,hasWallet:true,modalOpen:true});window.fixture.complete();});
+ await page.waitForTimeout(60);assert.equal((await status(page)).calls.signIn,0,'connection success is not application sign-in');
+ await page.evaluate(()=>window.fixture.setState({modalOpen:false}));
+ await page.waitForFunction(()=>window.fixture.status.calls.signIn===1);assert.equal((await status(page)).calls.signIn,1);
+});
+
+test('a stalled Privy network request expires and a later retry can complete',async t=>{
+ const page=await pageFor(t,{ready:true,authenticated:true,walletsReady:true,hasWallet:true,deadline:60});
+ await page.waitForFunction(()=>window.fixture.status.initialized==='ready');
+ await page.evaluate(()=>{window.fixture.blockSwitch();window.fixture.beginLogin();});
+ await page.waitForFunction(()=>window.fixture.status.errors.some(message=>message.includes('connection expired')));
+ assert.equal((await status(page)).calls.signIn,0);
+ await page.evaluate(()=>window.fixture.unblockSwitch());
+ await page.evaluate(()=>window.fixture.login());
+ await page.waitForFunction(()=>window.fixture.status.calls.signIn===1);
 });

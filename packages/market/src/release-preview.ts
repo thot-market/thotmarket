@@ -2,6 +2,7 @@ import {canonicalHash,canonicalJson} from '../../protocol/src/index.ts';
 import {ensure,type Document,type Transaction} from '../../storage/src/index.ts';
 import type {Actor,ThotService} from './service.ts';
 import {traceSaleEligibility} from './trace-library.ts';
+import {enqueueTraceQc} from './trace-qc-state.ts';
 
 export const RELEASE_PREVIEW_LIMITS=Object.freeze({max_bytes:2_000_000,max_turns:1000,max_revisions:32});
 const digest=(value:unknown)=>'0x'+canonicalHash(value);
@@ -91,6 +92,7 @@ export class ReleasePreview {
         trace.thot_listing_only=true;
         trace.release_edit={previous_content_hash:input.content_hash,content_hash:'0x'+hash,excluded_turns:indices.length,revision:trace.release_revision};
         await tx.update('traces',trace.trace_id,trace);
+        await enqueueTraceQc(tx,trace,this.service.now(),['release']);
         await tx.audit(actor.id,'ReleaseMessagesExcluded',{trace_id:trace.trace_id,previous_content_hash:input.content_hash,content_hash:'0x'+hash,excluded_turns:indices.length,revision:trace.release_revision});
         // Idempotency responses live in metadata storage: never persist plaintext
         // preview content there. Re-read the encrypted preview after commit.

@@ -7,6 +7,7 @@ import { canonicalHash, uuidv7, validateProvenanceReceipt } from '../../protocol
 import { ensure, type Document, type Transaction } from '../../storage/src/index.ts';
 import type { Actor, ThotService } from './service.ts';
 import { projectCapture } from './capture-projection.ts';
+import { enqueueTraceQc } from './trace-qc-state.ts';
 
 export interface ProxyCaptureBundle {format:'thot.proxy-capture/1';capture_id:string;client:CaptureClient;started_at:string;finished_at:string;exchanges:Document[];root:string}
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
@@ -123,6 +124,7 @@ export class AgentCaptureIngestion {
           capture.status='SAVED';capture.completed_at=this.service.now();capture.result={...capture.result,status:'SAVED'};
           trace.capture_state=capture.result.capture_summary.interrupted?'INTERRUPTED':'COMPLETED';previous.final=true;
           await tx.update('traces',trace.trace_id,trace);await tx.update('agent_captures',captureId,capture);
+          await enqueueTraceQc(tx,trace,this.service.now());
           await tx.audit(capture.owner_id,'AgentCaptureCompleted',{capture_id:captureId,trace_id:trace.trace_id,bundle_root:bundle.root,exchange_count:capture.result.capture_summary.exchanges});
         }
         return capture.result;
@@ -211,6 +213,7 @@ export class AgentCaptureIngestion {
       const trace=await tx.get('traces',capture.result.trace_id,authenticated.owner_id);
       trace.projection={status:'ERROR',source_root:bundle.root,error_code:'PROJECTION_FAILED'};capture.result.projection=trace.projection;
       await tx.update('traces',trace.trace_id,trace);await tx.update('agent_captures',captureId,capture);
+      await enqueueTraceQc(tx,trace,this.service.now());
       await tx.audit(authenticated.owner_id,'CaptureProjectionFailed',{capture_id:captureId,error_code:'PROJECTION_FAILED'});
     });}
     return this.service.db.transaction(async tx=>(await tx.get('agent_captures',captureId,authenticated.owner_id)).result);

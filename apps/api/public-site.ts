@@ -32,10 +32,27 @@ const assets: Record<string, [string, string]> = {
 
 export const publicDocumentRoutes = new Set(['/', '/index.html', '/read', '/tutorial', '/whitepaper', '/mechanism', '/affiliates', '/affiliates.html', '/app', '/app/', '/getting-started']);
 
-export async function readPublicAsset(path: string) {
+export const canonicalApplicationUrl = 'https://app.thot.market/app';
+
+/** Render only ordinary workspace links. Capability URLs never enter this function. */
+export function publicWorkspaceLinks(html: string, appUrl: string) {
+  if (appUrl !== '/app') {
+    const url = new URL(appUrl);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
+      || url.pathname !== '/app' || url.href !== appUrl || /[<>"'&]/.test(appUrl)) throw Error('INVALID_PUBLIC_APP_URL');
+  }
+  return html.replace(/<a\b[^>]*\bdata-workspace-link\b[^>]*>/g, tag => tag.replace(
+    /href="(?:https:\/\/app\.thot\.market)?\/app(#[a-z-]+)?"/,
+    (_match, fragment = '') => `href="${appUrl}${fragment}"`,
+  ));
+}
+
+export async function readPublicAsset(path: string, appUrl?: string) {
   const entry = assets[path];
   if (!entry) return undefined;
-  return { body: await readFile(new URL('../site/' + entry[0], import.meta.url)), contentType: entry[1] };
+  let body = await readFile(new URL('../site/' + entry[0], import.meta.url));
+  if (appUrl && entry[1].startsWith('text/html')) body = Buffer.from(publicWorkspaceLinks(body.toString('utf8'), appUrl));
+  return { body, contentType: entry[1] };
 }
 
 const proofSchema = 'thot.public-market-proof/1' as const;

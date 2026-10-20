@@ -11,8 +11,8 @@ const roots=[STORAGE_FORMAT_FILE,'postgres','objects','quarantine'];
 // Snapshot them in bounded chunks; this does not relax trace upload limits.
 const databaseFileLimit=1024*1024*1024;
 const databaseTotalLimit=4*1024*1024*1024;
-const currentMigration='006';
-const supportedVersions=['001','002','003','004','005',currentMigration];
+const currentMigration='007';
+const supportedVersions=['001','002','003','004','005','006',currentMigration];
 async function exists(path:string){try{await lstat(path);return true;}catch(error:any){if(error.code==='ENOENT')return false;throw error;}}
 async function copy(source:string,destination:string,entries:SnapshotEntry[]){for(const entry of entries){const target=join(destination,entry.path),from=join(source,entry.path);if(entry.type==='directory')await mkdir(target,{mode:0o700});else{const copied=await digestFile(from,target,entry.path.startsWith('postgres/')?databaseFileLimit:undefined);assert(copied.size===entry.size&&copied.sha256===entry.sha256,'PRESTART_SOURCE_CHANGED');}}}
 
@@ -25,7 +25,7 @@ export async function createCvmPreMigrationSnapshot(dataDir=process.env.THOT_DAT
     const postgres=await checkedDirectory(join(lease.dataDir,'postgres'));const db=await PGlite.create(postgres);let versions:string[];
     try{const present=(await db.query<{name:string|null}>("SELECT to_regclass('public.schema_versions') AS name")).rows[0]?.name;versions=present?(await db.query<{version:string}>('SELECT version FROM schema_versions ORDER BY version')).rows.map(row=>row.version):[];}finally{await db.close();}
     assert(versions.length>0&&versions.length<=supportedVersions.length&&versions.every((version,index)=>version===supportedVersions[index]),'UNSUPPORTED_PRESTART_SCHEMA');
-    if(versions.includes(currentMigration))return {status:'not-needed' as const,reason:'MIGRATION_006_ALREADY_APPLIED'};
+    if(versions.includes(currentMigration))return {status:'not-needed' as const,reason:'MIGRATION_007_ALREADY_APPLIED'};
     const backupRoot=await checkedDirectory(join(lease.dataDir,'.pre-migration-snapshots'),true),final=join(backupRoot,'before-'+currentMigration);
     if(await exists(final)){await checkedDirectory(final);const encoded=await readBounded(join(final,'manifest.json'),8_000_000),expected=(await readBounded(join(final,'manifest.sha256'),100)).toString('utf8').trim();assert(/^[a-f0-9]{64}$/.test(expected)&&createHash('sha256').update(encoded).digest('hex')===expected,'PRESTART_SNAPSHOT_MANIFEST_INVALID');const prior=JSON.parse(encoded.toString('utf8'));assert(prior?.format==='thot.cvm-pre-migration-snapshot/1'&&prior.before_migration===currentMigration&&prior.key_custody==='external','PRESTART_SNAPSHOT_MANIFEST_INVALID');return {status:'existing' as const,path:final};}
     const temporary=join(backupRoot,'.before-'+currentMigration+'-'+randomUUID());await mkdir(temporary,{mode:0o700});let complete=false;

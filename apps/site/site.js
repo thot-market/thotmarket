@@ -1,6 +1,6 @@
 // Keep existing helper links working after the homepage moved to this route.
 // Only known app fragments are forwarded, always to the same origin.
-if (/^#(?:thot|thot-robinhood|trace)=/.test(window.location.hash) || new URLSearchParams(window.location.search).has('oauth_state_id')) {
+if (/^#(?:thot|thot-robinhood|thot-history|trace)=/.test(window.location.hash) || new URLSearchParams(window.location.search).has('oauth_state_id')) {
   window.location.replace('/app' + window.location.search + window.location.hash);
 }
 

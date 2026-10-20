@@ -75,18 +75,6 @@ if (typeof document !== 'undefined') {
   }));
   recalculate();
 
-  async function loadWorkspace() {
-    try {
-      const response = await fetch('/v1/public/site-config', { credentials: 'omit', signal: AbortSignal.timeout(5000) });
-      if (!response.ok) return;
-      const config = await response.json();
-      if (config.access !== 'wallet') return;
-      // Fixed destinations keep referral CTAs out of user-controlled redirects.
-      if (!['https://app.test.thot.market/app', 'https://app.staging.thot.market/app', 'https://app.thot.market/app'].includes(config.appUrl)) return;
-      document.querySelectorAll('[data-workspace-link]').forEach(node => { node.href = config.appUrl; });
-    } catch { /* The same-origin /app access page remains available. */ }
-  }
-
   function emptyProof(text) {
     document.querySelectorAll('[data-proof-rows]').forEach(container => {
       const p = document.createElement('p'); p.className = 'proof-empty'; p.textContent = text; container.replaceChildren(p);
@@ -102,6 +90,9 @@ if (typeof document !== 'undefined') {
       if (!Number.isFinite(date.getTime()) || !Number.isSafeInteger(proof.block_number)) throw Error('UNAVAILABLE');
       const timestamp = date.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
       set('[data-proof-time]', `Snapshot ${timestamp} · block ${proof.block_number.toLocaleString('en-US')}`);
+      set('[data-proof-environment]', 'Robinhood testnet');
+      set('[data-proof-heading]', 'Recent test purchases');
+      set('[data-proof-caption]', 'Testnet verification purchases, not customer adoption or real-money earnings. Amounts are gross purchase prices. Delivery and finalized proceeds are different stages.');
       // Never silently display changed economics under fixed 20% public copy.
       earningsExample('10', 1, proof.tariff);
       tariff = proof.tariff; recalculate();
@@ -129,9 +120,10 @@ if (typeof document !== 'undefined') {
         container.replaceChildren(...rows);
       });
     } catch {
-      set('[data-proof-time]', 'Public receipts are not available in this snapshot.');
+      set('[data-proof-environment]', 'Unavailable');
+      set('[data-proof-time]', 'Verified public receipts are unavailable for this environment.');
       emptyProof('Open the workspace to see available market activity. We only show transaction receipts here when they can be verified.');
     }
   }
-  void loadWorkspace(); void loadProof();
+  void loadProof();
 }

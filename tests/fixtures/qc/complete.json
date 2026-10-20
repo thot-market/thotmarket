@@ -1,0 +1,9 @@
+{
+  "synthetic": true,
+  "turns": [
+    {"role": "user", "content": "Check the synthetic example's tests and report the result."},
+    {"role": "assistant", "content": "I will run the example test.", "tool_calls": [{"id": "example-check", "type": "function", "function": {"name": "run_test", "arguments": {"fixture": "synthetic-example"}}}]},
+    {"role": "tool", "tool_call_id": "example-check", "content": "Test completed successfully."},
+    {"role": "assistant", "content": "The example test reports success. This is a synthetic QC demonstration."}
+  ]
+}

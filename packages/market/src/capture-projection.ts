@@ -4,6 +4,7 @@ import {ensure,type Document} from '../../storage/src/index.ts';
 import type {ThotService} from './service.ts';
 import {projectProxyExchange,proxyModelIdentity} from './proxy-normalization.ts';
 import {nativeConversationKey,appendCapturedExchange} from './capture-session.ts';
+import {enqueueTraceQc} from './trace-qc-state.ts';
 
 /** Rebuildable readable view. Original bundles, parts and provenance receipts
  * are never rewritten here. Unknown content is a display issue, not data loss. */
@@ -110,6 +111,7 @@ export async function projectCapture(service:ThotService,captureId:string,root:s
       // Preserve parts/heartbeats that arrived while the readable view was prepared.
       currentCapture.result=capture.result;
       await tx.update('traces',trace.trace_id,trace);await tx.update('agent_captures',captureId,currentCapture);
+      await enqueueTraceQc(tx,trace,service.now());
       if(trace.projection_refs?.length)await tx.enqueue(capture.owner_id,'DeleteSupersededProjections',{trace_id:trace.trace_id});
       for(const audit of audits)await tx.audit(capture.owner_id,audit.event,audit.payload);
       await tx.audit(capture.owner_id,'CaptureProjectionUpdated',{capture_id:captureId,trace_id:trace.trace_id,source_root:root,status:projection.status,normalized_exchanges:normalized,display_issues:issues.length});

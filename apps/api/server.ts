@@ -29,7 +29,7 @@ import {OperatorFleet} from './operator-fleet.ts';
 import {operatorProduct} from './operator-product.ts';
 import { operatorEnvironment } from './operator-environment.ts';
 import {maintenanceStats} from '../../packages/market/src/maintenance.ts';
-import { readPublicAsset, publicDocumentRoutes, publicLaunchConfig, type LaunchConfiguration } from './public-site.ts';
+import { canonicalApplicationUrl, readPublicAsset, publicDocumentRoutes, publicLaunchConfig, unavailableMarketProof, type LaunchConfiguration } from './public-site.ts';
 
 type Application=Awaited<ReturnType<typeof createApplication>>;
 const readDiagnosticCodes=new Set(['BAD_DATA','UNKNOWN_ERROR','SERVER_ERROR','TIMEOUT','NETWORK_ERROR','CALL_EXCEPTION','OFFCHAIN_FAULT']);
@@ -91,6 +91,9 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
   if(externalAuth instanceof WalletAuth)ensure(options.publicOrigin===externalAuth.origin,'AUTH_ORIGIN_MISMATCH');
   const appOrigins=externalAuth instanceof WalletAuth?externalAuth.allowedOrigins:options.publicOrigin?[options.publicOrigin]:[];
   const appOriginByHost=new Map(appOrigins.map(origin=>[new URL(origin).host,origin]));
+  // Production's ordinary CTAs use the stable app only when it is explicitly
+  // allowed by this deployment. Private/local applications stay on their own host.
+  const publicAppUrl=appOrigins.includes(new URL(canonicalApplicationUrl).origin)?canonicalApplicationUrl:'/app';
   const walletChainId=externalAuth?.capabilities.wallet?.chain_id;
   const walletRpcUrl=externalAuth?.capabilities.wallet?.rpc_url;
   const privy=options.privy?{app_id:options.privy.app_id,...(options.privy.client_id?{client_id:options.privy.client_id}:{}),chain_id:walletChainId,rpc_url:walletRpcUrl}:undefined;
@@ -116,7 +119,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
     res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
     const clerkOrigin=externalAuth?.capabilities.clerk?.frontend_api_url,plaidCdn=app.plaid.capabilities().plaid_linking?' https://cdn.plaid.com':'';
     res.setHeader('Content-Security-Policy',privy
-      ? `default-src 'self'; script-src 'self' https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://auth.privy.io https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org ${walletRpcUrl}; img-src 'self' data: blob:; font-src 'self'; frame-src 'self' https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com${plaidCdn}; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
+      ? `default-src 'self'; script-src 'self' https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://auth.privy.io https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org ${walletRpcUrl}; img-src 'self' data: blob: https://explorer-api.walletconnect.com/v3/logo/; font-src 'self'; frame-src 'self' https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com${plaidCdn}; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
       : clerkOrigin
       ? `default-src 'self'; script-src 'self' ${clerkOrigin} https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' ${clerkOrigin} http://127.0.0.1:*; img-src 'self' data: https://img.clerk.com; frame-src ${clerkOrigin} https://challenges.cloudflare.com${plaidCdn}; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
       : `default-src 'self'; script-src 'self'${plaidCdn}; style-src 'self'; connect-src 'self' http://127.0.0.1:*; img-src 'self' data:; frame-src 'self'${plaidCdn}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
@@ -144,7 +147,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       // The retained old candidate serves only authentication and already-delivered
       // licensed content. Deny every other API route before parsing a request body.
       if(options.readOnly&&route.startsWith('/v1/')){
-        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/catalog','/v1/thot/workspace'].includes(route);
+        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/site-config','/v1/public/market-proof','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/catalog','/v1/thot/workspace'].includes(route);
         const safePost=req.method==='POST'&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify','/v1/auth/session/revoke','/v1/thot/offers/delivery'].includes(route);
         ensure(safeGet||safePost,'THOT_READ_ONLY',403);
       }
@@ -152,10 +155,25 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       const portableAsset=route.match(/^\/capture-verifier\/(verify\.mjs|canonical\.mjs|hardware\.mjs|verify_dcap\.py|requirements\.txt|README\.txt)$/);
       if(req.method==='GET'&&portableAsset){chargeRate('public');const file=await readFile(new URL('../../packages/provenance/portable/'+portableAsset[1],import.meta.url));res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','X-Content-Type-Options':'nosniff'});res.end(file);return;}
       if(req.method==='GET'||req.method==='HEAD') {
-        const asset=await readPublicAsset(route);
-        if(asset){chargeRate('public');res.writeHead(200,{'Content-Type':asset.contentType});res.end(req.method==='HEAD'?undefined:asset.body);return;}
+        const asset=await readPublicAsset(route,publicAppUrl);
+        if(asset){
+          chargeRate('public');
+          res.setHeader('Content-Type',asset.contentType);
+          if(!asset.contentType.startsWith('text/html')){
+            // Revalidate mutable public asset URLs without caching across a private site's gate.
+            const etag='"'+createHash('sha256').update(asset.body).digest('hex')+'"';
+            res.setHeader('Cache-Control','private, no-cache');res.setHeader('ETag',etag);
+            if(matchesAssetEtag(req.headers['if-none-match'],etag)){res.writeHead(304);res.end();return;}
+          }
+          res.setHeader('Content-Length',asset.body.length);
+          res.writeHead(200);res.end(req.method==='HEAD'?undefined:asset.body);return;
+        }
       }
       if(req.method==='GET'&&route==='/v1/public/launch-config'){chargeRate('public');reply(200,publicLaunchConfig(options.launch));return;}
+      if(req.method==='GET'&&route==='/v1/public/site-config'){chargeRate('public');reply(200,{appUrl:publicAppUrl,reviewerUrl:null,access:publicAppUrl==='/app'?'same-origin':'wallet',privateAppHosted:true});return;}
+      // No published production evidence source is configured here. Never select a
+      // test snapshot from request data or infer receipts from private account data.
+      if(req.method==='GET'&&route==='/v1/public/market-proof'){chargeRate('public');reply(200,unavailableMarketProof());return;}
       if((req.method==='GET'||req.method==='HEAD')&&isDashboardAssetRoute(route)){
         chargeRate('public');
         res.setHeader('Vary','Accept-Encoding');
@@ -383,6 +401,12 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       else if(req.method==='GET'&&route==='/v1/contributor/library')result=await app.library.list(actor,Object.fromEntries(url.searchParams));
       else if(segments.length===4&&segments.slice(0,3).join('/')==='v1/contributor/library'&&req.method==='GET')result=await app.library.item(actor,segments[3]!);
       else if(segments.length===4&&segments.slice(0,3).join('/')==='v1/contributor/library'&&req.method==='PATCH')result=await app.library.update(actor,key,segments[3]!,body);
+      else if(segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&req.method==='GET'){
+        ensure([...url.searchParams.keys()].length===new Set(url.searchParams.keys()).size,'INVALID_QC_QUERY');result=await app.qc.get(actor,segments[3]!,Object.fromEntries(url.searchParams));
+      }
+      else if(segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&req.method==='POST')result=await app.qc.run(actor,key,segments[3]!,body);
+      else if(segments.length===6&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&segments[5]==='retry'&&req.method==='POST')result=await app.qc.retry(actor,key,segments[3]!,body);
+      else if(segments.length===6&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&segments[5]==='review'&&req.method==='POST')result=await app.qc.review(actor,key,segments[3]!,body);
       else if(req.method==='GET'&&route==='/v1/operator/trace-explorer')result=await app.library.operator(actor,Object.fromEntries(url.searchParams));
       else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='refresh')result=await app.library.reprocess(actor,key,segments[3]!);
       else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='prepare-sale')result=await app.portfolio.prepareSale(actor,key,segments[3]!,body);

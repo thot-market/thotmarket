@@ -322,8 +322,8 @@ test('licensed delivery renders escaped conversation turns and licence before te
 });
 
 test('price preview deducts quoted service costs and labels fixed proceeds without invented earnings',t=>{
- const f=fixture(t,async()=>{});f.state.thot.account={seller_bps:null,economics:{service_fee:'40000000000000000'}};const target={textContent:''};document.querySelector=()=>target;
- f.ui.onInput({id:'thot-price',value:'1000'});assert.match(target.textContent,/999\.9600 THOT/);assert.match(target.textContent,/0\.0400 THOT/);assert.match(target.textContent,/funding quote includes your applicable fee reduction and fixes the exact proceeds/);assert.doesNotMatch(target.textContent,/separate fee cashback|30%|70%|qualified lock/);
+ const f=fixture(t,async()=>{});f.state.thot.account={seller_bps:null,economics:{policy:'quoted-cost/1',service_fee:'40000000000000000',direct_cost:'10000000000000000'}};const target={textContent:''};document.querySelector=()=>target;
+ f.ui.onInput({id:'thot-price',value:'1000'});assert.match(target.textContent,/999\.9600 THOT/);assert.match(target.textContent,/0\.0400 THOT/);assert.match(target.textContent,/funding quote includes any applicable discounts and fixes the exact proceeds/);assert.doesNotMatch(target.textContent,/separate fee cashback|30%|70%|qualified lock/);
  f.ui.onInput({id:'thot-price',value:'0.01'});assert.match(target.textContent,/too low/);
  f.ui.onInput({id:'thot-price',value:'-100'});assert.match(target.textContent,/Enter a gross price/);assert.doesNotMatch(target.textContent,/-70/);
 });
@@ -1007,4 +1007,36 @@ test('a changed account discards a delayed private release preview',async t=>{
  const work=f.ui.action('thot-list-configure',{dataset:{id:'trace'}});f.state.generation++;f.state.actor={id:'another'};
  wait.resolve({trace_id:'trace',content_hash:hash(1),content:{turns:[{role:'user',content:'Former private content'}]},sale_eligibility:{can_list:true}});
  await assert.rejects(work,{name:'StaleWorkspaceError'});assert.equal(f.dialogs.length,0);
+});
+
+test('percentage listing estimate uses the listed price and labels its basis without authorizing anything',t=>{
+ const f=fixture(t,async()=>{}),target={textContent:''};document.querySelector=()=>target;
+ f.state.thot.account={economics:{policy:'percentage/1',fee_bps:100,service_fee:'10000000000000000',direct_cost:'0'}};
+ f.ui.onInput({id:'thot-price',value:'100'});
+ assert.match(target.textContent,/Base service fee \(1% of trace price\): 1\.0000 THOT/);
+ assert.match(target.textContent,/Estimated seller proceeds: 99\.0000 THOT/);
+ assert.match(target.textContent,/any applicable discounts/);assert.match(target.textContent,/not guaranteed/);
+ assert.doesNotMatch(target.textContent,/0\.0100 THOT/);assert.equal(f.calls.length,0);assert.equal(f.requests.length,0);
+ f.state.thot.account.economics={policy:'future-policy/1',fee_bps:100,service_fee:'10000000000000000',direct_cost:'0'};
+ f.ui.onInput({id:'thot-price',value:'100'});assert.match(target.textContent,/Refresh your account/);assert.doesNotMatch(target.textContent,/THOT|%/);
+});
+
+test('listing review and THOT page distinguish configured tariff profiles and unknown policy',async t=>{
+ for(const economics of [
+  {policy:'percentage/1',fee_bps:100,service_fee:'10000000000000000',direct_cost:'0'},
+  {policy:'quoted-cost/1',fee_bps:null,service_fee:'40000000000000000',direct_cost:'10000000000000000'},
+  {policy:'future-policy/1',fee_bps:100,service_fee:'10000000000000000',direct_cost:'0'},
+ ]){
+  const f=fixture(t,async()=>{},async()=>({trace_id:'trace',content_hash:hash(1)}));f.state.thot.account={economics};
+  await f.ui.action('thot-list-configure',{dataset:{id:'trace'}});const review=f.dialogs.at(-1)[2];
+  const view=viewFixture();view.state.thot.account.economics=economics;const token=view.ui.tokenHTML();
+  for(const html of [review,token]){
+   if(economics.policy==='percentage/1'){assert.match(html,/1% of the listed trace price/);assert.doesNotMatch(html,/0\.0100 THOT per purchase/);}
+   else if(economics.policy==='quoted-cost/1'){assert.match(html,/0\.0400 THOT per purchase/);assert.doesNotMatch(html,/Eligible holders and stakers receive.*at funding/);}
+   else{assert.match(html,/current service fee is unavailable/);assert.doesNotMatch(html,/1% of|0\.0100 THOT per purchase/);}
+   assert.match(html,/Estimates do not guarantee a sale or payout/);
+  }
+  if(economics.policy==='future-policy/1')assert.match(token,/<small>SERVICE FEE PER PURCHASE<\/small><strong>Refresh quote<\/strong>/);
+  assert.equal(f.calls.some(call=>call.path==='/v1/thot/listings'),false);assert.equal(f.requests.length,0);
+ }
 });

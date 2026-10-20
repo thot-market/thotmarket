@@ -5,7 +5,7 @@ const NETWORKS = {
 };
 
 /** Cookie-based EVM sign-in: never persists a bearer token in browser storage. */
-export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'https://rpc.testnet.chain.robinhood.com', onSession, onSignedIn, onSignedOut = () => {}, onIdentityChanging, onSessionChanging, onError = () => {}, additionalProviders = async () => [], requestTimeoutMs = 15000, providerTimeoutMs = 5000, additionalProvidersTimeoutMs = 30000 }) {
+export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'https://rpc.testnet.chain.robinhood.com', onSession, onSignedIn, onSignedOut = () => {}, onIdentityChanging, onSessionChanging, onError = () => {}, onProgress = () => {}, additionalProviders = async () => [], requestTimeoutMs = 15000, providerTimeoutMs = 5000, additionalProvidersTimeoutMs = 30000, walletPromptTimeoutMs = 120000 }) {
   let rpc; try {rpc=new URL(rpcUrl);} catch {}
   const definition = NETWORKS[chainId];
   if (!definition || rpc?.protocol !== 'https:' || chainId === 4663 && rpc.href !== 'https://rpc.mainnet.chain.robinhood.com/') throw new Error('Wallet login is not configured for this network.');
@@ -93,24 +93,27 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
       await revokeRemote(); current(expected);
       const next = suppliedProvider ?? select(kind);
       if (typeof next?.request !== 'function') throw new Error('The wallet provider is unavailable.');
-      const accounts = await next.request({ method: 'eth_requestAccounts' }); current(expected);
+      const prompt = promise => bounded(promise, walletPromptTimeoutMs, 'Wallet sign-in expired. Close the old request in your wallet, then try again.', () => {if(epoch===expected)++epoch;});
+      const accounts = await prompt(next.request({ method: 'eth_requestAccounts' })); current(expected);
       const wallet = accounts?.[0]; if (typeof wallet !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(wallet)) throw new Error('Choose an EVM wallet account.');
       if (expectedAddress && wallet.toLowerCase() !== expectedAddress.toLowerCase()) throw new Error('The wallet provider returned a different account. Please choose your wallet again.');
-      await ensureChain(next, expected); attach(next); await context(next, expected, wallet);
+      await prompt(ensureChain(next, expected)); attach(next); await bounded(context(next, expected, wallet), providerTimeoutMs, 'Your wallet is not responding. Please try sign-in again.');
       const challenge = await api('/v1/auth/wallet/challenge', { address: wallet, chain_id: chainId }); current(expected);
       if (!challenge.response.ok) throw new Error(challenge.result.error === 'AUTH_CHALLENGE_RATE_LIMIT' ? 'Too many sign-in attempts. Wait a minute and try again.' : 'A sign-in challenge could not be created.');
-      validateChallenge(challenge.result, wallet); await context(next, expected, wallet);
+      validateChallenge(challenge.result, wallet); await bounded(context(next, expected, wallet), providerTimeoutMs, 'Your wallet is not responding. Please try sign-in again.');
       const bytes = new TextEncoder().encode(challenge.result.message), hex = '0x' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
-      const signature = await next.request({ method: 'personal_sign', params: [hex, wallet] });
-      await context(next, expected, wallet);
+      onProgress('One more signature opens your private workspace. This does not spend tokens.');
+      const signature = await prompt(next.request({ method: 'personal_sign', params: [hex, wallet] }));
+      await bounded(context(next, expected, wallet), providerTimeoutMs, 'Your wallet is not responding. Please try sign-in again.');
+      onProgress('Verifying your signature…');
       const verified = await api('/v1/auth/wallet/verify', { id: challenge.result.id, message: challenge.result.message, signature }); current(expected);
       if (!verified.response.ok) throw new Error(verified.result.error === 'WALLET_ALREADY_BOUND' ? 'This wallet belongs to an existing thot market account. Use that account to sign in; wallet sign-in will not copy its private traces.' : 'Wallet verification failed. Please try signing in again.');
-      validateSession(verified.result, wallet); await context(next, expected, wallet);
+      validateSession(verified.result, wallet); await bounded(context(next, expected, wallet), providerTimeoutMs, 'Your wallet is not responding. Please try sign-in again.');
       await sessionReady(sessionValue(verified.result)); return true;
     } catch (error) {
       // A verification can finish after a provider change/logout. Clear that late cookie too.
       try { await revokeRemote(); } catch (cleanupError) { onError(cleanupError); }
-      if (!destroyed) { await onSignedOut(); onError(error); } return false;
+      if (!destroyed) { await onSignedOut(); onError(Number(error?.code)===4001?new Error('Sign-in signature cancelled. Your workspace is still locked. Try again when ready.'):error); } return false;
     } finally { if (busyEpoch === expected) {busy = false; busyEpoch = null; busyKind = null;} }
   }
   async function restore() {

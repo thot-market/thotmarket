@@ -14,7 +14,7 @@ const routes=new Set([
   '/wallet-auth-ui.js','/privy-auth-state.js','/openrouter-ui.js',
   '/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js','/history-sync-ui.js',
   '/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started.js',
-  '/connected-journey-ui.js',
+  '/connected-journey-ui.js','/qc-ui.js','/fee-policy-ui.js',
 ]);
 const compressBrotli=promisify(brotliCompress),compressGzip=promisify(gzip);
 const maxFileBytes=16*1024*1024,maxSourceBytes=32*1024*1024,compressionOverhead=65536;

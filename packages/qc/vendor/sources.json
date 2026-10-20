@@ -1,0 +1,37 @@
+{
+  "schema_version": "qc-upstream-sources/v1",
+  "sources": [
+    {
+      "project": "data-juicer",
+      "repository": "https://github.com/datajuicer/data-juicer",
+      "commit": "79b1308b5178ba25705b282c43e1372a93802b05",
+      "path": "data_juicer/ops/mapper/tool_success_tagger_mapper.py",
+      "source_url": "https://raw.githubusercontent.com/datajuicer/data-juicer/79b1308b5178ba25705b282c43e1372a93802b05/data_juicer/ops/mapper/tool_success_tagger_mapper.py",
+      "sha256": "024058075b59a159e62a72f16d194fbb59d4f469d6c8ddfec375e128648b464d",
+      "license": "Apache-2.0",
+      "adaptations": [
+        "TypeScript translation of default success/error patterns and classifier with error precedence",
+        "String-only canonical input; no content serialization or silent truncation",
+        "Unmatched nonempty output is unknown instead of success",
+        "No content previews, framework registry, mutation, model dependency or result-success ratio",
+        "ASCII JavaScript word boundary semantics are used; multilingual regex parity is not claimed"
+      ]
+    },
+    {
+      "project": "openjudge",
+      "repository": "https://github.com/agentscope-ai/OpenJudge",
+      "commit": "d1e06420bac4b9b755480e2a763a259b4e9b017e",
+      "path": "openjudge/graders/agent/trajectory/trajectory_accuracy.py",
+      "source_url": "https://raw.githubusercontent.com/agentscope-ai/OpenJudge/d1e06420bac4b9b755480e2a763a259b4e9b017e/openjudge/graders/agent/trajectory/trajectory_accuracy.py",
+      "sha256": "11842a61e3a3d8101f17e9a09ebb9a3542d4fedc878ebf7d31ac595395f0e432",
+      "license": "Apache-2.0",
+      "adaptations": [
+        "English rubric constant extracted without framework imports",
+        "Output schema replaced by scored/abstained, coverage indices, bounded evidence references and controlled reason codes",
+        "No score clamping or zero-score errors; full input coverage required",
+        "Prompt treats captured text as untrusted evidence; missing evidence requires abstention",
+        "Provider must be supplied explicitly; timeout and input/output limits enforced"
+      ]
+    }
+  ]
+}

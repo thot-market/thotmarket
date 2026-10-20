@@ -10,6 +10,34 @@ test('private referral view uses current contract terms and separates earned, pe
  const state={thot:{account:{block:{number:20},qualified:money(100000),seller_bps:null,referral_bps:2000,claimable:money(20),economics:{service_fee:'40000000000000000',direct_cost:'10000000000000000'}}},thotAnalytics:{status,own:{independent_seller_atoms:money(100),treasury_seller_atoms:money(50)},buyer_pricing:{configured:false,block:20},referrals:{attributed_contributors:3,pending_atoms:money(10),earned_atoms:money(20),paid_atoms:null,paid_min_atoms:'0',paid_max_atoms:money(10),pooled_paid_atoms:money(10),basis:'Claims pool all credits.',term_seconds:365*86400,activation_window_seconds:90*86400,my_referrer:null,ledger:[],next_cursor:null}}};
  const html=make(state).referralsHTML();assert.match(html,/0\.0400 THOT/);assert.match(html,/0\.0100 THOT/);assert.match(html,/20% of net service contribution/);assert.match(html,/no membership surcharge/);assert.match(html,/365 days/);assert.match(html,/within 90 days of attribution/);assert.doesNotMatch(html,/70%|180 days|qualified lock tier/);assert.match(html,/Pending referral allocation/);assert.match(html,/Finalized referral earnings/);assert.match(html,/0\.0000 THOT–10\.0000 THOT/);assert.doesNotMatch(html,/undefined|NaN|\$20/);
 });
+test('percentage referral terms use the trace-price rate, never the one-THOT account sample as a fixed fee',()=>{
+ const state=salesIndexFixture();
+ state.thot.account.economics={policy:'percentage/1',fee_bps:125,service_fee:'12500000000000000',direct_cost:'0'};
+ state.thot.holder_rewards={mode:'upfront-discount',policy:{}};
+ const html=make(state).referralsHTML();
+ assert.match(html,/1\.25% of the listed trace price/);
+ assert.match(html,/independent buyer and seller discounts at funding/);
+ assert.match(html,/Discount percentages apply to the service fee, not the trace price/);
+ assert.match(html,/Estimates do not guarantee a sale or payout/);
+ assert.doesNotMatch(html,/0\.0125 THOT|Holding or locking THOT does not change|Each purchase deducts/);
+ assert.equal(state.thot.account.economics.service_fee,'12500000000000000');
+});
+test('quoted-cost referrals preserve fixed tariff and distinguish separate cashback from sale proceeds',()=>{
+ const state=salesIndexFixture();
+ state.thot.account.economics={policy:'quoted-cost/1',fee_bps:null,service_fee:'40000000000000000',direct_cost:'10000000000000000'};
+ state.thot.holder_rewards={mode:'cashback',policy:{}};
+ const html=make(state).referralsHTML();
+ assert.match(html,/0\.0400 THOT per purchase, including 0\.0100 THOT of direct costs/);
+ assert.match(html,/1\.5 times allocated overhead/);
+ assert.match(html,/cashback is claimed after settlement and does not change the quoted seller proceeds/);
+ assert.doesNotMatch(html,/1% of|discounts at funding/);
+});
+test('unavailable or unknown account economics never manufacture a zero or fixed fee',()=>{
+ for(const economics of [undefined,{policy:'future-policy/1',service_fee:'0',direct_cost:'0'},{policy:'percentage/1',fee_bps:null,service_fee:'10000000000000000'},{policy:'percentage/1',fee_bps:0,service_fee:'0'}]){
+  const state=salesIndexFixture();state.thot.account.economics=economics;
+  const html=make(state).referralsHTML();assert.match(html,/current service fee is unavailable/);assert.doesNotMatch(html,/0\.0100 THOT per purchase|\b0% of|0\.0000 THOT per purchase/);
+ }
+});
 test('leaderboard escapes pseudonyms, defaults to no identity opt-in, and clears private state on reset',()=>{
  const state={thotAnalytics:{profile:{opted_in:false,label:'" onfocus="bad'}},thotLeaderboard:{kind:'earners',items:[{label:'<script>bad</script>',amount:money(1),sales:1}],status,basis:'Finalized.',exclusions:'Treasury excluded.'}};
  const ui=make(state),html=ui.leaderboardHTML();assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>|value="" onfocus|type="checkbox" checked/);assert.match(html,/correlated with public blockchain/);

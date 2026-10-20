@@ -42,6 +42,8 @@ test('release preview is owner-only, exact scrubbed content with the listing com
 test('message exclusion reseals and reassesses the actual listed release, preserves raw source, rejects stale review',async t=>{
   const app=await fixture(t),saved=await imported(app),before=await app.releasePreview.preview(owner,{trace_id:saved.trace_id});
   const original=await app.db.transaction(tx=>tx.get('traces',saved.trace_id,owner.id));
+  const qualityJobs=()=>app.db.query("SELECT id,owner_id,payload,status FROM outbox_events WHERE event_type='CheckTraceQuality' AND payload->>'trace_id'=$1 ORDER BY payload->>'scope'",[saved.trace_id]);
+  const originalJobs=(await qualityJobs()).rows;assert.deepEqual(originalJobs.map(job=>job.payload.scope),['private','release']);
   const key=randomUUID(),input=exclusion(before),after=await app.releasePreview.exclude(owner,key,input);
   assert.deepEqual(after.content.turns,before.content.turns.filter((_:unknown,i:number)=>i!==2));
   assert.notEqual(after.content_hash,before.content_hash);assert.equal(after.release_revision,1);
@@ -49,9 +51,15 @@ test('message exclusion reseals and reassesses the actual listed release, preser
   const current=await app.db.transaction(tx=>tx.get('traces',saved.trace_id,owner.id));
   assert.equal(current.thot_listing_only,true);assert.notEqual(current.rights_id,original.rights_id);assert.notEqual(current.scrub_id,original.scrub_id);
   assert.equal(current.import_content_hash,original.import_content_hash);assert.deepEqual(current.raw_ref,original.raw_ref);
+  const editedJobs=(await qualityJobs()).rows;assert.deepEqual(editedJobs.map(job=>job.payload.scope),['private','release']);
+  assert.equal(editedJobs[0].id,originalJobs[0].id,'Release edits preserve private-source QC.');
+  assert.notEqual(editedJobs[1].id,originalJobs[1].id,'Only the current release revision remains queued.');
+  assert.equal(editedJobs[1].owner_id,owner.id);assert.equal(editedJobs[1].status,'pending');
+  assert.equal(editedJobs[1].payload.source_version,current.quality_checks.release.source_version);
   assert.match(JSON.stringify(await app.privacy.open(owner.id,current.raw_ref)),/private context/);
   assert.equal(JSON.stringify(after.content).includes('private context'),false);
   assert.equal((await app.releasePreview.exclude(owner,key,input)).release_revision,1,'retry does not remove another indexed message');
+  assert.deepEqual((await qualityJobs()).rows,editedJobs,'Idempotent exclusion keeps one job per scope.');
   await assert.rejects(app.releasePreview.exclude(owner,randomUUID(),input),/RELEASE_CHANGED/);
   const stored=JSON.stringify((await app.db.query('SELECT response FROM idempotency_keys WHERE actor_id=$1 AND key=$2',[owner.id,key])).rows);
   assert.equal(stored.includes('bounded queue'),false);assert.equal(stored.includes('private context'),false);

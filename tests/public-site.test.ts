@@ -8,7 +8,7 @@ import { runInNewContext } from 'node:vm';
 import { createApplication } from '../packages/market/src/bootstrap.ts';
 import { AuthAccessStore, type AuthProvider } from '../packages/auth/src/index.ts';
 import { createHttpServer } from '../apps/api/server.ts';
-import { publicLaunchConfig, readPublicAsset } from '../apps/api/public-site.ts';
+import { canonicalApplicationUrl, publicLaunchConfig, publicWorkspaceLinks, readPublicAsset, sanitizePublicMarketProof, unavailableMarketProof } from '../apps/api/public-site.ts';
 
 const tokenAddress = '0x1111111111111111111111111111111111111111';
 const ponsLaunchAddress = '0x2222222222222222222222222222222222222222';
@@ -60,7 +60,7 @@ test('public files use an explicit asset list rather than request-selected files
 
 test('legacy capture, brokerage and saved-trace links forward only to the same-origin app', async () => {
   const source = await readFile(new URL('../apps/site/site.js', import.meta.url), 'utf8');
-  for (const hash of ['#thot=encoded', '#thot-robinhood=encoded', '#trace=saved-trace', '#trace=https://outside.invalid']) {
+  for (const hash of ['#thot=encoded', '#thot-robinhood=encoded', '#thot-history=encoded', '#trace=saved-trace', '#trace=https://outside.invalid']) {
     const destinations: string[] = [];
     runInNewContext(source, {
       window: { location: { hash, search: '?__clerk_handshake=synthetic', replace: (value: string) => destinations.push(value) } },
@@ -109,12 +109,12 @@ test('public documents and launch config preserve private API, development-auth,
     await app.close();
     await rm(dir, { recursive: true, force: true });
   });
-  const call = (path: string, method = 'GET', headers: Record<string, string> = {}) => new Promise<{ status: number; body: string; type?: string }>((resolve, reject) => {
+  const call = (path: string, method = 'GET', headers: Record<string, string> = {}) => new Promise<{ status: number; body: string; type?: string; headers: import('node:http').IncomingHttpHeaders }>((resolve, reject) => {
     const req = request({ host: '127.0.0.1', port: address.port, path, method, headers: { Host: 'site.example', ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}), ...headers }, setHost: false }, res => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', value => { body += value; });
-      res.on('end', () => resolve({ status: res.statusCode!, body, type: res.headers['content-type'] }));
+      res.on('end', () => resolve({ status: res.statusCode!, body, type: res.headers['content-type'], headers: res.headers }));
     });
     req.on('error', reject);
     req.end(method === 'POST' ? '{}' : undefined);
@@ -128,9 +128,28 @@ test('public documents and launch config preserve private API, development-auth,
   assert.equal(head.status, 200);
   assert.equal(head.type, 'image/png');
   assert.equal(head.body, '');
+  assert.equal(head.headers['cache-control'], 'private, no-cache');
+  assert.ok(head.headers.etag);
+  const cached = await call('/assets/thot-logo.png', 'GET', { 'If-None-Match': head.headers.etag });
+  assert.equal(cached.status, 304);
+  assert.equal(cached.body, '');
+  assert.equal((await call('/assets/thot-logo.png', 'GET', { Host: 'wrong.example', 'If-None-Match': head.headers.etag })).status, 403);
+  assert.equal((await call('/')).headers['cache-control'], 'no-store');
   const configuration = await call(`/v1/public/launch-config?state=launched&tokenAddress=${tokenAddress}&ponsLaunchAddress=${ponsLaunchAddress}`);
   assert.equal(configuration.status, 200);
   assert.deepEqual(JSON.parse(configuration.body), publicLaunchConfig());
+  const site = await call('/v1/public/site-config?appUrl=https://outside.invalid');
+  assert.equal(site.status, 200);
+  assert.deepEqual(JSON.parse(site.body), { appUrl: '/app', reviewerUrl: null, access: 'same-origin', privateAppHosted: true });
+  const proof = await call('/v1/public/market-proof?appUrl=https://app.test.thot.market/app');
+  assert.equal(proof.status, 200);
+  assert.deepEqual(JSON.parse(proof.body), unavailableMarketProof());
+  for (const path of ['/', '/read', '/tutorial', '/whitepaper', '/mechanism', '/affiliates']) {
+    const html = (await call(path)).body;
+    const links = html.match(/<a\b[^>]*\bdata-workspace-link\b[^>]*>/g);
+    assert.ok(links?.length, path);
+    for (const link of links) assert.match(link, /href="\/app(?:#[a-z-]+)?"/, path);
+  }
 
   for (const path of ['/v1/contributor/portfolio', '/v1/earnings', '/v1/buyer/mandates', '/config/clerk.example.json', '/apps/api/server.ts']) {
     assert.equal((await call(path)).status, 401, path);
@@ -146,7 +165,7 @@ test('public documents and launch config preserve private API, development-auth,
     assert.equal((await call(path, 'GET', { ...navigation, 'Sec-Fetch-Dest': 'iframe' })).status, 403, path);
     assert.equal((await call(path, 'GET', { ...navigation, Host: 'wrong.example' })).status, 403, path);
   }
-  for (const path of ['/site.js', '/site.css', '/referrals.js', '/referrals.css', '/assets/thot-logo.png', '/v1/public/launch-config', '/v1/public/market-proof', '/v1/auth/session', '/v1/contributor/portfolio']) {
+  for (const path of ['/site.js', '/site.css', '/referrals.js', '/referrals.css', '/assets/thot-logo.png', '/v1/public/launch-config', '/v1/public/site-config', '/v1/public/market-proof', '/v1/auth/session', '/v1/contributor/portfolio']) {
     assert.equal((await call(path, 'GET', navigation)).status, 403, path);
   }
   assert.equal(authenticationAttempts, 0);
@@ -173,16 +192,12 @@ test('public copy distinguishes trade properties, paid buyer access and persiste
 
 
 test('production documents keep calibration out; public examples identify their basis', async () => {
-  for (const path of ['apps/site/mechanism.html', 'launch-prep/LAUNCH_POST.md', 'launch-prep/WHITEPAPER.md']) {
+  // Check distributed pages; the launch-prep Markdown sources are not in this checkout.
+  for (const path of ['apps/site/mechanism.html']) {
     const copy = await readFile(new URL('../' + path, import.meta.url), 'utf8');
     assert.doesNotMatch(copy, /TESTTHOT|test calibration|testnet tariff|0\.0(?:01|04|06|1|2|3|34|4|6)\b|one.hour|10 million THOT/i, path);
     assert.match(copy, /12 hours after recorded delivery to raise an eligible dispute/, path);
-    if (path === 'apps/site/mechanism.html') {
-      assert.match(copy, /production tariff will be published before purchases open/i, path);
-    } else {
-      assert.match(copy, /launch service fee is \*\*1% of the posted trace price\*\*, rounded up to the nearest token base unit/i, path);
-      assert.match(copy, /Holder and locker discounts reduce that fee independently for each side/i, path);
-    }
+    assert.match(copy, /purchase quote shows the applicable tariff before you authorize payment/i, path);
   }
   for (const path of ['apps/site/index.html', 'apps/site/affiliates.html']) {
     const html = await readFile(new URL('../' + path, import.meta.url), 'utf8');
@@ -191,5 +206,54 @@ test('production documents keep calibration out; public examples identify their 
     assert.match(html, /not customer adoption or real-money earnings/i);
     assert.match(html, /direct costs/);
     assert.doesNotMatch(html, /customers already|guaranteed earnings|data-fake-counter/i);
+  }
+  for (const path of ['apps/site/article.html', 'apps/site/whitepaper.html']) {
+    const html = await readFile(new URL('../' + path, import.meta.url), 'utf8');
+    assert.match(html, /percentage policy applies its configured rate to the listed trace price/i, path);
+    assert.match(html, /quoted-cost policy uses the disclosed direct cost plus 1\.5 times allocated overhead/i, path);
+    assert.match(html, /displayed estimate does not guarantee a sale or payout/i, path);
+    assert.match(html, /before holder discounts/i, path);
+    assert.doesNotMatch(html, /launch service fee is|base fee = 1%|referral = 20% of base fee/i, path);
+  }
+});
+
+test('synthetic proof fixtures remain explicitly testnet and reject claims from another environment', () => {
+  const hash = '0x' + '1'.repeat(64);
+  const fixture = {
+    schema_version: 'thot.public-market-proof/1', environment: 'dev', network: 'Robinhood testnet',
+    chain_id: 46630, test_assets: true, scope: 'testnet-verification', as_of: '2026-01-01T00:00:00.000Z',
+    block_number: 10, block_hash: hash, confirmations: 1, amount_basis: 'finalized seller proceeds',
+    purchase_amount_basis: 'gross purchase price', private_note: 'must not reach the response',
+    scan: { from_block: 1, through_block: 10, complete_since_deployment: true },
+    tariff: { service_fee_thot: '0.04', direct_cost_thot: '0.01', allocated_overhead_thot: '0',
+      net_contribution_thot: '0.03', referral_bps: 2000, dispute_seconds: 43200, activation_seconds: 0, term_seconds: 0 },
+    receipts: [], purchases: [{ tx_hash: hash, block_number: 10, amount_thot: '1', source: 'unknown',
+      explorer_url: 'https://explorer.testnet.chain.robinhood.com/tx/' + hash, status: 'finalized' }],
+  };
+  const proof = sanitizePublicMarketProof(fixture, 'dev');
+  assert.equal(proof.status, 'available');
+  assert.equal(proof.test_assets, true);
+  assert.equal(proof.scope, 'testnet-verification');
+  assert.match(proof.notice, /do not establish organic traction/);
+  assert.ok(!('private_note' in proof));
+  assert.throws(() => sanitizePublicMarketProof(fixture, 'staging'), /INVALID_PUBLIC_MARKET_PROOF/);
+  for (const replacement of [{ environment: 'production' }, { test_assets: false }, { scope: 'production' }, { chain_id: 4663 }]) {
+    assert.throws(() => sanitizePublicMarketProof({ ...fixture, ...replacement }, 'dev'), /INVALID_PUBLIC_MARKET_PROOF/);
+  }
+});
+
+test('ordinary production entry links target the canonical application and preserve their intended view', async () => {
+  for (const name of ['index', 'article', 'tutorial', 'mechanism', 'whitepaper', 'affiliates']) {
+    const html = await readFile(new URL(`../apps/site/${name}.html`, import.meta.url), 'utf8');
+    const links = html.match(/<a\b[^>]*\bdata-workspace-link\b[^>]*>/g);
+    assert.ok(links?.length, name);
+    for (const link of links) assert.match(link, /href="https:\/\/app\.thot\.market\/app(?:#[a-z-]+)?"/, name);
+    assert.doesNotMatch(html, /href="\/app"|>Open the test app<|>test workspace</);
+  }
+  const html = '<a href="https://app.thot.market/app#referrals" data-workspace-link>Referrals</a><a href="/app#thot=secret">Capability</a>';
+  assert.equal(publicWorkspaceLinks(html, '/app'), '<a href="/app#referrals" data-workspace-link>Referrals</a><a href="/app#thot=secret">Capability</a>');
+  assert.equal(publicWorkspaceLinks(html, canonicalApplicationUrl), html);
+  for (const value of ['javascript:alert(1)', 'https://user:secret@app.example/app', 'https://app.example/app?token=secret', 'https://app.example/app#secret']) {
+    assert.throws(() => publicWorkspaceLinks(html, value), /INVALID_PUBLIC_APP_URL/);
   }
 });
