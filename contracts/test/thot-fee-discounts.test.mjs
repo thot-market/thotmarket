@@ -83,7 +83,8 @@ test('workspace shares one guarded block across discounts, staking and reserve r
    await f.provider.send('anvil_setCode',[config.token,'0x60006000fd']);
    return result;
   };
-  try{await assert.rejects(marketplace.workspace(demoUser),/THOT_CODE_PIN_MISMATCH/);}
+  // Reads run in parallel, so a sibling read may hit the changed code before the final pin check: either way the request fails closed.
+  try{await assert.rejects(marketplace.workspace(demoUser),/THOT_CODE_PIN_MISMATCH|execution reverted/);}
   finally{chain.reserve.authorizedBuyers=authorized;await f.provider.send('evm_revert',[beforeCodeChange]);}
 
   const beforeReorg=await f.provider.send('evm_snapshot',[]);

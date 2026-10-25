@@ -11,11 +11,15 @@ export async function buildPrivyAuth({outdir = fileURLToPath(new URL('../apps/da
     entryNames:'privy-auth.bundle',chunkNames:'privy-auth-chunks/[hash]',splitting:true,write:false,
     bundle: true, format: 'esm', platform: 'browser', target: ['es2022'], minify: true, sourcemap: false,
     define: {'process.env.NODE_ENV': '"production"'}, legalComments: 'inline', metafile: true, logLevel: 'warning'});
+  // The workspace modules ship as one minified file; Privy stays a separate lazy bundle.
+  const app=await build({entryPoints:[fileURLToPath(new URL('../apps/dashboard/app.js', import.meta.url))], outfile:resolve(directory,'app.bundle.js'),
+    write:false, bundle:true, format:'esm', platform:'browser', target:['es2022'], minify:true, legalComments:'inline', logLevel:'error'});
+  result.outputFiles.push(...app.outputFiles);
   const assets=result.outputFiles.map(file=>({path:relative(directory,file.path).split('\\').join('/'),bytes:file.contents.length,
     sha256:createHash('sha256').update(file.contents).digest('hex')})).sort((a,b)=>a.path.localeCompare(b.path,'en'));
   if(assets.length>512||assets.reduce((sum,file)=>sum+file.bytes,0)>32*1024*1024||
     !assets.some(file=>file.path==='privy-auth.bundle.js')||assets.some(file=>file.bytes>16*1024*1024||
-      !/^(?:privy-auth\.bundle\.js|privy-auth-chunks\/[A-Z0-9]{8}\.js)$/.test(file.path)))throw new Error('PRIVY_ASSET_BUILD_LIMIT');
+      !/^(?:app\.bundle\.js|privy-auth\.bundle\.js|privy-auth-chunks\/[A-Z0-9]{8}\.js)$/.test(file.path)))throw new Error('PRIVY_ASSET_BUILD_LIMIT');
   const manifest=JSON.stringify({format:'thot.privy-assets/1',assets})+'\n';
   if(Buffer.byteLength(manifest)>128*1024)throw new Error('PRIVY_ASSET_MANIFEST_LIMIT');
   // Generated artifacts are image inputs, never source exports. Clear stale

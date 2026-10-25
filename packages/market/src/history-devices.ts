@@ -59,7 +59,7 @@ export class HistoryDevices {
     ensure(hash(input.text)===input.version_id,'HISTORY_VERSION_MISMATCH',409);
     const device=await this.service.db.transaction(tx=>this.authenticate(tx,id,token,true));
     ensure(device.source_ids.includes(input.source_id),'HISTORY_SOURCE_NOT_AUTHORIZED',403);
-    const parsed=parseCodingSessionJsonl(input.text);ensure(parsed.source.format===(device.client==='claude'?'claude-code-jsonl':'codex-jsonl'),'HISTORY_CLIENT_MISMATCH',403);
+    const parsed=parseCodingSessionJsonl(input.text);ensure(device.client==='claude'?parsed.source.format==='claude-code-jsonl':parsed.source.format==='codex-jsonl'||parsed.source.format==='codex-exec-jsonl','HISTORY_CLIENT_MISMATCH',403);
     const authorize=async(tx:Transaction)=>{const current=await this.authenticate(tx,id,token,true);ensure(current.source_ids.includes(input.source_id),'HISTORY_SOURCE_NOT_AUTHORIZED',403);};
     const historySync={device_id:id,source_id:input.source_id,file_id:input.file_id,version_id:input.version_id,...(input.previous_version_id?{previous_version_id:input.previous_version_id}:{})};
     const result=await this.portfolio.import({id:device.owner_id,role:'user'},'history:'+id+':'+input.version_id,{text:input.text,filename:'selected-history.jsonl',content_commitment:parsed.preview.content_commitment,save_privately:true},{authorize,historySync});

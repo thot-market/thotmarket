@@ -90,3 +90,45 @@ test('imported model names remain explicit unverified claims and missing names s
  assert.deepEqual(known.model_history,[{sequence:1,claimed_model:'claude-known-file-claim',evidence:'user_supplied'}]);
  assert.deepEqual(parseCodingSessionJsonl(fixture).model_history,[]);
 });
+
+// `codex exec --json` (codex-cli 0.163.x) prints an experimental NDJSON event
+// stream: thread/turn lifecycle plus started/completed items. This fixture is
+// synthetic; agents and CI that cannot read ~/.codex/sessions keep this stream.
+const codexExecFixture=[
+  line({type:'thread.started',thread_id:'0199a1b2c3d47e5f8a9bcdef01234567'}),
+  line({type:'turn.started'}),
+  line({type:'item.started',item:{id:'item_0',type:'reasoning',text:'partial reasoning before completion'}}),
+  line({type:'item.completed',item:{id:'item_0',type:'reasoning',text:'Plan: inspect the parser, then run the tests.'}}),
+  line({type:'item.started',item:{id:'item_1',type:'command_execution',command:'npm test',status:'in_progress'}}),
+  line({type:'item.completed',item:{id:'item_1',type:'command_execution',command:'npm test',aggregated_output:'3 passing',exit_code:0,status:'completed'}}),
+  line({type:'item.completed',item:{id:'item_2',type:'web_search',query:'node test runner json events'}}),
+  line({type:'item.completed',item:{id:'item_3',type:'agent_message',text:'The exec stream imports with commands, outputs and assistant text.'}}),
+  line({type:'turn.completed',usage:{input_tokens:1200,cached_input_tokens:800,output_tokens:64}}),
+].join('\n');
+
+test('codex exec event streams map onto the same durable turns as rollout files',()=>{
+  const result=parseCodingSessionJsonl(codexExecFixture);
+  assert.equal(result.source.format,'codex-exec-jsonl');assert.equal(result.source.session_id,'0199a1b2c3d47e5f8a9bcdef01234567');
+  assert.equal(result.preview.format,'Codex exec JSONL');assert.equal(result.preview.source_label,'Codex (user supplied)');
+  assert.equal(result.preview.title,'Codex session');assert.equal(result.summary.turns,5);assert.equal(result.summary.tool_calls,2);
+  // thread/turn lifecycle, both started items and the usage record are telemetry.
+  assert.equal(result.summary.metadata_records_skipped,5);
+  assert.deepEqual(result.trace.turns.map(turn=>turn.role),['assistant','assistant','tool','assistant','assistant']);
+  assert.match(result.trace.turns[0]!.content,/\[Reasoning]\nPlan: inspect the parser/);
+  assert.match(result.trace.turns[1]!.content,/\[Tool use: command_execution; id=item_1]\nnpm test/);
+  assert.match(result.trace.turns[2]!.content,/\[Tool result: id=item_1; exit_code=0]\n3 passing/);
+  assert.match(result.trace.turns[3]!.content,/\[Tool use: web_search; id=item_2]/);assert.match(result.trace.turns[3]!.content,/node test runner json events/);
+  assert.equal(result.trace.turns[4]!.content,'The exec stream imports with commands, outputs and assistant text.');
+  assert.deepEqual(result.model_history,[]);assert.match(result.limitations.join(' '),/carries no model names/);
+});
+
+test('codex exec streams stay separate from rollout files and reject unknown events with a named error',()=>{
+  assert.throws(()=>parseCodingSessionJsonl(codexExecFixture+'\n'+codexFixture),/MIXED_HISTORY_FORMAT/);
+  assert.throws(()=>parseCodingSessionJsonl(codexExecFixture+'\n'+line({type:'turn.interrupted'})),/UNSUPPORTED_CODEX_EXEC_EVENT/);
+  assert.throws(()=>parseCodingSessionJsonl(line({type:'experimental.new_event'})),/UNSUPPORTED_HISTORY_FORMAT/);
+  assert.throws(()=>parseCodingSessionJsonl(line({type:'item.completed',item:{id:'item_9',type:'gpu_tool_call'}})),/UNSUPPORTED_CODEX_EXEC_ITEM/);
+  assert.throws(()=>parseCodingSessionJsonl(line({type:'item.completed'})),/UNSUPPORTED_CODEX_EXEC_EVENT/);
+  assert.throws(()=>parseCodingSessionJsonl(line({type:'item.completed',item:{id:'item_1',type:'command_execution',command:'npm test',aggregated_output:'x'.repeat(200_000)}})),/IMPORT_LIMIT_EXCEEDED|UNSUPPORTED_CODEX_EXEC_CONTENT/);
+  assert.throws(()=>parseClaudeCodeJsonl(codexExecFixture),/UNSUPPORTED_CLAUDE_RECORD/);
+  assert.throws(()=>parseCodingSessionJsonl(line({type:'thread.started'})),/UNSUPPORTED_CODEX_EXEC_EVENT/);
+});

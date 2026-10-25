@@ -18,13 +18,13 @@ test('the split auth build is deterministic, fully manifested, and has a bounded
   const files=new Map(manifest.assets.map(asset=>[asset.path,asset]));
   let total=0;
   for(const asset of manifest.assets){
-    assert.match(asset.path,/^(?:privy-auth\.bundle\.js|privy-auth-chunks\/[A-Z0-9]{8}\.js)$/);
+    assert.match(asset.path,/^(?:app\.bundle\.js|privy-auth\.bundle\.js|privy-auth-chunks\/[A-Z0-9]{8}\.js)$/);
     const body=await readFile(join(first,asset.path));assert.equal(body.length,asset.bytes);
     assert.equal(createHash('sha256').update(body).digest('hex'),asset.sha256);
     assert.deepEqual(body,await readFile(join(second,asset.path)));total+=asset.bytes;
   }
   assert.ok(total<=32*1024*1024);
-  assert.equal((await readdir(join(first,'privy-auth-chunks'))).length,manifest.assets.length-1);
+  assert.equal((await readdir(join(first,'privy-auth-chunks'))).length,manifest.assets.length-2); // minus the two entry bundles
   const outputs=result.metafile.outputs,entry=Object.keys(outputs).find(path=>resolve(path)===join(first,'privy-auth.bundle.js'));
   assert.ok(entry);const upfront=new Set();
   function visit(path){if(upfront.has(path))return;upfront.add(path);for(const item of outputs[path].imports)if(item.kind==='import-statement')visit(item.path);}

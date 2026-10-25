@@ -5,7 +5,7 @@
 .reading-status{display:flex;gap:13px;align-items:baseline;margin:25px 0 50px;font-size:12px;line-height:1.7;color:#546048;max-width:920px}
 .reading-status strong{display:inline-block;flex-shrink:0;background:#e7ebd2;color:var(--moss);border-radius:4px;font-size:11px;font-weight:650;padding:3px 8px}
 .reading-layout{display:grid;grid-template-columns:185px minmax(0,760px);gap:70px;justify-content:start;align-items:start}
-.reading-aside{position:sticky;top:30px;padding-top:10px}
+.reading-aside{position:sticky;top:30px;padding-top:10px;max-height:calc(100vh - 60px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .reading-aside h2{font-family:var(--body);font-size:12px;font-weight:650;line-height:1.4;letter-spacing:0;margin-bottom:19px;color:var(--ink)}
 .reading-aside ol{margin:0;padding:0;list-style:none}
 .reading-aside li+li{margin-top:16px}

@@ -1,4 +1,5 @@
 import {validCallback} from './agent-capture-ui.js';
+import {requestingDevice} from './device-pairing-ui.js';
 
 export function parseHistorySyncFragment(location=window.location,history=window.history){
   if(!location.hash?.startsWith('#thot-history='))return null;
@@ -36,12 +37,20 @@ export function createHistorySyncUI({state,api,openDialog,dialog,escape,toast,re
     if(request.error){const message=request.error;reset();openDialog('Cannot connect history uploads',message,'');return;}
     if(state.role!=='user'){reset();openDialog('Contributor account required','Sign in with your contributor account, then restart the helper.','');return;}
     owner={id:state.actor?.id,generation:state.generation};
-    openDialog('Allow private history uploads?','Connect '+(request.client==='codex'?'Codex':'Claude Code')+' history from this computer.',`<p>The helper selected ${request.source_ids.length} folder(s), shown in your terminal. Folder paths stay on your computer.</p><p>${request.backfill?'Existing and future JSONL histories in those folders are included.':'Existing JSONL paths are excluded, including later edits. Only new paths are included.'} Stable file versions will save privately to this signed-in account.</p><p>The schedule is ${escape(request.daily_time_utc)} UTC when you explicitly enable it in the terminal. Access expires after 30 days without a successful upload. You can pause or disconnect it here. Signing out leaves it connected.</p><p>Prompts, answers, tool output, code and personal information can be included. Imported history is unverified. This permission does not authorize listing, sale or access to your vault.</p><label class="consent-label"><input type="checkbox" id="history-private-consent"> Allow the selected histories to be uploaded privately.</label>`, '<button class="button secondary" data-action="history-sync-cancel">Cancel</button><button class="button" data-action="history-sync-confirm">Connect private uploads</button>');
+    openDialog('Allow private history uploads?','Connect '+(request.client==='codex'?'Codex':'Claude Code')+' history from this computer.',`${requestingDevice(request,escape)}<p>The helper selected ${request.mode==='code'?request.source_count:request.source_ids.length} folder(s), shown in your terminal. Folder paths stay on your computer.</p><p>${request.backfill?'Existing and future JSONL histories in those folders are included.':'Existing JSONL paths are excluded, including later edits. Only new paths are included.'} Stable file versions will save privately to this signed-in account.</p><p>The schedule is ${escape(request.daily_time_utc)} UTC when you explicitly enable it in the terminal. Access expires after 30 days without a successful upload. You can pause or disconnect it here. Signing out leaves it connected.</p><p>Prompts, answers, tool output, code and personal information can be included. Imported history is unverified. This permission does not authorize listing, sale or access to your vault.</p><label class="consent-label"><input type="checkbox" id="history-private-consent"> Allow the selected histories to be uploaded privately.</label>`, '<button class="button secondary" data-action="history-sync-cancel">Cancel</button><button class="button" data-action="history-sync-confirm">Connect private uploads</button>');
   }
   async function confirm(){
     guard();if(!request||!dialog.querySelector('#history-private-consent')?.checked)throw Error('Confirm private history upload permission first.');if(busy)return;busy=true;
     const current=request;
     try{
+      if(current.mode==='code'){
+        // Device-code pairing: the helper is on another machine and receives
+        // the grant by polling the pairing session, not a loopback callback.
+        const result=await api('/v1/contributor/device-pairing/'+encodeURIComponent(current.code)+'/approve',{method:'POST',body:{consent:'private-history-upload-v1'}});guard();
+        if(result?.status!=='approved'||!result?.device_id||result?.account_id!==state.actor?.id)throw Error('thot market did not complete this device pairing.');
+        reset();openDialog('History uploader connected','Return to your terminal to run once or explicitly enable daily uploads.','<p>No history was uploaded and no schedule was installed by this browser approval. Your helper prints the connection ID and exact commands.</p>', '<button class="button secondary" data-action="history-sync-manage">View daily uploads</button>');
+        return;
+      }
       const result=handoff??await api('/v1/contributor/history-devices',{method:'POST',body:{client:current.client,source_ids:current.source_ids,backfill:current.backfill,daily_time_utc:current.daily_time_utc,consent:'private-history-upload-v1'}});guard();if(current!==request)throw Error('History connection changed.');handoff=result;
       const response=await send(current.callback,{method:'POST',mode:'cors',cache:'no-store',credentials:'omit',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify(result)});guard();
       if(!response.ok)throw Error('The local helper could not accept this connection. Keep it open and retry.');const ack=await response.json();guard();if(ack.paired!==true||ack.private_only!==true)throw Error('The helper did not confirm private upload permission.');
@@ -57,5 +66,5 @@ export function createHistorySyncUI({state,api,openDialog,dialog,escape,toast,re
     if(control){const id=state.actor?.id,generation=state.generation;await api('/v1/contributor/history-devices/'+encodeURIComponent(button.dataset.id)+'/'+control[1],{method:'POST',body:{}});if(state.actor?.id!==id||state.generation!==generation)return true;await manage();toast(control[1]==='disconnect'?'Upload permission revoked. Saved history is unchanged.':control[1]==='pause'?'Uploads paused on THOT.':'Uploads resumed on THOT. Locally paused helpers also need the resume command.');return true;}
     return false;
   }
-  return {handle,authReady,acceptFragment(){const next=parseHistorySyncFragment();if(!next)return false;reset();request=next;authReady();return true;},authLost(){if(owner)reset();},reset,onDialogClose(){if(request&&owner)reset();}};
+  return {handle,authReady,acceptFragment(){const next=parseHistorySyncFragment();if(!next)return false;reset();request=next;authReady();return true;},acceptDevicePairing(info){reset();request={mode:'code',code:info.code,client:info.client,device_name:info.device_name,request_ip:info.request_ip,source_count:info.history?.source_count??0,backfill:info.history?.backfill===true,daily_time_utc:info.history?.daily_time_utc??'02:00'};authReady();},authLost(){if(owner)reset();},reset,onDialogClose(){if(request&&owner)reset();}};
 }

@@ -213,7 +213,16 @@ test('connected contributor journey: private upload, exact release edits, signed
   await page.setViewportSize({width:390,height:844});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await shot('05-reviewed-release-mobile');
   await page.setViewportSize({width:1440,height:1000});await page.locator('#thot-title').fill('Synthetic queue cancellation lesson');await page.locator('#thot-price').fill('100');await page.locator('#thot-list-consent').check();
   assert.equal(await page.locator('#thot-treasury-consent').isChecked(),false);
-  await page.locator('[data-action="thot-list-confirm"]').click();await page.locator('#detail-dialog').waitFor({state:'hidden'});
+  await page.locator('[data-action="thot-list-confirm"]').click();
+  // The exact-commitment review names both hashes before the wallet opens.
+  await page.getByRole('heading',{name:'Review the exact commitments'}).waitFor();
+  assert.match(await page.locator('#detail-dialog').innerText(),/evidenceHash being signed/);await shot('04b-exact-commitments');
+  await page.getByRole('button',{name:'Open wallet to sign'}).click();
+  // The dialog closes while the wallet prompt is topmost, then the finished
+  // listing dialog carries the public share URL (#97).
+  await page.locator('#detail-dialog').waitFor({state:'hidden'});
+  await page.getByRole('heading',{name:/is listed/}).waitFor();
+  assert.match(await page.locator('#thot-listing-url').inputValue(),/\/l\//);await shot('04c-listed-url');
   const listing=await app.db.transaction(async tx=>(await tx.list('thot_records',actor.id)).find(item=>item.kind==='listing'));
   assert(listing?.active&&listing.signature);assert.equal(listing.release_content_hash,after.content_hash);assert.equal(listing.turn_count,3);
   const release=await app.privacy.open(actor.id,listing.release_ref);assert.deepEqual(release.content,after.content);assert.equal(listing.evidence_hash,'0x'+canonicalHash(release));

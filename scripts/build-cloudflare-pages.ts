@@ -109,6 +109,8 @@ export async function buildCloudflarePages(options: { outputParent?: string; rev
   const accessConfig = options.migration
     ? { appUrl: null, reviewerUrl: null, access: 'migration', privateAppHosted: false }
     : publicSiteConfig({ publicOrigin: 'https://thot.market', ...options });
+  // Production entry builds must carry reviewed token inputs, never preview defaults.
+  if(accessConfig.appUrl&&new URL(accessConfig.appUrl,'https://thot.market').hostname==='app.thot.market'&&options.launch?.state!=='launched')throw Error('PRODUCTION_TOKEN_CONFIGURATION_REQUIRED');
   const launch = publicLaunchConfig(options.launch);
   if (options.launch?.state === 'launched' && launch.state !== 'launched') throw Error('INCOMPLETE_LAUNCH_CONFIGURATION');
   const files = new Map<string, Buffer>();
@@ -166,8 +168,17 @@ export async function buildCloudflarePages(options: { outputParent?: string; rev
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
-  if (args.length && !(args.length === 1 && args[0] === '--migration') && !(args.length === 2 && ['--reviewer-url', '--app-url'].includes(args[0]!))) throw Error('Usage: node scripts/build-cloudflare-pages.ts [--migration | --app-url https://workspace-origin/app | --reviewer-url https://reviewer-origin]');
-  const result = await buildCloudflarePages(args[0] === '--migration' ? { migration: true } : args[0] === '--app-url' ? { appUrl: args[1] } : { reviewerUrl: args[1] });
+  const args=process.argv.slice(2),options:Parameters<typeof buildCloudflarePages>[0]={};
+  const seen=new Set<string>();
+  for(let i=0;i<args.length;i++){
+    const flag=args[i]!;if(seen.has(flag))throw Error('DUPLICATE_BUILD_OPTION');seen.add(flag);
+    if(flag==='--migration'){options.migration=true;continue;}
+    if(!['--app-url','--reviewer-url','--launch-config'].includes(flag)||!args[i+1])throw Error('Usage: build-cloudflare-pages.ts [--migration | --app-url URL | --reviewer-url URL] [--launch-config reviewed.json]');
+    const value=args[++i]!;
+    if(flag==='--app-url')options.appUrl=value;
+    if(flag==='--reviewer-url')options.reviewerUrl=value;
+    if(flag==='--launch-config'){const config=JSON.parse(await readFile(resolve(value),'utf8'));if(!config||typeof config!=='object'||Array.isArray(config)||Object.keys(config).some(k=>!['state','tokenAddress','ponsLaunchAddress'].includes(k)))throw Error('INVALID_LAUNCH_CONFIGURATION');options.launch=config;}
+  }
+  const result=await buildCloudflarePages(options);
   process.stdout.write(JSON.stringify({ directory: result.directory, archive: result.archive, files: result.manifest.files.length, zipBytes: result.zipBytes, launchState: result.manifest.launchState, reviewerAccess: result.manifest.reviewerAccess, walletAccess: result.manifest.walletAccess, workspaceMigration: result.manifest.workspaceMigration }) + '\n');
 }

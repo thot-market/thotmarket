@@ -5,6 +5,8 @@ import {tmpdir} from 'node:os';
 import {join,resolve,dirname} from 'node:path';
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
+import {createHash} from 'node:crypto';
+import {createServer as createHttpServer} from 'node:http';
 
 function run(args:string[],env:NodeJS.ProcessEnv,cwd?:string){return new Promise<{code:number|null;output:string}>(resolve=>{const child=spawn(process.execPath,args,{env,cwd,stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);child.on('close',code=>resolve({code,output}));});}
 // Installing changes executable bits. Always install copied fixture scripts so
@@ -17,6 +19,19 @@ async function installerSource(root:string){
   }
   return source;
 }
+// The real installer downloads the pinned verifier, so these tests serve the
+// pinned bytes from a local fixture instead of the network. The served script
+// only answers readiness probes; it is not a proof-producing verifier.
+async function verifierFixture(root:string){
+  const bytes=Buffer.from(`#!/bin/sh\ncase "$1" in --help) exit 0;; *) exit 1;; esac\n`);
+  let served=0;
+  const server=createHttpServer((request,response)=>{served++;response.setHeader('Content-Type','application/octet-stream');response.end(bytes);});
+  await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+  const port=(server.address() as {port:number}).port,url='http://127.0.0.1:'+port+'/dcap-qvl';
+  const pin=join(root,'verifier-pin.json');
+  await writeFile(pin,JSON.stringify({format:'thot.dcap-qvl-pin/1',version:'0.6.1',platforms:{'linux-x86_64-musl':{asset:'dcap-qvl-linux-x86_64-musl',url,sha256:createHash('sha256').update(bytes).digest('hex')}}},null,2)+'\n');
+  return {server,pin,downloads:()=>served,url,sha256:createHash('sha256').update(bytes).digest('hex')};
+}
 // These two bridge/setup tests never perform hardware verification. Make their
 // prerequisite probes hermetic; the actual DCAP verifier has its own test gate.
 // Refuse every invocation except readiness probes so this fixture cannot be
@@ -28,11 +43,18 @@ async function bridgeReadiness(root:string){
 }
 test('empty THOT home installs helpers once and readiness explains missing prerequisites',async t=>{
   const root=await mkdtemp(join(tmpdir(),'thot-first-install-'));t.after(()=>rm(root,{recursive:true,force:true}));
-  const source=await installerSource(root),env={...process.env,THOT_USER_HOME:root};
+  const source=await installerSource(root),verifier=await verifierFixture(root);t.after(()=>new Promise<void>(r=>verifier.server.close(()=>r())));
+  const env={...process.env,THOT_USER_HOME:root,THOT_VERIFIER_PIN_FILE:verifier.pin};
   const args=['scripts/install-capture-helper.ts','--thot-url','https://thot.example'];
   assert.equal((await run(args,env,source)).code,0);assert.equal((await run(args,env,source)).code,0);
   for(const command of ['thot-capture','thot-link','thot-setup'])assert.equal((await lstat(join(root,'.local/bin',command))).isSymbolicLink(),true);
   assert.equal(JSON.parse(await readFile(join(root,'.config/thot/capture.json'),'utf8')).thot_url,'https://thot.example');
+  // The pinned verifier downloaded from the fixture is installed once and
+  // recorded; the second installer run downloads nothing new.
+  const installed=join(root,'.local/share/thot/bin/dcap-qvl');
+  assert.equal((await lstat(installed)).mode&0o111,0o111);
+  assert.equal(JSON.parse(await readFile(join(root,'.config/thot/verifier.json'),'utf8')).sha256,verifier.sha256);
+  assert.equal(verifier.downloads(),1);
   const check=await run(['scripts/thot-setup.ts','robinhood'],{...env,TV_DCAP_QVL:join(root,'missing-verifier'),THOT_CAPTURE_PYTHON:join(root,'missing-python')});
   assert.equal(check.code,1);assert.match(check.output,/Next: Install Python 3/);assert.doesNotMatch(check.output,/prerequisites are ready/);
   const existing=join(root,'existing-connector.json');await writeFile(existing,'{}',{mode:0o600});
@@ -50,7 +72,7 @@ test('upgrade removes only this checkout retired capture link and preserves othe
   await symlink(join(source,'scripts/thot.ts'),legacy);
   const unrelated=join(bin,'unrelated-helper'),unrelatedTarget=resolve('scripts/nonexistent-user-helper.ts');
   await symlink(unrelatedTarget,unrelated);
-  const env={...process.env,THOT_USER_HOME:root};
+  const env={...process.env,THOT_USER_HOME:root,THOT_VERIFIER_AUTO_INSTALL:'0'};
   const result=await run(['scripts/install-capture-helper.ts'],env,source);
   assert.equal(result.code,0,result.output);assert.match(result.output,/Removed 1 stale helper/);
   await assert.rejects(lstat(legacy),{code:'ENOENT'});

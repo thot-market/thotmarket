@@ -1,3 +1,4 @@
+import {DomainError,ensure} from './errors.ts';
 import { performance } from 'node:perf_hooks';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -7,13 +8,7 @@ import { canonicalJson, canonicalHash, uuidv7 } from '../../protocol/src/index.t
 
 export type Document = Record<string, any>;
 export interface Queryable { query<T = Document>(sql: string, params?: any[]): Promise<{ rows: T[] }>; }
-export class DomainError extends Error {
-  code: string; status: number;
-  constructor(code: string, status = 400) { super(code); this.code = code; this.status = status; }
-}
-export function ensure(condition: unknown, code: string, status = 400): asserts condition {
-  if (!condition) throw new DomainError(code, status);
-}
+export {DomainError,ensure} from './errors.ts';
 export const wire = <T>(value: T): T => JSON.parse(canonicalJson(value));
 const tables = new Set(["users","user_wallets","buyers","buyer_members","trace_bundles","traces","trace_objects","provenance_receipts","credential_receipts","outcome_receipts","rights_assessments","scrub_receipts","trace_features","user_policies","sale_authorizations","mandates","mandate_funding","mandate_candidates","assay_receipts","release_artifacts","licenses","deliveries","contributor_entitlements","inference_credit_reservations","market_purchase_orders","token_transfers","burn_allocations","chain_transactions","chain_event_cursor","sale_settlements"]);
 const mutable = new Set(['users','user_wallets','buyers','buyer_members','traces','trace_objects','trace_features','mandates','mandate_candidates','deliveries','contributor_entitlements','inference_credit_reservations','market_purchase_orders','token_transfers','burn_allocations','chain_transactions','chain_event_cursor']);

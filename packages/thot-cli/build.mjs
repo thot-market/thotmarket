@@ -32,6 +32,9 @@ async function copy(path){
   await mkdir(dirname(target),{recursive:true});await writeFile(target,body);
 }
 for(const entry of ['scripts/thot-capture.ts','scripts/thot-setup.ts','scripts/thot-history.ts','scripts/capture-terminal-child.ts'])await copy(entry);
+// The automatic verifier install reads this pin at run time, not import time,
+// so it is copied explicitly next to its reader.
+await copy('packages/capture/src/verifier-pin.json');
 for(const name of ['verify.mjs','canonical.mjs','hardware.mjs','verify_dcap.py','requirements.txt','README.txt'])await copy('packages/provenance/portable/'+name);
 for(const path of ['packages/provenance/scripts/verify_recorder.py','trace-vault/attestation_verify.py'])await copy(path);
 // Production has no accepted API/recorder pair yet. The package must never

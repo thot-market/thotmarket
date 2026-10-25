@@ -21,12 +21,12 @@ try{
    await page.goBack();assert.equal(page.url(),origin+path);await page.locator('.site-footer [data-workspace-link]').click();await page.waitForURL('https://app.thot.market/app');
    checks.push({kind:'browser click/reload/back/footer with synthetic destination',viewport:[width,height],route:path,links:links.length,target:href,result:'pass'});
   }
-  await page.goto(origin+'/');await page.waitForFunction(()=>document.querySelector('[data-proof-time]')?.textContent.includes('unavailable'));assert.equal(await page.locator('[data-proof-environment]').innerText(),'Unavailable');
+  await page.goto(origin+'/');await page.waitForFunction(()=>document.querySelector('[data-proof-environment]')?.hidden===true);assert.doesNotMatch(await page.locator('[data-market-proof]').innerText(),/unavailable/i,'proof panel must not read as an outage');
   await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement?.className),'skip-link');await page.keyboard.press('Enter');await page.waitForFunction(()=>location.hash==='#main');await page.waitForTimeout(700);
   const skip=await page.evaluate(()=>({scrollY,mainTop:document.querySelector('#main').getBoundingClientRect().top}));assert(skip.scrollY>0);assert(skip.mainTop>=0&&skip.mainTop<100);
   await page.goto(origin+'/');await page.getByRole('link',{name:/See how it works/}).click();await page.waitForFunction(()=>location.hash==='#how-it-works');await page.waitForFunction(()=>{const y=document.querySelector('#how-it-works').getBoundingClientRect().top;return y>=0&&y<100;});
   const scroll=await page.evaluate(()=>({scrollY,targetTop:document.querySelector('#how-it-works').getBoundingClientRect().top,width:document.documentElement.scrollWidth}));assert(scroll.scrollY>0);assert(scroll.targetTop>=0&&scroll.targetTop<100);assert.equal(scroll.width,width);
-  checks.push({kind:'browser keyboard focus, actual anchor scroll, proof unavailable',viewport:[width,height],skip,scroll,errors,result:'pass'});assert.deepEqual(errors,[]);
+  checks.push({kind:'browser keyboard focus, actual anchor scroll, neutral proof panel',viewport:[width,height],skip,scroll,errors,result:'pass'});assert.deepEqual(errors,[]);
   await page.goto(origin+'/app#referrals');await page.waitForURL('https://app.thot.market/app#referrals');
   for(const suffix of ['#thot=synthetic','#thot-history=synthetic','?oauth_state_id=synthetic#trace=synthetic']){
    await page.goto(origin+'/app'+suffix);await page.waitForFunction(()=>document.querySelector('#access-status')?.textContent.includes('original app'));assert.equal(page.url(),origin+'/app'+suffix);

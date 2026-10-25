@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalHash, canonicalJson } from '../../protocol/src/index.ts';
 import { DomainError, ensure, type Document } from '../../storage/src/index.ts';
 
-export type CodingSessionFormat='claude-code-jsonl'|'codex-jsonl';
+export type CodingSessionFormat='claude-code-jsonl'|'codex-jsonl'|'codex-exec-jsonl';
 export interface HistoryImportOptions { maxBytes?:number;maxLines?:number;maxTurns?:number;maxTextBytes?:number;maxTurnChars?:number;maxToolPayloadBytes?:number;maxCanonicalTraceBytes?:number; }
 export interface CodingSessionHistoryImport {
   schema_version:'thot.coding-session-history-import/1';
@@ -72,10 +72,47 @@ function codexRecord(record:Document,limits:typeof DEFAULTS):ParsedRecord {
   return fail('UNSUPPORTED_CODEX_RECORD');
 }
 
-function detect(first:Document):CodingSessionFormat {
-  if(first.type==='session_meta'||first.type==='response_item'||first.type==='event_msg'||first.type==='turn_context')return 'codex-jsonl';
-  if(typeof first.type==='string'&&(plain(first.message)||CLAUDE_SKIPPED.has(first.type)||first.type==='system'))return 'claude-code-jsonl';
-  return fail('UNSUPPORTED_HISTORY_FORMAT');
+function detectKind(record:Document):CodingSessionFormat|undefined {
+  if(record.type==='session_meta'||record.type==='response_item'||record.type==='event_msg'||record.type==='turn_context')return 'codex-jsonl';
+  if(typeof record.type==='string'&&CODEX_EXEC_EVENTS.has(record.type))return 'codex-exec-jsonl';
+  if(typeof record.type==='string'&&(plain(record.message)||CLAUDE_SKIPPED.has(record.type)||record.type==='system'))return 'claude-code-jsonl';
+  return undefined;
+}
+function detect(record:Document):CodingSessionFormat {return detectKind(record)??fail('UNSUPPORTED_HISTORY_FORMAT');}
+
+// `codex exec --json` prints a flat NDJSON event stream instead of the
+// ~/.codex/sessions rollout records: thread/turn lifecycle events plus started
+// and completed items. Agents and CI that cannot read the sessions directory
+// can only keep this stream, so it maps onto the same trace turns as rollouts.
+const CODEX_EXEC_EVENTS=new Set(['thread.started','turn.started','turn.completed','turn.failed','item.started','item.completed','item.failed','error']);
+const execText=(value:unknown,limit:number):string=>{ensure(typeof value==='string','UNSUPPORTED_CODEX_EXEC_CONTENT');return bounded(value,'UNSUPPORTED_CODEX_EXEC_CONTENT',limit);};
+function codexExecItem(item:Document,limits:typeof DEFAULTS):ParsedRecord['turns'] {
+  ensure(typeof item.id==='string'&&item.id.length>0&&item.id.length<=200&&typeof item.type==='string','UNSUPPORTED_CODEX_EXEC_ITEM');
+  if(item.type==='agent_message')return [{role:'assistant',content:execText(item.text,limits.maxTextBytes)}];
+  if(item.type==='reasoning')return item.text==null?[]:[{role:'assistant',content:'[Reasoning]\n'+execText(item.text,limits.maxTextBytes)}];
+  if(item.type==='command_execution'){
+    const command=execText(item.command,limits.maxToolPayloadBytes);
+    const output=item.aggregated_output==null?'':execText(item.aggregated_output,limits.maxToolPayloadBytes);
+    const exit=item.exit_code==null?'':`; exit_code=${item.exit_code}`;
+    return [{role:'assistant',content:`[Tool use: command_execution; id=${item.id}]\n${command}`,toolCall:true},{role:'tool',content:`[Tool result: id=${item.id}${exit}]\n${output}`}];
+  }
+  if(item.type==='web_search'){
+    let encoded:string;try{encoded=canonicalJson({query:item.query});}catch{return fail('UNSUPPORTED_CODEX_EXEC_ITEM');}
+    ensure(Buffer.byteLength(encoded)<=limits.maxToolPayloadBytes,'IMPORT_LIMIT_EXCEEDED');
+    return [{role:'assistant',content:`[Tool use: web_search; id=${item.id}]\n${encoded}`,toolCall:true}];
+  }
+  return fail('UNSUPPORTED_CODEX_EXEC_ITEM');
+}
+function codexExecRecord(record:Document,limits:typeof DEFAULTS):ParsedRecord {
+  ensure(typeof record.type==='string'&&CODEX_EXEC_EVENTS.has(record.type),'UNSUPPORTED_CODEX_EXEC_EVENT');const timestamp=typeof record.timestamp==='string'?record.timestamp:undefined;
+  if(record.type==='thread.started'){ensure(typeof record.thread_id==='string'&&record.thread_id.length>0&&record.thread_id.length<=200,'UNSUPPORTED_CODEX_EXEC_EVENT');return {turns:[],skipped:true,sessionId:record.thread_id,timestamp};}
+  // Lifecycle, usage, error and partially started items are telemetry: the
+  // completed item of the same work carries the content exactly once.
+  if(record.type==='turn.started'||record.type==='turn.completed'||record.type==='turn.failed'||record.type==='item.started'||record.type==='error')return {turns:[],skipped:true,timestamp};
+  ensure(record.type==='item.completed'||record.type==='item.failed','UNSUPPORTED_CODEX_EXEC_EVENT');
+  ensure(plain(record.item),'UNSUPPORTED_CODEX_EXEC_EVENT');
+  if(record.type==='item.failed')return {turns:[],skipped:true,timestamp};
+  return {turns:codexExecItem(record.item,limits),skipped:false,timestamp};
 }
 
 /** Strict, bounded, auto-detecting parser for one user-supplied coding-session JSONL file. */
@@ -83,12 +120,25 @@ export function parseCodingSessionJsonl(input:string|Buffer,options:HistoryImpor
   const limits={...DEFAULTS,...options};for(const value of Object.values(limits))ensure(Number.isSafeInteger(value)&&value>0,'INVALID_IMPORT_LIMITS');
   const bytes=Buffer.isBuffer(input)?input:Buffer.from(input,'utf8');ensure(bytes.length>0,'EMPTY_IMPORT');ensure(bytes.length<=limits.maxBytes,'IMPORT_TOO_LARGE');const text=bytes.toString('utf8');ensure(Buffer.from(text,'utf8').equals(bytes),'INVALID_UTF8');
   const lines=text.split(/\r?\n/);ensure(lines.length<=limits.maxLines+1,'IMPORT_LIMIT_EXCEEDED');let format:CodingSessionFormat|undefined;const turns:CodingSessionHistoryImport['trace']['turns']=[];let records=0,skipped=0,toolCalls=0,totalText=0;const sessions=new Set<string>(),timestamps:string[]=[],models:CodingSessionHistoryImport['model_history']=[];let project:string|undefined;
-  for(let i=0;i<lines.length;i++){const line=lines[i]!;if(!line.trim())continue;records++;let record:unknown;try{rejectDuplicateJsonKeys(line);record=JSON.parse(line);}catch(error){if(error instanceof DomainError&&error.code==='DUPLICATE_JSON_KEY')throw error;fail(`MALFORMED_JSONL_LINE_${i+1}`);}ensure(plain(record),'UNSUPPORTED_HISTORY_RECORD');format??=detect(record);ensure(detect(record)===format,'MIXED_HISTORY_FORMAT');const claimed=record.message?.model??record.payload?.model;if(typeof claimed==='string'&&claimed.length>0&&claimed.length<=200&&!/[\u0000-\u001f\u007f]/.test(claimed)&&models.at(-1)?.claimed_model!==claimed)models.push({sequence:records,claimed_model:claimed,evidence:'user_supplied'});const parsed=format==='codex-jsonl'?codexRecord(record,limits):claudeRecord(record,limits);if(parsed.sessionId)sessions.add(parsed.sessionId);if(parsed.timestamp){ensure(Number.isFinite(Date.parse(parsed.timestamp)),format==='codex-jsonl'?'INVALID_CODEX_TIMESTAMP':'INVALID_CLAUDE_TIMESTAMP');timestamps.push(new Date(parsed.timestamp).toISOString());}project??=parsed.project;if(parsed.skipped)skipped++;for(const turn of parsed.turns){ensure(turn.content.length<=limits.maxTurnChars,'IMPORT_LIMIT_EXCEEDED');totalText+=Buffer.byteLength(turn.content);ensure(totalText<=limits.maxTextBytes,'IMPORT_LIMIT_EXCEEDED');turns.push({role:turn.role,content:turn.content});if(turn.toolCall)toolCalls++;}ensure(turns.length<=limits.maxTurns,'IMPORT_LIMIT_EXCEEDED');}
+  for(let i=0;i<lines.length;i++){const line=lines[i]!;if(!line.trim())continue;records++;let record:unknown;try{rejectDuplicateJsonKeys(line);record=JSON.parse(line);}catch(error){if(error instanceof DomainError&&error.code==='DUPLICATE_JSON_KEY')throw error;fail(`MALFORMED_JSONL_LINE_${i+1}`);}ensure(plain(record),'UNSUPPORTED_HISTORY_RECORD');
+      // An unknown thread/turn/item event names its own error instead of
+      // UNSUPPORTED_CODEX_RECORD; a record of another known format is a mix.
+      const kind=detectKind(record);
+      format??=kind??(typeof record.type==='string'&&/^(?:thread|turn|item)\./.test(record.type)?'codex-exec-jsonl':undefined);
+      if(!format)fail('UNSUPPORTED_HISTORY_FORMAT');
+      if(format==='codex-exec-jsonl')ensure(kind==='codex-exec-jsonl',kind===undefined?'UNSUPPORTED_CODEX_EXEC_EVENT':'MIXED_HISTORY_FORMAT');
+      else ensure(kind===undefined||kind===format,'MIXED_HISTORY_FORMAT');const claimed=record.message?.model??record.payload?.model;if(typeof claimed==='string'&&claimed.length>0&&claimed.length<=200&&!/[\u0000-\u001f\u007f]/.test(claimed)&&models.at(-1)?.claimed_model!==claimed)models.push({sequence:records,claimed_model:claimed,evidence:'user_supplied'});const parsed=format==='claude-code-jsonl'?claudeRecord(record,limits):format==='codex-jsonl'?codexRecord(record,limits):codexExecRecord(record,limits);if(parsed.sessionId)sessions.add(parsed.sessionId);if(parsed.timestamp){ensure(Number.isFinite(Date.parse(parsed.timestamp)),format==='claude-code-jsonl'?'INVALID_CLAUDE_TIMESTAMP':'INVALID_CODEX_TIMESTAMP');timestamps.push(new Date(parsed.timestamp).toISOString());}project??=parsed.project;if(parsed.skipped)skipped++;for(const turn of parsed.turns){ensure(turn.content.length<=limits.maxTurnChars,'IMPORT_LIMIT_EXCEEDED');totalText+=Buffer.byteLength(turn.content);ensure(totalText<=limits.maxTextBytes,'IMPORT_LIMIT_EXCEEDED');turns.push({role:turn.role,content:turn.content});if(turn.toolCall)toolCalls++;}ensure(turns.length<=limits.maxTurns,'IMPORT_LIMIT_EXCEEDED');}
   ensure(records>0&&format&&turns.length>0,'EMPTY_IMPORT');ensure(sessions.size<=1,'MIXED_SESSION');timestamps.sort();const trace={turns};ensure(Buffer.byteLength(canonicalJson(trace))<=limits.maxCanonicalTraceBytes,'IMPORT_LIMIT_EXCEEDED');const glmCount=format==='claude-code-jsonl'?models.filter(m=>glmModel(m.claimed_model)).length:0;
   // A session replayed against two gateways cannot carry one honest upstream label.
   if(glmCount>0&&glmCount<models.length)fail('MIXED_UPSTREAM');
-  const sourceDate=timestamps[0],provider=format==='codex-jsonl'?'Codex':glmCount>0?'Claude Code (Z.AI)':'Claude Code';const privacyFlags=[/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(text)?'possible_email':undefined,/\b(?:sk-|gh[pousr]_)/.test(text)?'possible_secret':undefined].filter((x):x is string=>!!x);
-  return {schema_version:'thot.coding-session-history-import/1',source:{kind:'user_supplied',format,...(sessions.size?{session_id:[...sessions][0]}:{}),...(glmCount>0?{upstream:'https://api.z.ai' as const}:{}),source_bytes:bytes.length,source_sha256:createHash('sha256').update(bytes).digest('hex')},trace,model_history:models,summary:{records,metadata_records_skipped:skipped,turns:turns.length,tool_calls:toolCalls,...(sourceDate?{started_at:sourceDate,ended_at:timestamps.at(-1)}:{})},preview:{title:project?`${provider}: ${project}`:`${provider} session`,format:format==='codex-jsonl'?'Codex coding-session JSONL':'Claude Code JSONL',source_label:`${provider} (user supplied)`,...(sourceDate?{source_date:sourceDate}:{}),size_bytes:bytes.length,turn_count:turns.length,content_commitment:canonicalHash(trace),privacy_flags:privacyFlags},limitations:['User-supplied history: this receipt commits to imported bytes and parsed content but does not authenticate the conversation or provider.',format==='codex-jsonl'?'Codex session metadata, event telemetry, token counts and encrypted reasoning are omitted; system/developer instructions, supported user/assistant text and function calls/results are retained. Model names in this file are unverified user-supplied claims.':'Claude Code application metadata records (including snapshots, UI state, permission state and attachment metadata) are omitted; supported message text, thinking, tool calls and text/tool-reference results are retained. Model names in this file are unverified user-supplied claims.'+(glmCount>0?' The Z.AI upstream is inferred from those GLM model names, not authenticated.':'')]};
+  const sourceDate=timestamps[0],provider=format==='claude-code-jsonl'?glmCount>0?'Claude Code (Z.AI)':'Claude Code':'Codex';const privacyFlags=[/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(text)?'possible_email':undefined,/\b(?:sk-|gh[pousr]_)/.test(text)?'possible_secret':undefined].filter((x):x is string=>!!x);
+  const formatLabel=format==='codex-exec-jsonl'?'Codex exec JSONL':format==='codex-jsonl'?'Codex coding-session JSONL':'Claude Code JSONL';
+  const limitation=format==='codex-exec-jsonl'
+    ?'Codex exec thread/turn lifecycle events, token usage, started (partial) items and stream errors are omitted; completed agent messages, reasoning, command executions and web searches are retained. This format carries no model names.'
+    :format==='codex-jsonl'
+    ?'Codex session metadata, event telemetry, token counts and encrypted reasoning are omitted; system/developer instructions, supported user/assistant text and function calls/results are retained. Model names in this file are unverified user-supplied claims.'
+    :'Claude Code application metadata records (including snapshots, UI state, permission state and attachment metadata) are omitted; supported message text, thinking, tool calls and text/tool-reference results are retained. Model names in this file are unverified user-supplied claims.'+(glmCount>0?' The Z.AI upstream is inferred from those GLM model names, not authenticated.':'');
+  return {schema_version:'thot.coding-session-history-import/1',source:{kind:'user_supplied',format,...(sessions.size?{session_id:[...sessions][0]}:{}),...(glmCount>0?{upstream:'https://api.z.ai' as const}:{}),source_bytes:bytes.length,source_sha256:createHash('sha256').update(bytes).digest('hex')},trace,model_history:models,summary:{records,metadata_records_skipped:skipped,turns:turns.length,tool_calls:toolCalls,...(sourceDate?{started_at:sourceDate,ended_at:timestamps.at(-1)}:{})},preview:{title:project?`${provider}: ${project}`:`${provider} session`,format:formatLabel,source_label:`${provider} (user supplied)`,...(sourceDate?{source_date:sourceDate}:{}),size_bytes:bytes.length,turn_count:turns.length,content_commitment:canonicalHash(trace),privacy_flags:privacyFlags},limitations:['User-supplied history: this receipt commits to imported bytes and parsed content but does not authenticate the conversation or provider.',limitation]};
 }
 
 export function parseClaudeCodeJsonl(input:string|Buffer,options:ClaudeHistoryImportOptions={}):ClaudeHistoryImport {

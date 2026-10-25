@@ -30,12 +30,28 @@ import {operatorProduct} from './operator-product.ts';
 import { operatorEnvironment } from './operator-environment.ts';
 import {maintenanceStats} from '../../packages/market/src/maintenance.ts';
 import { canonicalApplicationUrl, readPublicAsset, publicDocumentRoutes, publicLaunchConfig, unavailableMarketProof, type LaunchConfiguration } from './public-site.ts';
+import {loadFormGateConfig, createFormGate} from './form-gate.ts';
+import {renderListingPage, renderListingUnavailablePage} from './listing-page.ts';
 
 type Application=Awaited<ReturnType<typeof createApplication>>;
 const readDiagnosticCodes=new Set(['BAD_DATA','UNKNOWN_ERROR','SERVER_ERROR','TIMEOUT','NETWORK_ERROR','CALL_EXCEPTION','OFFCHAIN_FAULT']);
 const readDiagnosticTransportCodes=new Set(['ECONNRESET','EAI_AGAIN']);
 const readDiagnosticDomainCodes=new Set(['THOT_NOT_CONFIGURED','THOT_BLOCK_UNAVAILABLE','THOT_CODE_PIN_MISMATCH','THOT_DEPLOYMENT_ANCHOR_MISMATCH','THOT_OPERATOR_JOURNAL_REQUIRED','THOT_PRODUCTION_ACTIVATION_PENDING','ANVIL_RESET_RECONCILIATION_REQUIRED','SETTLEMENT_RECONCILIATION_REQUIRED']);
 const readDiagnosticMethods=new Set(['eth_call','eth_chainId','eth_blockNumber','eth_getBlockNumber','eth_getCode','eth_getBlockByNumber','eth_getBlockByHash','eth_getBalance','eth_getLogs','eth_getTransactionCount','eth_getTransactionByHash','eth_getTransactionReceipt','eth_estimateGas','eth_gasPrice','eth_maxPriorityFeePerGas']);
+// The workspace shell points at its build's bundle and styles by content version, so browsers cache them until a release.
+let appShellHtml:Promise<Buffer>|null=null;
+function appShell():Promise<Buffer>{
+  const file=(name:string)=>readFile(new URL('../dashboard/'+name,import.meta.url));
+  const version=async(name:string)=>createHash('sha256').update(await file(name)).digest('hex').slice(0,16);
+  return appShellHtml??=(async()=>{
+    const html=(await file('index.html')).toString('utf8');
+    // shortcut: without a build (bare source checkout) the shell keeps loading the unbundled modules.
+    const app=await version('app.bundle.js').then(v=>`src="/app.bundle.js?v=${v}"`,()=>'src="/app.js"');
+    return Buffer.from(html.replace('src="/app.js"',app)
+      .replace('href="/style.css"',`href="/style.css?v=${await version('style.css')}"`)
+      .replace('href="/staking.css"',`href="/staking.css?v=${await version('staking.css')}"`));
+  })().catch(error=>{appShellHtml=null;throw error;});
+}
 function readDiagnosticFields(error:unknown):Document {
   const fields:Document={family:'unknown',code:'UNCLASSIFIED',exception_type:'Other',transient_reason:'other'};
   try {
@@ -66,7 +82,7 @@ function readDiagnosticFields(error:unknown):Document {
   } catch { /* Unusual error shapes never escape into diagnostics. */ }
   return fields;
 }
-export function createHttpServer(app:Application,options:{log?:(event:Document)=>void;clock?:()=>number;sessionTtlMs?:number;externalAuth?:AuthProvider;billing?:BillingReconciliationConfig;publicOrigin?:string;enableDemoOffers?:boolean;admission?:ApiAdmission;launch?:LaunchConfiguration;privy?:{app_id:string;client_id?:string};environmentName?:string;operatorActivity?:OperatorActivity;readOnly?:boolean}={}) {
+export function createHttpServer(app:Application,options:{log?:(event:Document)=>void;clock?:()=>number;sessionTtlMs?:number;externalAuth?:AuthProvider;billing?:BillingReconciliationConfig;publicOrigin?:string;enableDemoOffers?:boolean;admission?:ApiAdmission;launch?:LaunchConfiguration;privy?:{app_id:string;client_id?:string};environmentName?:string;operatorActivity?:OperatorActivity;readOnly?:boolean;formGate?:ReturnType<typeof createFormGate>}={}) {
   ensure(!options.readOnly||app.thot.readOnly&&!app.thot.chain?.operatorAvailable(),'THOT_READ_ONLY_SIGNER_FORBIDDEN');
   const sessions=new Map<string,{actor:Actor;expires:number}>();
   const sessionNow=options.clock??Date.now,sessionTtlMs=options.sessionTtlMs??8*3600000;
@@ -133,21 +149,49 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       releaseRequest=admission.enterRequest();
       // The public app shell is a safe landing page for external links and Clerk
       // redirects. This exception never applies to APIs, assets, or mutations.
-      const documentNavigation=req.method==='GET'&&(publicDocumentRoutes.has(route)||route==='/ops'||route==='/ops/')
+      // A listing share page and the gate's own login page are the same class of
+      // public top-level navigation.
+      const publicListingPage=/^\/l\/[A-Za-z0-9_-]{1,80}$/.test(route);
+      // The gate's own login form is public surface: browsers may submit it
+      // with an opaque "null" origin, and it carries no ambient authority —
+      // the session cookie it can set is SameSite=Strict and site-scoped.
+      const gateRoute=route==='/gate'||route==='/gate/'||route==='/gate/logout';
+      const documentNavigation=req.method==='GET'&&(publicDocumentRoutes.has(route)||route==='/ops'||route==='/ops/'||publicListingPage||gateRoute)
         &&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
       if(options.publicOrigin){
         ensure(requestOrigin,'INVALID_HOST',403);
-        ensure(documentNavigation||!req.headers.origin||req.headers.origin===requestOrigin,'CROSS_ORIGIN_DENIED',403);
+        ensure(documentNavigation||gateRoute||!req.headers.origin||req.headers.origin===requestOrigin,'CROSS_ORIGIN_DENIED',403);
       } else {
         ensure(/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(host),'INVALID_HOST',403);
-        ensure(documentNavigation||!req.headers.origin||req.headers.origin===`http://${host}`,'CROSS_ORIGIN_DENIED',403);
+        ensure(documentNavigation||gateRoute||!req.headers.origin||req.headers.origin===`http://${host}`,'CROSS_ORIGIN_DENIED',403);
       }
-      ensure(documentNavigation||req.headers['sec-fetch-site']!=='cross-site','CROSS_ORIGIN_DENIED',403);
+      ensure(documentNavigation||gateRoute||req.headers['sec-fetch-site']!=='cross-site','CROSS_ORIGIN_DENIED',403);
+
+      // The form/cookie gate fronts the whole private site: its own login page
+      // answers first, then every remaining request needs a tester session.
+      // Self-token-authenticated device routes keep their own boundary.
+      if(options.formGate){
+        if(gateRoute){
+          chargeRate('public');
+          if(await options.formGate.handleGateEndpoint(req,res,route))return;
+        }
+        if(await options.formGate.guard(req,res,route))return;
+      }
+
+      // A listing share page is public metadata plus a sign-in-to-buy action;
+      // hidden or unlisted listings explain that clearly instead of 404ing.
+      if((req.method==='GET'||req.method==='HEAD')&&publicListingPage){
+        chargeRate('public');
+        const view=await app.thot.publicListingView(route.slice(3));
+        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});
+        res.end(req.method==='HEAD'?undefined:view.available?renderListingPage(view.listing,publicAppUrl):renderListingUnavailablePage(publicAppUrl));
+        return;
+      }
 
       // The retained old candidate serves only authentication and already-delivered
       // licensed content. Deny every other API route before parsing a request body.
       if(options.readOnly&&route.startsWith('/v1/')){
-        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/site-config','/v1/public/market-proof','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/catalog','/v1/thot/workspace'].includes(route);
+        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/site-config','/v1/public/market-proof','/v1/public/listings','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/catalog','/v1/thot/workspace'].includes(route);
         const safePost=req.method==='POST'&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify','/v1/auth/session/revoke','/v1/thot/offers/delivery'].includes(route);
         ensure(safeGet||safePost,'THOT_READ_ONLY',403);
       }
@@ -174,13 +218,13 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       // No published production evidence source is configured here. Never select a
       // test snapshot from request data or infer receipts from private account data.
       if(req.method==='GET'&&route==='/v1/public/market-proof'){chargeRate('public');reply(200,unavailableMarketProof());return;}
+      if(req.method==='GET'&&route==='/v1/public/listings'){chargeRate('public');reply(200,await app.thot.publicCatalog());return;}
       if((req.method==='GET'||req.method==='HEAD')&&isDashboardAssetRoute(route)){
         chargeRate('public');
         res.setHeader('Vary','Accept-Encoding');
         const asset=await dashboardAssets(route,req.headers['accept-encoding']);
-        // The same URLs can change between releases. Always revalidate, and do
-        // not let a shared cache turn a protected site's gate into a bypass.
-        res.setHeader('Cache-Control','private, no-cache');res.setHeader('ETag',asset.etag);
+        // Versioned (?v=) and content-named URLs never change; the rest revalidate. Never a shared cache: a gated site must not leak.
+        res.setHeader('Cache-Control',url.searchParams.has('v')||route.includes('/privy-auth-chunks/')?'private, max-age=31536000, immutable':'private, no-cache');res.setHeader('ETag',asset.etag);
         res.setHeader('Content-Type',asset.contentType);
         if(asset.encoding!=='identity')res.setHeader('Content-Encoding',asset.encoding);
         if(matchesAssetEtag(req.headers['if-none-match'],asset.etag)){res.writeHead(304);res.end();return;}
@@ -190,7 +234,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       if(req.method==='GET'&&['/app','/app/','/ops','/ops/','/getting-started'].includes(route)) {
         chargeRate('public');
         const name=route==='/app'||route==='/app/'?'index.html':route==='/ops'||route==='/ops/'?'operator.html':route==='/getting-started'?'getting-started.html':route.slice(1);
-        const file=await readFile(new URL('../dashboard/'+name,import.meta.url));
+        const file=name==='index.html'?await appShell():await readFile(new URL('../dashboard/'+name,import.meta.url));
         res.writeHead(200,{'Content-Type':name.endsWith('.css')?'text/css; charset=utf-8':name.endsWith('.js')?'text/javascript; charset=utf-8':'text/html; charset=utf-8'});res.end(file);return;
       }
       if(req.method==='GET'&&route==='/healthz') {chargeRate('public');await app.db.query('SELECT 1');reply(200,{status:'ok',mode:'local-development',version:'0.2.0',live_integrations:app.inference.capabilities().enabled});return;}
@@ -211,7 +255,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       const token=bearer||cookieToken;
       const deviceCapture=route.match(/^\/v1\/capture-devices\/([^/]+)\/(captures|disconnect)$/);
       const captureCapability=route.match(/^\/v1\/agent-captures\/([^/]+)\/(parts|complete|checkpoint|authorize|heartbeat)$/);
-      const publicAuth=req.method==='POST'&&(route==='/v1/dev/session'||externalAuth instanceof WalletAuth&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify'].includes(route));
+      const publicAuth=req.method==='POST'&&(route==='/v1/dev/session'||['/v1/device-pairing/sessions','/v1/device-pairing/sessions/token','/v1/device-pairing/sessions/events'].includes(route)||externalAuth instanceof WalletAuth&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify'].includes(route));
       const relayRoute=req.method==='POST'&&route==='/v1/openrouter/chat/completions';
       const delegated=req.method==='POST'&&(!!deviceCapture||!!captureCapability||!!historyDevice);
       const authenticateSession=async()=>{
@@ -226,7 +270,9 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       if(!publicAuth){ensure(token,'UNAUTHENTICATED',401);releaseAuth=admission.enterAuthentication(token);}
       if(publicAuth){
         if(route==='/v1/dev/session')ensure(app.service.config.development&&!externalAuth,'DEVELOPMENT_AUTH_DISABLED',403);
-        else if(externalAuth instanceof WalletAuth)externalAuth.requireOrigin(req.headers.origin);
+        // Device-pairing helper routes are called terminal-to-server with no
+        // browser origin; only the wallet challenge pair is origin-bound.
+        else if(externalAuth instanceof WalletAuth&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify'].includes(route))externalAuth.requireOrigin(req.headers.origin);
         chargeRate('public');
       }else if(relayRoute){ensure(bearer,'UNAUTHENTICATED',401);const authorization=await app.openrouter.authorize(bearer);verifiedAdmission('account',authorization.owner_id);}
       else if(delegated){
@@ -235,7 +281,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         else if(deviceCapture){const device=await app.db.transaction(tx=>app.captureDevices.authenticate(tx,decodeURIComponent(deviceCapture[1]!),bearer));verifiedAdmission('capture',device.owner_id);}
         else {const capture=await app.agentCapture.authenticate(decodeURIComponent(captureCapability![1]!),bearer);if(capture.device_id)await app.db.transaction(tx=>app.captureDevices.active(tx,capture.device_id));verifiedAdmission('capture',capture.owner_id);}
       }else {const session=await authenticateSession();verifiedAdmission('account',session.actor.id);}
-      const routeLimit=historyDevice?.[2]==='imports'?16_000_000:publicAuth||delegated&&!['parts','complete','checkpoint'].includes(captureCapability?.[2]??'')?8192:route.startsWith('/v1/contributor/import/')?16_000_000:['/v1/thot/listings/preview','/v1/thot/listings/exclude'].includes(route)?65536:captureCapability?CAPTURE_PART_JSON_BYTES:4_000_000;
+      const routeLimit=historyDevice?.[2]==='imports'?16_000_000:route==='/v1/device-pairing/sessions/events'?1_100_000:publicAuth||delegated&&!['parts','complete','checkpoint'].includes(captureCapability?.[2]??'')?8192:route.startsWith('/v1/contributor/import/')?16_000_000:['/v1/thot/listings/preview','/v1/thot/listings/exclude'].includes(route)?65536:captureCapability?CAPTURE_PART_JSON_BYTES:4_000_000;
       const body=mutating?await jsonBody(req,Math.min(routeLimit,admission.limits.body_bytes_in_flight),admission,release=>{releaseBody=release;},()=>{if(req.headers.expect?.toLowerCase()==='100-continue')res.writeContinue();}):{};
       if(req.method==='POST'&&route==='/v1/dev/session') {
         ensure(app.service.config.development&&!externalAuth,'DEVELOPMENT_AUTH_DISABLED',403);
@@ -246,6 +292,17 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         ensure(sessions.size<1000,'SESSION_LIMIT',429);
         const token=randomBytes(32).toString('base64url');sessions.set(token,{actor,expires:sessionNow()+sessionTtlMs});
         reply(200,{token,actor,development:true,expires_in_seconds:Math.ceil(sessionTtlMs/1000),permissions:{trace_explorer:app.library.canExplore(actor)}});return;
+      }
+      // Device-code pairing: the helper holds a device_code and polls; the
+      // browser approves with the matching user_code through its session.
+      if(req.method==='POST'&&route==='/v1/device-pairing/sessions'){
+        reply(200,await app.devicePairing.create(body,{origin:requestOrigin??`http://${host}`,ip:req.socket.remoteAddress??''}));return;
+      }
+      if(req.method==='POST'&&route==='/v1/device-pairing/sessions/token'){
+        reply(200,await app.devicePairing.token(body.device_code));return;
+      }
+      if(req.method==='POST'&&route==='/v1/device-pairing/sessions/events'){
+        reply(200,await app.devicePairing.events(body.device_code,body));return;
       }
       if(externalAuth instanceof WalletAuth&&req.method==='POST'&&route==='/v1/auth/wallet/challenge'){
         const challenge=await externalAuth.challenge(body as any,req.headers.origin);res.setHeader('Set-Cookie',challenge.set_cookie);reply(200,challenge.body);return;
@@ -431,6 +488,11 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       else if(req.method==='POST'&&route==='/v1/thot/listings/preview')result=await app.releasePreview.preview(actor,body);
       else if(req.method==='POST'&&route==='/v1/thot/listings/exclude')result=await app.releasePreview.exclude(actor,key,body);
       else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/capture-devices'&&segments[4]==='disconnect')result=await app.captureDevices.revoke(actor,key,segments[3]!);
+      else if(req.method==='GET'&&segments.length===4&&segments.slice(0,3).join('/')==='v1/contributor/device-pairing')result=await app.devicePairing.info(actor,segments[3]!);
+      else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/device-pairing'&&['approve','deny','saved','cancel'].includes(segments[4]!)){
+        const action=segments[4]!,pairingCode=segments[3]!;
+        result=action==='approve'?await app.devicePairing.approve(actor,key,pairingCode,body):action==='deny'?await app.devicePairing.deny(actor,pairingCode):action==='saved'?await app.devicePairing.saved(actor,key,pairingCode):await app.devicePairing.cancel(actor,key,pairingCode);
+      }
       else if(req.method==='POST'&&route==='/v1/contributor/agent-captures/begin')result=await app.agentCapture.begin(actor,body);
       else if(req.method==='GET'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/agent-captures'&&segments[4]==='status')result=await app.agentCapture.status(actor,segments[3]!);
       else if(req.method==='GET'&&segments.length===7&&segments.slice(0,3).join('/')==='v1/contributor/agent-captures'&&segments[4]==='proof'&&segments[5]==='parts')result=await app.agentCapture.proofPart(actor,segments[3]!,Number(segments[6]));
@@ -652,13 +714,15 @@ export async function startServer(options:{port?:number;dataDir?:string;database
   })();
   try{
     remoteStorage=await openRemoteStorage(process.env);
+    const formGateConfig=loadFormGateConfig(process.env);
+    if(formGateConfig)ensure(publicOrigin,'FORM_GATE_REQUIRES_PUBLIC_ORIGIN');
     app=await createApplication({storage:remoteStorage,thot,thotOperatorSigner:operatorRuntime.signer,readOnly,dataDir:options.dataDir,databaseUrl:options.databaseUrl,config:{tokenEnabled:options.tokenEnabled??false,traceExplorerViewers:JSON.parse(viewers)},masterKey,inference,robinhood,plaid,openrouter:{enabled:process.env.THOT_ENABLE_OPENROUTER_RELAY==='true'}});
     let externalAuth;
     if(externalAuthConfig)externalAuth=await ExternalAuth.create(app.db,externalAuthConfig);else if(clerkAuthConfig)externalAuth=await ClerkAuth.create(app.db,clerkAuthConfig);else if(walletAuthConfig)externalAuth=await WalletAuth.create(app.db,walletAuthConfig);
     validateThotHost({...hostConfiguration,walletAuthConfigured:externalAuth instanceof WalletAuth,authConfigured:!!externalAuth});
     if(initialMemberships)await seedHostedAuthMemberships(app.db,externalAuth,initialMemberships);
     operatorActivity=await OperatorActivity.create({dataDir:app.dataDir,db:app.db});
-    server=createHttpServer(app,{operatorActivity,externalAuth,billing,publicOrigin,readOnly,...(process.env.THOT_PRIVY_APP_ID?{privy:{app_id:process.env.THOT_PRIVY_APP_ID,client_id:process.env.THOT_PRIVY_CLIENT_ID}}:{}),...(process.env.THOT_ENVIRONMENT_NAME?{environmentName:process.env.THOT_ENVIRONMENT_NAME}:{}),enableDemoOffers:process.env.THOT_ENABLE_DEMO_OFFERS==='true'?true:undefined,launch:{state:process.env.THOT_LAUNCH_STATE,tokenAddress:process.env.THOT_TOKEN_ADDRESS,ponsLaunchAddress:process.env.THOT_PONS_LAUNCH_ADDRESS},log:entry=>process.stdout.write(canonicalJson(entry)+'\n')});
+    server=createHttpServer(app,{operatorActivity,externalAuth,billing,publicOrigin,readOnly,...(formGateConfig?{formGate:createFormGate(formGateConfig)}:{}),...(process.env.THOT_PRIVY_APP_ID?{privy:{app_id:process.env.THOT_PRIVY_APP_ID,client_id:process.env.THOT_PRIVY_CLIENT_ID}}:{}),...(process.env.THOT_ENVIRONMENT_NAME?{environmentName:process.env.THOT_ENVIRONMENT_NAME}:{}),enableDemoOffers:process.env.THOT_ENABLE_DEMO_OFFERS==='true'?true:undefined,launch:{state:process.env.THOT_LAUNCH_STATE,tokenAddress:process.env.THOT_TOKEN_ADDRESS,ponsLaunchAddress:process.env.THOT_PONS_LAUNCH_ADDRESS},log:entry=>process.stdout.write(canonicalJson(entry)+'\n')});
     await new Promise<void>((resolve,reject)=>{server!.once('error',reject);server!.listen(port,bind,()=>resolve());});
     if(!readOnly)worker=startWorkerLoop(app,{intervalMs:(thot?.mode==='robinhood-testnet'||thot?.mode==='production')?30_000:2000});
     const address=server.address();const actualPort=typeof address==='object'&&address?address.port:port;

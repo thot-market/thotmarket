@@ -172,7 +172,13 @@ try {
       await seller.page.setViewportSize(desktop);
     }
     const activated = seller.page.waitForResponse(r => r.url().endsWith('/v1/thot/listings/activate'));
-    await seller.page.locator('[data-action="thot-list-confirm"]').click(); const activation = await activated; assert.equal(activation.status(), 200);
+    await seller.page.locator('[data-action="thot-list-confirm"]').click();
+    // The exact-commitment review sits between consent and the wallet request;
+    // the recording captures it before the signature opens the wallet.
+    await seller.page.getByRole('heading', {name: 'Review the exact commitments'}).waitFor();
+    await shot(seller.page, 'listing-exact-commitments');
+    await seller.page.getByRole('button', {name: 'Open wallet to sign'}).click();
+    const activation = await activated; assert.equal(activation.status(), 200);
     const listing = await activation.json();
     assert(listing?.automatic_sales); return {trace, listing, metadata};
   }

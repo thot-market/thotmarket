@@ -1,0 +1,23 @@
+/* Standalone public listing share page. No script, no external requests. */
+:root{--ink:#1d2a20;--muted:#6c7567;--line:#dfe3d5;--surface:#fbfaf3;--navy:#223f2a;--mint:#9fc39f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface);color:var(--ink);font:16px/1.65 "DM Sans","Trebuchet MS",sans-serif}
+main{max-width:640px;margin:0 auto;padding:32px 22px 60px}
+.listing-brand{display:inline-flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font-size:26px;letter-spacing:2px}
+h1{font-size:30px;line-height:1.2;margin:26px 0 8px;overflow-wrap:anywhere}
+.listing-price{font-size:24px;font-weight:650;margin:0 0 22px}
+.listing-meta{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden}
+.listing-row{display:flex;justify-content:space-between;gap:18px;padding:13px 16px;border-bottom:1px solid var(--line);font-size:14px}
+.listing-row:last-child{border-bottom:0}
+.listing-row span{color:var(--muted)}
+.listing-row strong{text-align:right;max-width:70%;overflow-wrap:anywhere;font-weight:600}
+.listing-row code{font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.listing-license{margin-top:20px}
+.listing-license h2{font-size:15px;margin:0 0 8px}
+.listing-license p{border:1px solid var(--line);border-radius:12px;background:#fff;padding:14px 16px;font-size:14px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.listing-note{color:var(--muted);font-size:13px;margin:18px 0}
+.listing-actions{display:flex;gap:12px;flex-wrap:wrap}
+.listing-buy,.listing-browse{display:inline-block;border-radius:9px;padding:13px 20px;font-size:15px;font-weight:600;text-decoration:none}
+.listing-buy{background:var(--navy);color:#f1f5ec}
+.listing-browse{border:1px solid var(--line);background:transparent;color:var(--ink)}
+.listing-unavailable h1{margin-bottom:4px}

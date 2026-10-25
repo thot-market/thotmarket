@@ -120,7 +120,9 @@ test('same-page fragment selects marketplace and late account response cannot re
  await f.page.locator('[data-action="identity-sign-out"]').waitFor({state:'attached'});
  await f.page.evaluate(()=>{location.hash='thot-available';});await card(f.page).waitFor();
  await f.page.locator('.journey-menu>summary').click();await f.page.locator('[data-action="identity-sign-out"]').click();
- await f.page.getByRole('heading',{name:'Sign in with your wallet.'}).waitFor();
+ // Signed out on the market route, the buyer sign-in state answers (#83).
+ await f.page.getByRole('heading',{name:/Sign in with your wallet/}).waitFor();
+ assert.equal(await f.page.title(),'Buy traces · thot market');
  f.release();await f.page.waitForTimeout(100);
  assert.equal(await card(f.page).count(),0);assert.equal(await ready(f.page).count(),0);
 });
@@ -129,7 +131,7 @@ test('wallet change discards late catalogue and account responses',async t=>{
  const f=await fixture(t,{holdCatalog:true});await f.open();
  await f.page.locator('[data-action="identity-sign-out"]').waitFor({state:'attached'});
  await f.page.evaluate(()=>window.fixtureAccountChange());
- await f.page.getByRole('heading',{name:'Sign in with your wallet.'}).waitFor();
+ await f.page.getByRole('heading',{name:/Sign in with your wallet/}).waitFor();
  f.releaseCatalog();f.release();await f.page.waitForTimeout(100);
  assert.equal(await card(f.page).count(),0);
  assert.equal(await f.page.locator('#wallet-summary').isVisible(),false);
@@ -142,12 +144,12 @@ test('My work is readable while chain data waits and never presents pending sale
  assert.match(await f.page.locator('.library-row').innerText(),/Sale status loading/);
  assert.equal(await f.page.locator('[data-action="thot-list-configure"]').count(),0);
  assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace'&&r.search==='?scope=buyer').length,1);
- await f.page.getByRole('button',{name:'Add a trace'}).click();
+ await f.page.getByRole('button',{name:'Add work'}).click();
  await f.page.locator('[data-action="journey-local"][data-client="codex"]').click();
  await f.page.getByRole('button',{name:/Daily history uploads/}).click();
  await f.page.getByRole('heading',{name:'Upload Codex history daily'}).waitFor();
  await f.page.locator('#detail-dialog [data-action="close-dialog"]').click();
- await f.page.getByRole('button',{name:'Add a trace'}).click();
+ await f.page.getByRole('button',{name:'Add work'}).click();
  await f.page.locator('[data-action="journey-local"][data-client="claude"]').click();
  await f.page.getByRole('button',{name:/Import a conversation/}).click();
  await f.page.locator('#research-file').waitFor();

@@ -204,12 +204,21 @@ test('manifest membership, digest, sizes, symlinks and finite limits fail closed
 });
 
 test('packaged chunks preserve real HTTP compression, namespace revalidation, origin denial and admission',async t=>{
-  const manifest=JSON.parse(await readFile(new URL('../apps/dashboard/privy-auth.assets.json',import.meta.url),'utf8'));
+  // A flattened export ships no generated sign-in bundle; build it in place so
+  // the packaged-asset contract is testable from a plain checkout too.
+  const manifestPath=new URL('../apps/dashboard/privy-auth.assets.json',import.meta.url);
+  try{await readFile(manifestPath,'utf8');}
+  catch{const {buildPrivyAuth}=await import(String('../scripts/build-privy-auth.mjs')) as {buildPrivyAuth:()=>Promise<unknown>};await buildPrivyAuth();}
+  const manifest=JSON.parse(await readFile(manifestPath,'utf8'));
   const file=manifest.assets.find((asset:{path:string})=>asset.path.startsWith('privy-auth-chunks/')).path;
   const call=await fixture(t),route='/privy-auth/v1/0/'+file;
   const first=await call(route,{'Accept-Encoding':'br'});assert.equal(first.status,200);
-  assert.equal(first.headers['cache-control'],'private, no-cache');assert.equal(first.headers['content-encoding'],'br');
+  assert.equal(first.headers['cache-control'],'private, max-age=31536000, immutable');assert.equal(first.headers['content-encoding'],'br');
   assert.deepEqual(brotliDecompressSync(first.body),await readFile(new URL('../apps/dashboard/'+file,import.meta.url)));
+  const shell=(await call('/app',{})).body.toString('utf8'),bundle=shell.match(/src="(\/app\.bundle\.js\?v=[0-9a-f]{16})"/)?.[1];
+  assert.ok(bundle&&/href="\/style\.css\?v=[0-9a-f]{16}"/.test(shell),'app shell references versioned assets');
+  assert.equal((await call(bundle,{'Accept-Encoding':'br'})).headers['cache-control'],'private, max-age=31536000, immutable');
+  assert.equal((await call('/style.css',{'Accept-Encoding':'br'})).headers['cache-control'],'private, no-cache');
   const headers={'Accept-Encoding':'br','If-None-Match':first.headers.etag!};
   const next=await call('/privy-auth/v1/9999/'+file,headers);assert.equal(next.status,304);assert.equal(next.body.length,0);
   for(const denial of [{Host:'attacker.invalid'},{Origin:'https://attacker.invalid'},{'Sec-Fetch-Site':'cross-site'}] as Record<string,string>[]){

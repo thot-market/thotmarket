@@ -2,12 +2,14 @@ import { readFileSync, existsSync } from 'node:fs';
 import { isAbsolute, dirname, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { availableParallelism } from 'node:os';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { suites } = JSON.parse(readFileSync(new URL('../release/test-suites.json', import.meta.url), 'utf8'));
-const selected = process.argv[2];
-if (process.argv.length !== 3 || (selected !== 'all' && !Object.hasOwn(suites, selected))) {
-  throw new Error(`Choose one suite: ${Object.keys(suites).join(', ')}, all`);
+// `contracts:2/3` runs the second of three file shards, so CI can split slow suites across runners.
+const [selected, shard] = (process.argv[2] ?? '').split(':');
+if (process.argv.length !== 3 || (selected !== 'all' && !Object.hasOwn(suites, selected)) || (shard && !/^[1-9]\d*\/[1-9]\d*$/.test(shard))) {
+  throw new Error(`Choose one suite: ${Object.keys(suites).join(', ')}, all (optionally suite:i/n)`);
 }
 const env = { ...process.env, NODE_ENV: 'test', THOT_MONEY_POOL: 'local-v2' };
 env.THOT_E2E_BROWSER ??= env.THOT_E2E_BROWSER;
@@ -47,7 +49,10 @@ for (const name of selected === 'all' ? Object.keys(suites) : [selected]) {
       }
     }
   }
-  if (suite.node?.length) run(process.execPath, ['--test', '--test-concurrency=1', ...suite.node]);
+  // Fixtures use random ports and temp dirs; suites that share a display or database say `serial`.
+  const concurrency = suite.serial ? 1 : availableParallelism();
+  if (suite.node?.length) run(process.execPath, ['--test', `--test-concurrency=${concurrency}`, ...(shard ? [`--test-shard=${shard}`] : []), ...suite.node]);
+  if (shard && !shard.startsWith('1/')) continue; // commands below run once, in shard 1
   // Explicit script arguments, run serially after node:test. No shell interpolation.
   for (const command of suite.node_commands ?? []) run(process.execPath, command);
   for (const path of suite.python ?? []) run(python('THOT_TRADE_TEST_PYTHON'), [path]);

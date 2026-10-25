@@ -1,5 +1,6 @@
 import {mkdir,symlink,lstat,readlink,chmod,writeFile,unlink} from 'node:fs/promises';
 import {thotUserHome} from '../packages/capture/src/setup.ts';
+import {ensureVerifierInstalled} from '../packages/capture/src/verifier.ts';
 import {join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 if(Number(process.versions.node.split('.')[0])<24){console.error('Node.js 24 or later is required. Install it, check node --version, then rerun the installer.');process.exit(1);}
@@ -48,4 +49,21 @@ if(options.has('--robinhood-config')){
   await writeFile(path,JSON.stringify({config_file:configFile})+'\n',{mode:0o600});await chmod(path,0o600);
   console.log('Saved existing Robinhood connector preference. No extension reinstall is needed.');
 }
-console.log('Installed thot-capture, thot-link, thot-setup and thot-history in '+bin+'\n'+(repaired?'Removed '+repaired+' stale helper command(s) from an earlier version.\n':'')+'Keep this extracted source folder in place. Installation alone does not connect an account, upload files or install a schedule.\n'+(configuredOrigin?'Saved default Thot origin: '+configuredOrigin:'Saved Thot origin default: unchanged')+'\nCheck the installed history helper:\n'+shellQuote(join(bin,'thot-history'))+' --help\nCheck live-capture prerequisites:\n'+shellQuote(join(bin,'thot-setup'))+' codex\nThen capture from your project:\n'+shellQuote(join(bin,'thot-capture'))+' codex\nUse claude instead of codex for Claude Code.\nThese full paths work without adding the helper directory to PATH. Node.js 24+ must remain available as node in each terminal.\nOptional short commands for this terminal: export PATH="$HOME/.local/bin:$PATH"\nFor future terminals, add that export to your shell startup file and reopen the terminal.\nSelection order: --thot-url, THOT_URL, saved config. No automatic production default is configured.');
+console.log('Installed thot-capture, thot-link, thot-setup and thot-history in '+bin+'\n'+(repaired?'Removed '+repaired+' stale helper command(s) from an earlier version.\n':'')+'Keep this extracted source folder in place. Installation alone does not connect an account, upload files or install a schedule.\n'+(configuredOrigin?'Saved default Thot origin: '+configuredOrigin:'Saved Thot origin default: unchanged'));
+// Hardware verifier: fetch the pinned dcap-qvl release for this platform,
+// verify its sha256 and record the absolute path. Nothing falls back to an
+// unverified binary; failures name the URL and expected hash.
+let verifierNote='';
+try{
+  const verifier=await ensureVerifierInstalled();
+  if(verifier.status==='installed')verifierNote='Installed the hardware verifier dcap-qvl '+verifier.version+' at '+verifier.path+' (sha256 '+verifier.sha256+' verified). thot-setup and thot-capture find it automatically.';
+  else if(verifier.status==='present')verifierNote='Hardware verifier dcap-qvl '+verifier.version+' already installed at '+verifier.path+'.';
+  else if(verifier.status==='unsupported')verifierNote=verifier.instructions;
+  else if(verifier.status==='disabled')verifierNote='Skipped the hardware verifier download (THOT_VERIFIER_AUTO_INSTALL=0). thot-setup installs it while online unless that variable stays set.';
+  else if(verifier.status==='env')verifierNote='Using the hardware verifier named by TV_DCAP_QVL; no download was attempted.';
+}catch(error){
+  console.error('Hardware verifier install failed.\n'+(error as Error).message);
+  console.error('The helper commands above are installed. Rerun this installer, or run thot-setup, once the verifier can be downloaded and verified.');
+  process.exit(1);
+}
+console.log(verifierNote+'\nCheck the installed history helper:\n'+shellQuote(join(bin,'thot-history'))+' --help\nCheck live-capture prerequisites:\n'+shellQuote(join(bin,'thot-setup'))+' codex\nThen capture from your project:\n'+shellQuote(join(bin,'thot-capture'))+' codex\nUse claude instead of codex for Claude Code.\nThese full paths work without adding the helper directory to PATH. Node.js 24+ must remain available as node in each terminal.\nOptional short commands for this terminal: export PATH="$HOME/.local/bin:$PATH"\nFor future terminals, add that export to your shell startup file and reopen the terminal.\nSelection order: --thot-url, THOT_URL, saved config. No automatic production default is configured.');

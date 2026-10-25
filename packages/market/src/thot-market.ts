@@ -1,3 +1,4 @@
+import {isResearch} from '../../content/src/research.ts';
 import {holderRewardsWorkspace,prepareHolderReward,prepareHolderPolicy} from '../../chain/thot-holder-rewards.ts';
 import {stakingWorkspace,prepareStaking} from '../../chain/thot-staking.ts';
 import {campaignId,campaignReserveState} from '../../chain/thot-campaigns.ts';
@@ -118,16 +119,38 @@ export class ThotMarketplace {
   // Browsing and purchasing require fresh wallet, receipt and pause checks, not
   // contributor estimates or every staking campaign. Deferred fields are marked
   // by the response scope; callers must load full before rendering those views.
-  const valuations=scope==='full'&&actor.role==='user'&&chain&&block?await this.valuationRows(actor,records,wallet,block):[];
-  const holderRewards=scope==='full'&&chain?await holderRewardsWorkspace(chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id),block!):null;
-  const staking=scope==='full'&&chain?await stakingWorkspace(chain,wallet,block!):null;
-  const reserveBuyer=wallet&&chain?await chain.isReserveBuyer(wallet,block!):false;
+  // Independent reads at the same confirmed height.
+  const [valuations,holderRewards,staking,reserveBuyer]=await Promise.all([
+   scope==='full'&&actor.role==='user'&&chain&&block?this.valuationRows(actor,records,wallet,block):[],
+   scope==='full'&&chain?holderRewardsWorkspace(chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id),block!):null,
+   scope==='full'&&chain?stakingWorkspace(chain,wallet,block!):null,
+   wallet&&chain?chain.isReserveBuyer(wallet,block!):false,
+  ]);
   // Anvil can change code at the same height without changing the block hash.
   if(chain&&!chain.publicChain())await chain.guard();
   if(chain&&block)await chain.assertSnapshot(block);
   return {workspace_scope:scope,holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
  }
- private publicListing(r:Document){return {...(r.brokerage_claim?{brokerage_claim:r.brokerage_claim}:{}),id:r.id,seller:r.wallet,owner_label:'Contributor',title:r.title,price_atoms:r.price_atoms,license:r.license,license_hash:r.license_hash,evidence_hash:r.evidence_hash,provenance:r.provenance,workflow:r.workflow,turn_count:r.turn_count,capture_model:r.capture_model??null,created_at:r.created_at,automatic_sales:!!r.signature,treasury_opt_in:r.treasury_sampling_consent===THOT_TREASURY_SAMPLING_POLICY};}
+ private publicListing(r:Document){return {...(r.brokerage_claim?{brokerage_claim:r.brokerage_claim}:{}),...(r.content_kind==='research'?{content_kind:'research',file_count:r.file_count}:{}),id:r.id,public_path:this.listingPath(r.id),seller:r.wallet,owner_label:'Contributor',title:r.title,price_atoms:r.price_atoms,license:r.license,license_hash:r.license_hash,evidence_hash:r.evidence_hash,provenance:r.provenance,workflow:r.workflow,turn_count:r.turn_count,capture_model:r.capture_model??null,created_at:r.created_at,automatic_sales:!!r.signature,treasury_opt_in:r.treasury_sampling_consent===THOT_TREASURY_SAMPLING_POLICY};}
+ // Stable public URL path for a listing. The record id prefix is an internal
+ // storage detail; the public identifier is the bare sortable id after it.
+ private listingPath(id:string){return '/l/'+String(id).replace(/^listing:/,'');}
+ private listingActive(r:Document){return r.kind==='listing'&&r.active===true&&!!r.signature&&!r.unlisted_at&&!r.release_deleted_at;}
+ /** Public catalogue for signed-out browsing: the same metadata each listing's share page shows, newest first. */
+ async publicCatalog(){
+  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
+  return {listings:records.filter(r=>this.listingActive(r)).slice(-48).reverse().map(r=>this.publicListing(r))};
+ }
+ /** Public, unauthenticated listing view for the share page: metadata only. */
+ async publicListingView(id:string){
+  const normalized=String(id).replace(/^listing:/,'');
+  ensure(/^[A-Za-z0-9_-]{1,80}$/.test(normalized),'INVALID_LISTING_ID',400);
+  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
+  const row=records.find(r=>r.kind==='listing'&&(String(r.id)===('listing:'+normalized)||String(r.id)===normalized));
+  if(!row)return {available:false as const};
+  if(!this.listingActive(row))return {available:false as const,unlisted:true as const};
+  return {available:true as const,listing:this.publicListing(row)};
+ }
  private publicIntent(r:Document){return {job_status:['queued','awaiting_funding','awaiting_reconciliation','awaiting_settlement','disputed','blocked','complete'].includes(r.job_status)?r.job_status:null,last_error:r.last_error?(['AUTHORIZATION_UNAVAILABLE','CONTENT_ALREADY_SUBSIDIZED','THOT_DELIVERY_ACK_PENDING','THOT_MARKET_PAUSED','THOT_OPERATOR_UNAVAILABLE'].includes(r.last_error)?r.last_error:'AUTOMATION_PENDING'):null,...(r.campaign_id?{campaign_id:r.campaign_id}:{}),...(r.selection_id?{selection_id:r.selection_id}:{}),id:r.offer_id,listing_id:r.listing_id,title:r.title,buyer:r.wallet,seller:r.seller_wallet,gross:r.gross,economics:r.economics??null,seller_gross:r.seller_gross??r.gross,buyer_surcharge:r.buyer_surcharge??'0',buyer_total:r.buyer_total??r.gross,buyer_surcharge_bps:r.buyer_surcharge_bps??0,license_hash:r.license_hash,evidence_hash:r.evidence_hash,automatic:r.automatic===true,payout_transaction:r.payout_transaction??null,refund_transaction:r.refund_transaction??null,payout_scope:'beneficiary_claimable_batch'};}
  async listingMetadata(actor:Actor,traceId:string){
   allowed(actor);ensure(actor.role==='user','FORBIDDEN',403);
@@ -167,7 +190,7 @@ export class ThotMarketplace {
    const release={...(disputeReview?{dispute_review:disputeReview}:{}),...(brokerageEvidence?{brokerage_evidence:brokerageEvidence}:{}),...(treasurySampling?{treasury_sampling:treasurySampling}:{}),...(t.capture_model?{capture_model:t.capture_model}:{}),schema_version:'thot.release/1',retention_days:retentionDays,content,provenance:{confidence_tier:p.confidence_tier,claim:'Content provenance level only; no brokerage or identity disclosure.'},license:input.license};
    const id='listing:'+uuidv7(),ref=await this.service.privacy.seal(actor.id,release);
    const authorization={seller:wallet,buyer:input.treasury_only===true?chain.config.reserve:ZeroAddress,evidenceHash:digest(release),licenseHash:digest(input.license),gross:price.toString(),minSellerBps,validUntil,nonce:'0x'+randomBytes(32).toString('hex'),maxUses:1};
-   const row={kind:'listing',dispute_review_consent:disputeReview?.policy??null,...(brokerageEvidence?{trade_evidence_id:input.trade_evidence_id,brokerage_claim:brokerageEvidence.summary}:{}),...(streamPolicy?{stream_id:streamPolicy.id}:{}),capture_model:t.capture_model??null,trace_id:t.trace_id,wallet,title:input.title,price_atoms:price.toString(),license:input.license,license_hash:digest(input.license),evidence_hash:digest(release),release_content_hash:digest(content),subsidy_content_fingerprint:await this.sourceFingerprint(tx,t),provenance:p.confidence_tier,workflow:String(f.workflow_type??'unknown'),turn_count:Number(f.counts?.turns??f.turn_count??content.turns?.length??0),feature_snapshot:f,release_ref:ref,retention_days:retentionDays,authorization,treasury_sampling_consent:treasurySampling?.policy??null,provenance_status:t.provenance_status??'UNSPECIFIED',active:false,created_at:this.service.now()};
+   const row={kind:'listing',content_kind:t.content_kind??'trace',file_count:isResearch(content)?content.files.length:null,dispute_review_consent:disputeReview?.policy??null,...(brokerageEvidence?{trade_evidence_id:input.trade_evidence_id,brokerage_claim:brokerageEvidence.summary}:{}),...(streamPolicy?{stream_id:streamPolicy.id}:{}),capture_model:t.capture_model??null,trace_id:t.trace_id,wallet,title:input.title,price_atoms:price.toString(),license:input.license,license_hash:digest(input.license),evidence_hash:digest(release),release_content_hash:digest(content),subsidy_content_fingerprint:await this.sourceFingerprint(tx,t),provenance:p.confidence_tier,workflow:String(f.workflow_type??'unknown'),turn_count:Number(f.counts?.turns??f.turn_count??content.turns?.length??0),feature_snapshot:f,release_ref:ref,retention_days:retentionDays,authorization,treasury_sampling_consent:treasurySampling?.policy??null,provenance_status:t.provenance_status??'UNSPECIFIED',active:false,created_at:this.service.now()};
    await tx.insert('thot_records',id,actor.id,row);await tx.audit(actor.id,'ThotTraceListed',{listing_id:id,release_hash:row.evidence_hash});return {...this.publicListing({...row,id}),typed_data:TypedDataEncoder.getPayload(chain.authorizationDomain(),THOT_AUTHORIZATION_TYPES,authorization),notice:'Sign once to authorize one automatic sale at this gross price. The disclosed service tariff determines your proceeds, with at least the signed minimum retention. Holder benefits follow the configured fee policy; your minimum seller proceeds remain protected. No later acceptance is required.'};
   });
  }
@@ -447,13 +470,14 @@ export class ThotMarketplace {
   // Reuse this request's guarded account/order snapshot. Each observation still
   // checks its anchor and revalidates that snapshot; nothing survives a request.
   // Old or reorganized observations cannot remain evidence for a visible estimate.
-  const observations:ThotSaleObservation[]=[],anchors=new Map<string,boolean>();
-  for(const row of records.filter(r=>r.kind==='sale_observation').slice(-500)){
-   const anchor=row.confirmation_block;if(!anchor)continue;
-   const key=String(anchor.number)+':'+String(anchor.hash);
-   if(!anchors.has(key))anchors.set(key,await this.enabled().isCanonicalBlock(anchor,block));
-   if(anchors.get(key))observations.push(row.observation as ThotSaleObservation);
-  }
+  const rows=records.filter(r=>r.kind==='sale_observation').slice(-500).filter(r=>r.confirmation_block);
+  const key=(anchor:{number:number;hash:string|null})=>String(anchor.number)+':'+String(anchor.hash);
+  const unique=[...new Map(rows.map(r=>[key(r.confirmation_block),r.confirmation_block])).values()];
+  const canonical=new Set<string>();
+  // Check distinct anchors in parallel; the provider batches them into few round trips.
+  // shortcut: unbounded fan-out over at most 500 anchors, fine while sales are few; bound it if observations grow.
+  await Promise.all(unique.map(async anchor=>{if(await this.enabled().isCanonicalBlock(anchor,block))canonical.add(key(anchor));}));
+  const observations=rows.filter(r=>canonical.has(key(r.confirmation_block))).map(r=>r.observation as ThotSaleObservation);
   const targets=await this.service.db.transaction(async tx=>{
    const traces=(await tx.list('traces',actor.id)).filter(t=>!t.deleted).slice(-50),rows=[];
    for(const t of traces){
@@ -567,8 +591,8 @@ export class ThotMarketplace {
   const refHash=digest(t.raw_ref);
   if(t.subsidy_fingerprint_ref===refHash&&/^0x[0-9a-f]{64}$/.test(t.subsidy_content_fingerprint??''))return String(t.subsidy_content_fingerprint);
   const raw=await this.service.privacy.open(t.owner_id,t.raw_ref);
-  ensure(Array.isArray(raw.turns)&&raw.turns.length>0,'RESERVE_SOURCE_IDENTITY_UNAVAILABLE');
-  const fingerprint='0x'+createHmac('sha256',this.reserveFingerprintKey).update(canonicalHash(raw)).digest('hex');
+  ensure(isResearch(raw)||(Array.isArray(raw.turns)&&raw.turns.length>0),'RESERVE_SOURCE_IDENTITY_UNAVAILABLE');
+  const fingerprint='0x'+createHmac('sha256',this.reserveFingerprintKey).update(canonicalHash(isResearch(raw)?{kind:'research',files:raw.files.map(f=>({sha256:f.sha256,media_type:f.media_type})).sort((a,b)=>a.sha256.localeCompare(b.sha256)||a.media_type.localeCompare(b.media_type))}:raw)).digest('hex');
   t.subsidy_content_fingerprint=fingerprint;t.subsidy_fingerprint_ref=refHash;await tx.update('traces',t.id,t);return fingerprint;
  }
  private async reserveFingerprint(tx:Transaction,l:Document){

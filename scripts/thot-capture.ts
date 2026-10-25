@@ -18,7 +18,7 @@ import {captureTiming} from '../packages/capture/src/timing.ts';
 const argv=process.argv.slice(2);
 const timing=captureTiming();timing.emit('helper_started');
 if(argv.includes('--help')||argv.includes('-h')){
-  console.log('Usage: thot-capture codex|claude|zai [--thot-url URL] [--recorder-url URL] [--reference-policy FILE] [--require-reference] [--project DIR] [-- CLI arguments]\n       thot-capture --retry CAPTURE_ID\n       thot-capture --export CAPTURE_ID --output NEW_DIRECTORY\n       thot-capture --disconnect codex|claude|zai\n\nUses your existing CLI login. Thot opens your browser once to connect this tool. Returning captures reuse it.\nzai runs Claude Code against Z.AI with key auth: set ANTHROPIC_AUTH_TOKEN for that child.\nWork normally; signed checkpoints save privately while you work. Encrypted local copies are kept after saving.\nExport writes private plaintext files for independent inspection. Keep them private.\nUse --local-retention until-saved to reclaim local bodies after successful save; default: keep.\nA visible bar shows what is saved and what is pending locally.\nAPI selection: --thot-url, THOT_URL, saved configuration. No production default is configured yet.\nRecorder selection: reviewed reference policy or explicit --recorder-url / THOT_RECORDER_URL. Strict reference checks use --require-reference.');
+  console.log('Usage: thot-capture codex|claude|zai [--thot-url URL] [--recorder-url URL] [--reference-policy FILE] [--require-reference] [--project DIR] [--pairing code|loopback] [-- CLI arguments]\n       thot-capture --retry CAPTURE_ID\n       thot-capture --export CAPTURE_ID --output NEW_DIRECTORY\n       thot-capture --disconnect codex|claude|zai\n\nUses your existing CLI login. Thot opens your browser once to connect this tool. Returning captures reuse it.\nzai runs Claude Code against Z.AI with key auth: set ANTHROPIC_AUTH_TOKEN for that child.\nWork normally; signed checkpoints save privately while you work. Encrypted local copies are kept after saving.\nExport writes private plaintext files for independent inspection. Keep them private.\nUse --local-retention until-saved to reclaim local bodies after successful save; default: keep.\nA visible bar shows what is saved and what is pending locally.\nAPI selection: --thot-url, THOT_URL, saved configuration. No production default is configured yet.\nRecorder selection: reviewed reference policy or explicit --recorder-url / THOT_RECORDER_URL. Strict reference checks use --require-reference.\nPairing: loopback first, then a short code if no browser reaches this computer within 30 seconds. Use --pairing code or THOT_PAIRING=code to skip loopback.');
   process.exit(0);
 }
 if(['codex','claude','zai'].includes(argv[0]))argv.splice(0,1,'--client',argv[0]);
@@ -26,7 +26,8 @@ const split=argv.indexOf('--'),flags=split<0?argv:argv.slice(0,split),clientArgs
 const requireReference=flags.includes('--require-reference');
 if(requireReference)flags.splice(flags.indexOf('--require-reference'),1);
 const params=new Map<string,string>();
-for(let i=0;i<flags.length;i+=2){if(!['--client','--thot-url','--thot-url','--recorder-url','--reference-policy','--project','--retry','--disconnect','--export','--output','--local-retention','--collateral'].includes(flags[i])||!flags[i+1])throw new Error('INVALID_CAPTURE_ARGUMENT');params.set(flags[i],flags[i+1]);}
+for(let i=0;i<flags.length;i+=2){if(!['--client','--thot-url','--thot-url','--recorder-url','--reference-policy','--project','--retry','--disconnect','--export','--output','--local-retention','--collateral','--pairing'].includes(flags[i])||!flags[i+1])throw new Error('INVALID_CAPTURE_ARGUMENT');params.set(flags[i],flags[i+1]);}
+const pairingChoice=params.get('--pairing');if(pairingChoice!==undefined&&!['code','loopback'].includes(pairingChoice))throw new Error('INVALID_PAIRING_ARGUMENT');
 async function selectedOrigin(){const value=params.get('--thot-url')??params.get('--thot-url')??process.env.THOT_URL??process.env.THOT_URL??await savedThotOrigin();if(!value)throw Error('THOT_PRODUCTION_ORIGIN_UNCONFIGURED: use --thot-url or THOT_URL until production is accepted');return thotOrigin(value);}
 const stateRoot=resolve(thotUserHome(),'.local/state/thot/captures');
 const thotOrigin=captureOrigin;
@@ -63,7 +64,7 @@ if(exportId){
   if(!setup.ready){console.error('Setup needed: '+setup.checks.find(c=>!c.ok)!.next+'\nCheck again: thot-setup '+client);process.exit(1);}
   if(requireReference&&!setup.checks.find(c=>c.id==='verifier')?.ok)throw Error('RECORDER_VERIFIER_REQUIRED');
   const retention=params.get('--local-retention')??'keep';if(!['keep','until-saved'].includes(retention))throw Error('INVALID_LOCAL_RETENTION');
-  const connection={...await connectCapture({origin,client,project:basename(project),root:connectionRoot,...((process.env.THOT_CAPTURE_NO_OPEN??process.env.THOT_CAPTURE_NO_OPEN)==='1'?{open:async()=>false}:{})}),local_retention:retention as 'keep'|'until-saved'};
+  const connection={...await connectCapture({origin,client,project:basename(project),root:connectionRoot,pairing:(pairingChoice??undefined) as 'code'|'loopback'|undefined,...((process.env.THOT_CAPTURE_NO_OPEN??process.env.THOT_CAPTURE_NO_OPEN)==='1'?{open:async()=>false}:{})}),local_retention:retention as 'keep'|'until-saved'};
   timing.emit('connection_ready');
   process.stdout.write('Private vault account: '+connection.account_id+' · project: '+basename(project)+'\n');
   process.stdout.write(connection.automatic_sales?'Automatic sales: eligible completed sessions use your signed connection policy. A funded purchase is required for earnings.\n':'Private capture: no automatic sale policy is active for this session.\n');
@@ -95,10 +96,10 @@ if(exportId){
   catch(error){
     const code=error instanceof Error?error.message:'CAPTURE_CONNECTION_FAILED';
     const messages:Record<string,string>={
-      CAPTURE_AUTHORIZATION_REJECTED:'The recorder could not verify this vault’s capture approval. Ask the demo operator to check the recorder-to-vault connection.',
+      CAPTURE_AUTHORIZATION_REJECTED:'The recorder could not verify this vault’s capture approval. Retry later, or report this code when you ask for help so the recorder-to-vault connection can be checked.',
       CAPTURE_AUTHORIZATION_UNAVAILABLE:'The recorder could not reach the vault to verify your approval. Please try again shortly.',
       RECORDER_BUSY:'The recorder is at capacity. Please try again shortly.',
-      TEE_SESSION_REJECTED:'The recorder rejected the connection. Share this error code with the demo operator.'
+      TEE_SESSION_REJECTED:'The recorder rejected the connection. Report this error code when you ask for help.'
     };
     sync.close();
     console.error('\nCapture did not start. '+(messages[code]??'The recorder connection or verification failed.')+'\nYour coding tool was not started. No model credentials were sent.\nError: '+(/^[A-Z0-9_]{1,80}$/.test(code)?code:'CAPTURE_CONNECTION_FAILED'));process.exit(1);

@@ -9,7 +9,7 @@ import {chromium} from 'playwright-core';
 // reproduced by substituting a Promise-returning import function in a VM test.
 const application = await readFile(new URL('../apps/dashboard/app.js', import.meta.url), 'utf8');
 const loader = application.slice(application.indexOf('async function loadPrivyAuth()'), application.indexOf('\nfunction showIdentityLogin('));
-assert.match(loader, /import\(`\.\/privy-auth\/v1\/\$\{attemptNamespace\}\/privy-auth\.bundle\.js`\)/);
+assert.match(loader, /const bundlePath=`\.\/privy-auth\/v1\/\$\{attemptNamespace\}\/privy-auth\.bundle\.js`;[^\n]*\n\s*import\(bundlePath\)/);
 const probe = `
 const setTimeout=(callback,ms)=>window.setTimeout(callback,ms===30000?300:ms===90000?900:ms);
 const clearTimeout=window.clearTimeout.bind(window);

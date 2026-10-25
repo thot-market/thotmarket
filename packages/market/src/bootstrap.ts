@@ -18,6 +18,7 @@ import { InferencePortfolioCapture } from './inference-capture.ts';
 import {TraceLibrary} from './trace-library.ts';
 import {CaptureDevices} from './capture-devices.ts';
 import {HistoryDevices} from './history-devices.ts';
+import {DevicePairing} from './device-pairing.ts';
 import {ReleasePreview} from './release-preview.ts';
 import {TraceQc} from './trace-qc.ts';
 import { AgentCaptureIngestion } from './agent-capture.ts';
@@ -88,7 +89,8 @@ export async function createApplication(options:{dataDir?:string;databaseUrl?:st
   const releasePreview=new ReleasePreview(service);
   const qc=new TraceQc(service);
   const robinhoodBrowser=new RobinhoodBrowserCoordinator(robinhood,options.robinhood?.browser);
+  const devicePairing=new DevicePairing(service,captureDevices,historyDevices,robinhood,tradeEvidence,thot);
   let closing:Promise<void>|undefined;
-  return {db,privacy,service,thot,thotAnalytics,tradeEvidence,inference,inferenceCapture,agentCapture,captureDevices,historyDevices,releasePreview,qc,library,robinhood,robinhoodBrowser,plaid,portfolio,openrouter,dataDir,close:()=>closing??=(async()=>{await openrouter!.close();thotChain?.close();await service.moneyPath?.close();await robinhoodBrowser.close();await db!.close();await lease.release();})()};
+  return {db,privacy,service,thot,thotAnalytics,tradeEvidence,inference,inferenceCapture,agentCapture,captureDevices,historyDevices,devicePairing,releasePreview,qc,library,robinhood,robinhoodBrowser,plaid,portfolio,openrouter,dataDir,close:()=>closing??=(async()=>{await openrouter!.close();thotChain?.close();await service.moneyPath?.close();await robinhoodBrowser.close();await db!.close();await lease.release();})()};
   } catch(error) {await openrouter?.close();thotChain?.close();await moneyPath?.close();if(db)await db.close();await lease.release();throw error;}
 }

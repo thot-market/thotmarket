@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,writeFile,readFile,stat,rm} from 'node:fs/promises';
+import {mkdtemp,writeFile,readFile,stat,rm,cp,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -31,4 +31,14 @@ test('a FIFO is refused without waiting for a writer',async t=>{
   assert.equal(spawnSync('mkfifo',[fifo],{encoding:'utf8'}).status,0);
   const result=spawnSync(process.execPath,[resolve('scripts/trace-qc.ts'),'--input',fifo],{encoding:'utf8',timeout:5000});
   assert.equal(result.error,undefined);assert.equal(result.status,2);assert.match(result.stderr,/QC_CLI_INPUT_LIMIT/);
+});
+
+
+test('QC remains runnable without database drivers or an installed application',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'thot-qc-minimal-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ await writeFile(join(dir,'package.json'),JSON.stringify({type:'module'}));
+ for(const name of ['qc','content/src','scrubber/src','provenance/src','protocol/src']){const to=join(dir,'packages',name);await mkdir(to,{recursive:true});await cp(resolve('packages',name),to,{recursive:true});}
+ await mkdir(join(dir,'packages/storage/src'),{recursive:true});await cp(resolve('packages/storage/src/errors.ts'),join(dir,'packages/storage/src/errors.ts'));
+ const script="const {runTraceQc}=await import('./packages/qc/index.ts'); const r=runTraceQc({turns:[{role:'user',content:'Synthetic question'},{role:'assistant',content:'Synthetic answer'}]},{scope:'private'});if(r.status!=='pass')process.exit(1);";
+ const result=spawnSync(process.execPath,['--input-type=module','-e',script],{cwd:dir,encoding:'utf8',timeout:15000});assert.equal(result.status,0,result.stderr);assert.equal(result.stdout,'');
 });

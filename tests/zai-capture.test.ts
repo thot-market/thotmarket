@@ -83,7 +83,7 @@ test('zai readiness checks the Claude CLI and a token in the child environment o
   const root=await mkdtemp(join(tmpdir(),'thot-zai-readiness-'));t.after(()=>rm(root,{recursive:true,force:true}));
   const bin=join(root,'bin');await mkdir(bin,{recursive:true});
   await writeFile(join(bin,'claude'),'#!/bin/sh\nexit 0\n',{mode:0o700});
-  const base={...process.env,PATH:bin,THOT_USER_HOME:root,ANTHROPIC_AUTH_TOKEN:''};
+  const base={...process.env,PATH:bin,THOT_USER_HOME:root,THOT_VERIFIER_AUTO_INSTALL:'0',ANTHROPIC_AUTH_TOKEN:''};
   const environmentKeys=['PATH','THOT_USER_HOME','ANTHROPIC_AUTH_TOKEN'] as const;
   const savedEnvironment=Object.fromEntries(environmentKeys.map(key=>[key,process.env[key]]));
   t.after(()=>{

@@ -201,8 +201,7 @@ test('production documents keep calibration out; public examples identify their 
   }
   for (const path of ['apps/site/index.html', 'apps/site/affiliates.html']) {
     const html = await readFile(new URL('../' + path, import.meta.url), 'utf8');
-    assert.match(html, /Worked example · testnet tariff/);
-    assert.match(html, /production tariff/);
+    assert.match(html, /Worked example</);
     assert.match(html, /not customer adoption or real-money earnings/i);
     assert.match(html, /direct costs/);
     assert.doesNotMatch(html, /customers already|guaranteed earnings|data-fake-counter/i);
@@ -256,4 +255,124 @@ test('ordinary production entry links target the canonical application and prese
   for (const value of ['javascript:alert(1)', 'https://user:secret@app.example/app', 'https://app.example/app?token=secret', 'https://app.example/app#secret']) {
     assert.throws(() => publicWorkspaceLinks(html, value), /INVALID_PUBLIC_APP_URL/);
   }
+});
+
+
+test('published token UI shows the exact configured contract and supports copy without implying mechanism activation',async()=>{
+ const source=await readFile(new URL('../apps/site/site.js',import.meta.url),'utf8');
+ for(const scenario of ['launched','preview','failed']){
+  let copy:undefined|(()=>Promise<void>),copied='';
+  const nodes:Record<string,any>={'token-state':{textContent:''},'token-contract':{hidden:true},'thot-contract-address':{textContent:''},'token-copy-status':{textContent:''},'copy-token-address':{addEventListener:(_name:string,handler:()=>Promise<void>)=>{copy=handler;}}},link:any={hidden:true};
+  const config=publicLaunchConfig(scenario==='launched'?{state:'launched',tokenAddress,ponsLaunchAddress}:{});
+  runInNewContext(source,{window:{location:{hash:'',search:''}},document:{getElementById:(id:string)=>nodes[id]??null,querySelectorAll:()=>[link]},fetch:async()=>({ok:scenario!=='failed',json:async()=>config}),navigator:{clipboard:{writeText:async(value:string)=>{copied=value;}}},AbortSignal,URLSearchParams,URL});
+  await new Promise(resolve=>setImmediate(resolve));
+  if(scenario==='launched'){assert.equal(link.hidden,false);assert.equal(nodes['token-contract'].hidden,false);assert.equal(nodes['thot-contract-address'].textContent,tokenAddress);assert.match(nodes['token-state'].textContent,/is live/);assert.ok(copy);await copy();assert.equal(copied,tokenAddress);assert.match(nodes['token-copy-status'].textContent,/copied/);}
+  else {assert.equal(link.hidden,true);assert.equal(nodes['token-contract'].hidden,true);assert.equal(nodes['thot-contract-address'].textContent,'');assert.doesNotMatch(nodes['token-state'].textContent,/will appear|is live/);}
+ }
+ const html=(await readPublicAsset('/'))!.body.toString();assert.match(html,/Token availability is separate/);assert.match(html,/id="copy-token-address"/);
+});
+
+test('production entry bundles require explicit published token inputs while test bundles remain preview',async()=>{
+ const {buildCloudflarePages}=await import('../scripts/build-cloudflare-pages.ts');
+ const dir=await mkdtemp(join(tmpdir(),'token-entry-build-'));
+ try{
+  await assert.rejects(buildCloudflarePages({outputParent:dir,zip:false}),/PRODUCTION_TOKEN_CONFIGURATION_REQUIRED/);
+  await assert.rejects(buildCloudflarePages({outputParent:dir,appUrl:'https://app.thot.market',zip:false}),/PRODUCTION_TOKEN_CONFIGURATION_REQUIRED/);
+  await assert.rejects(buildCloudflarePages({outputParent:dir,appUrl:'https://app.thot.market',launch:{state:'launched'},zip:false}),/INCOMPLETE_LAUNCH_CONFIGURATION/);
+  const built=await buildCloudflarePages({outputParent:dir,appUrl:'https://app.thot.market',launch:{state:'launched',tokenAddress,ponsLaunchAddress},zip:false});
+  assert.equal(JSON.parse(await readFile(join(built.directory,'v1/public/launch-config.json'),'utf8')).tokenAddress,tokenAddress);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+// Minimal DOM double for referrals.js: one shared node per selector, created elements tracked.
+function referralsSandbox(proof: unknown) {
+ const element = () => ({
+  children: [] as any[], textContent: '', hidden: false, className: '', value: '', href: '', rel: '', target: '',
+  dataset: {} as Record<string, string>,
+  append(...nodes: any[]) { this.children.push(...nodes); },
+  replaceChildren(...nodes: any[]) { this.children = [...nodes]; },
+  addEventListener() {},
+  setAttribute(name: string, value: string) { (this as any)['attr_' + name] = value; },
+ });
+ const registry = new Map<string, any[]>();
+ const nodes = (selector: string) => { if (!registry.has(selector)) registry.set(selector, [element()]); return registry.get(selector)!; };
+ const created: any[] = [];
+ const sandbox = {
+  document: {
+   querySelectorAll: (selector: string) => selector.split(',').flatMap(part => nodes(part.trim())),
+   querySelector: (selector: string) => nodes(selector)[0],
+   createElement: () => { const node = element(); created.push(node); return node; },
+  },
+  fetch: async () => ({ ok: true, json: async () => proof }),
+  AbortSignal,
+ };
+ const text = (node: any): string => node.textContent + node.children.map(text).join('');
+ const rendered = () => [...registry.values()].flat().map(text).concat(created.map(text)).join('\n');
+ return { sandbox, nodes, rendered, text };
+}
+
+test('production build renders no Unavailable receipts panel while verified testnet receipts render as before',async()=>{
+ const {buildCloudflarePages}=await import('../scripts/build-cloudflare-pages.ts');
+ const dir=await mkdtemp(join(tmpdir(),'public-entry-proof-'));
+ try{
+  // The real production bundle: its baked proof is unavailable for this app URL.
+  const built=await buildCloudflarePages({outputParent:dir,appUrl:'https://app.thot.market/app',launch:{state:'launched',tokenAddress,ponsLaunchAddress},zip:false});
+  const proof=JSON.parse(await readFile(join(built.directory,'v1/public/market-proof.json'),'utf8'));
+  assert.equal(proof.status,'unavailable');
+  const script=(await readFile(join(built.directory,'referrals.js'),'utf8')).replace(/^export /gm,'');
+  const unavailable=referralsSandbox(proof);
+  runInNewContext(script,unavailable.sandbox);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.doesNotMatch(unavailable.rendered(),/unavailable/i);
+  assert.equal(unavailable.nodes('[data-proof-environment]')[0].hidden,true);
+  assert.equal(unavailable.nodes('[data-proof-time]')[0].hidden,true);
+  assert.match(unavailable.nodes('[data-proof-rows]')[0].children[0].textContent,/receipts appear here when this environment publishes a verified snapshot/i);
+  // A verified testnet snapshot still renders the badge, timestamp and receipt rows.
+  const hash='0x'+'1'.repeat(64);
+  const available=sanitizePublicMarketProof({
+   schema_version:'thot.public-market-proof/1',environment:'dev',network:'Robinhood testnet',chain_id:46630,
+   test_assets:true,scope:'testnet-verification',as_of:'2026-01-01T00:00:00.000Z',block_number:10,block_hash:hash,
+   confirmations:1,amount_basis:'finalized seller proceeds',purchase_amount_basis:'gross purchase price',
+   scan:{from_block:1,through_block:10,complete_since_deployment:true},
+   tariff:{service_fee_thot:'0.04',direct_cost_thot:'0.01',allocated_overhead_thot:'0',net_contribution_thot:'0.03',referral_bps:2000,dispute_seconds:43200,activation_seconds:0,term_seconds:0},
+   receipts:[],purchases:[{tx_hash:hash,block_number:10,amount_thot:'1',source:'reserve',explorer_url:'https://explorer.testnet.chain.robinhood.com/tx/'+hash,status:'finalized'}],
+  },'dev');
+  assert.equal(available.status,'available');
+  const verified=referralsSandbox(available);
+  runInNewContext(script,verified.sandbox);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(verified.nodes('[data-proof-environment]')[0].hidden,false);
+  assert.equal(verified.nodes('[data-proof-environment]')[0].textContent,'Robinhood testnet');
+  assert.match(verified.nodes('[data-proof-time]')[0].textContent,/Snapshot .*UTC · block 10/);
+  assert.match(verified.nodes('[data-proof-heading]')[0].textContent,/Recent test purchases/);
+  const row=verified.nodes('[data-proof-rows]')[0].children[0];
+  assert.match(verified.text(row),/Finalized · proceeds allocated.*Reserve-funded test purchase.*1 test THOT.*View transaction/s);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('2026-10-24 QA copy fixes: plain language, no dead references, no font-glyph arrows', async () => {
+  const pages = ['index.html','article.html','tutorial.html','mechanism.html','whitepaper.html','affiliates.html','access.html'] as const;
+  const html = Object.fromEntries(await Promise.all(pages.map(async name => [name, await readFile(new URL('../apps/site/'+name, import.meta.url), 'utf8')] as const)));
+  // #86: CTA arrows are inline SVG icons that render on every platform.
+  for (const [name, page] of Object.entries(html)) {
+    assert.ok(!page.includes('↗'), `${name} still contains a raw arrow glyph`);
+    assert.ok(!page.includes('↓'), `${name} still contains a raw down-arrow glyph`);
+  }
+  assert.match(html['index.html']!, /<svg class="arrow-icon"/);
+  assert.match(html['whitepaper.html']!, /Read the launch post <svg class="arrow-icon"/);
+  // #88: plain-language and corrected copy.
+  assert.match(html['index.html']!, /The current base service fee is 1% of the trace price/);
+  assert.doesNotMatch(html['index.html']!, /At the current tiers, The base service fee/);
+  assert.match(html['index.html']!, /In testing; not live yet/);
+  assert.doesNotMatch(html['index.html']!, /Joined local acceptance/);
+  assert.match(html['index.html']!, /<h3>Bring your own evaluator\.<\/h3>/);
+  assert.doesNotMatch(Object.values(html).join(' '), /assayer/i);
+  assert.match(html['affiliates.html']!, /<h3>Share your wallet address\.<\/h3>/);
+  assert.doesNotMatch(html['affiliates.html']!, /<h3>Share your wallet\.<\/h3>/);
+  // #85: no dead Pons repository link remains.
+  assert.doesNotMatch(html['whitepaper.html']!, /github\.com/);
+  assert.match(html['whitepaper.html']!, /configuration inspected for this whitepaper/);
+  // The idea page no longer promises buyers a proof package they do not receive.
+  assert.doesNotMatch(html['article.html']!, /a property a buyer can verify/);
+  assert.match(html['article.html']!, /bounded trade claim the marketplace checks for buyers/);
 });

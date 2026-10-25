@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+      actions: read
       packages: write
       id-token: write
       attestations: write
@@ -50,21 +51,41 @@ jobs:
           test -z "$(git status --porcelain --untracked-files=all)"
           node scripts/check-release-git-identity.mjs --tag "$RELEASE_TAG"
           node scripts/check-public-branding.mjs
-      - name: Download pinned DCAP verifier
+      - name: Require passing public checks for this commit
         run: |
           set -euo pipefail
+          passed=$(gh run list -R "$GITHUB_REPOSITORY" --workflow verify.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq length)
+          test "$passed" -gt 0 || { echo "Public source checks have not passed for $GITHUB_SHA" >&2; exit 1; }
+      - name: Download pinned DCAP verifier
+        id: verifier
+        run: |
+          set -euo pipefail
+          pin=packages/capture/src/verifier-pin.json
+          test "$(jq -er '.format' "$pin")" = 'thot.dcap-qvl-pin/1'
+          asset=$(jq -er '.platforms["linux-x86_64-musl"].asset' "$pin")
+          url=$(jq -er '.platforms["linux-x86_64-musl"].url' "$pin")
+          expected=$(jq -er '.platforms["linux-x86_64-musl"].sha256' "$pin")
+          test ${#expected} -eq 64
           mkdir -p "$RUNNER_TEMP/tools"
           curl --fail --location --silent --show-error --retry 3 \
-            --output "$RUNNER_TEMP/tools/dcap-qvl-linux-x86_64-musl" \
-            https://github.com/Phala-Network/dcap-qvl/releases/download/v0.6.1/dcap-qvl-linux-x86_64-musl
-          echo '84bd935e37decbace7a902da2680d7486caca954438bb3196c8da8ed91f26d7b  '"$RUNNER_TEMP/tools/dcap-qvl-linux-x86_64-musl" | sha256sum --check --status
+            --output "$RUNNER_TEMP/tools/$asset" \
+            "$url"
+          echo "$expected  $RUNNER_TEMP/tools/$asset" | sha256sum --check --status
+          echo "path=$RUNNER_TEMP/tools/$asset" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "sha256=$expected" >> "$GITHUB_OUTPUT"
       - name: Create and verify public image snapshot
         id: snapshot
+        env:
+          VERIFIER_PATH: ${{ steps.verifier.outputs.path }}
+          VERIFIER_SHA256: ${{ steps.verifier.outputs.sha256 }}
         run: |
           set -euo pipefail
+          test -n "$VERIFIER_PATH" && test -n "$VERIFIER_SHA256"
           node scripts/build-thot-image.mjs --source "$GITHUB_WORKSPACE" \
             --output "$RUNNER_TEMP/thot-image-snapshot" \
-            --verifier "$RUNNER_TEMP/tools/dcap-qvl-linux-x86_64-musl" > "$RUNNER_TEMP/snapshot.json"
+            --verifier "$VERIFIER_PATH" \
+            --expected-verifier-sha256 "$VERIFIER_SHA256" > "$RUNNER_TEMP/snapshot.json"
           snapshot_hash=$(jq -r .manifest_sha256 "$RUNNER_TEMP/snapshot.json")
           source_hash=$(jq -r .source_sha256 "$RUNNER_TEMP/snapshot.json")
           node scripts/build-thot-image.mjs --snapshot "$RUNNER_TEMP/thot-image-snapshot" \

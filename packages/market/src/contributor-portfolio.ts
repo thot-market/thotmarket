@@ -1,3 +1,4 @@
+import {isResearch,validateResearchPackage,researchPreview,RESEARCH_FORMAT} from '../../content/src/research.ts';
 import { canonicalHash } from '../../protocol/src/index.ts';
 import { ensure, type Document, type Transaction } from '../../storage/src/index.ts';
 import { scanSecrets } from '../../scrubber/src/index.ts';
@@ -13,9 +14,10 @@ import { enqueueTraceQc } from './trace-qc-state.ts';
 export class ContributorPortfolio {
   readonly service:ThotService; readonly robinhood:RobinhoodLinks; readonly plaid:PlaidLinks;
   constructor(service:ThotService,robinhood:RobinhoodLinks,plaid:PlaidLinks){this.service=service;this.robinhood=robinhood;this.plaid=plaid;}
-  preview(actor:Actor,input:Document){
+  preview(actor:Actor,input:Document):Document{
     ensure(actor.role==='user','FORBIDDEN',403);
     ensure(typeof input.text==='string'&&typeof input.filename==='string'&&input.filename.length<=200,'INVALID_IMPORT_REQUEST');
+    if(input.kind==='research'){let packageValue;try{packageValue=JSON.parse(input.text);}catch{ensure(false,'INVALID_RESEARCH_PACKAGE');}return researchPreview(packageValue);}
     const parsed=parseCodingSessionJsonl(input.text);
     return {...parsed.preview,warnings:parsed.limitations,privacy_flags:[...new Set([...parsed.preview.privacy_flags,...(scanSecrets(parsed.trace).rejected?['secret']:[])])],metadata_records_skipped:parsed.summary.metadata_records_skipped};
   }
@@ -26,7 +28,7 @@ export class ContributorPortfolio {
     const privateSave=input.save_privately===true;
     if(privateSave)ensure((input.rights_confirmed===undefined||input.rights_confirmed===false)&&(input.model_output_licensed===undefined||input.model_output_licensed===false),'PRIVATE_IMPORT_RELEASE_CONFLICT');
     else{ensure(input.rights_confirmed===true,'IMPORT_RIGHTS_CONFIRMATION_REQUIRED');ensure(typeof input.model_output_licensed==='boolean','IMPORT_OUTPUT_CHOICE_REQUIRED');}
-    const imported=await this.service.importTrace(actor,key,{bundle:{format:'thot.coding-session-jsonl/1',text:input.text},content_commitment:preview.content_commitment,category:input.category??(privateSave?'general':'research_flow'),...(privateSave?{save_privately:true}:{rights_confirmed:true,model_output_licensed:input.model_output_licensed})},trusted);
+    const imported=await this.service.importTrace(actor,key,{bundle:input.kind==='research'?{format:RESEARCH_FORMAT,content:JSON.parse(input.text)}:{format:'thot.coding-session-jsonl/1',text:input.text},content_commitment:preview.content_commitment,category:input.category??(input.kind==='research'?'general':privateSave?'general':'research_flow'),...(privateSave?{save_privately:true}:{rights_confirmed:true,model_output_licensed:input.model_output_licensed})},trusted);
     // Retry recovers this metadata step after an interrupted import, without duplicate inventory.
     const saved=await this.service.db.transaction(async tx=>{
       await trusted.authorize?.(tx);
@@ -85,6 +87,7 @@ export class ContributorPortfolio {
   }
   private async appraise(tx:Transaction,actor:Actor,trace:Document,credentials:VerifiedCredentialReference[]){
     const preview={...(trace.import_preview??trace.capture_preview)};
+    if(trace.content_kind==='research')return {...preview,trace_id:trace.trace_id,content_kind:'research',status:trace.display_status,rights_status:trace.rights_status,evidence:{status:trace.provenance_status,confidence_tier:'P0_OPERATOR',authenticated_provider_history:false},imported_at:trace.created_at,appraisal_history:[]};
     if(!trace.rights_id||!await tx.maybe('trace_features',trace.trace_id))return {...preview,trace_id:trace.trace_id,agent_capture_id:trace.agent_capture_id,status:trace.display_status,rights_status:'pending',evidence:{status:trace.provenance_status,confidence_tier:(await tx.get('provenance_receipts',trace.provenance_id,actor.id)).receipt.confidence_tier},projection:trace.projection,capture_state:trace.capture_state,imported_at:trace.created_at,appraisal_history:[]};
     const features=await tx.get('trace_features',trace.trace_id,actor.id),rights=(await tx.get('rights_assessments',trace.rights_id,actor.id)).receipt;
     const history=trace.appraisal_history??[];

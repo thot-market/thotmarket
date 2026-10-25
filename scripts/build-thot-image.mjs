@@ -9,7 +9,14 @@ import {execFileSync, spawnSync} from 'node:child_process';
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 const runtimePython = new Set(JSON.parse(readFileSync(new URL('./runtime-python-files.json', import.meta.url), 'utf8')).files);
 const NODE_IMAGE = 'node:24-slim@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553';
-const QVL_SHA256 = '84bd935e37decbace7a902da2680d7486caca954438bb3196c8da8ed91f26d7b';
+// The verifier pin is the single checked-in source shared with the capture
+// helper's automatic install and the cvm-image workflow.
+const verifierPin = JSON.parse(readFileSync(new URL('../packages/capture/src/verifier-pin.json', import.meta.url), 'utf8'));
+if (verifierPin.format !== 'thot.dcap-qvl-pin/1' || !/^\d+\.\d+\.\d+$/.test(verifierPin.version ?? '')) throw new Error('INVALID_VERIFIER_PIN');
+const QVL_ENTRY = verifierPin.platforms['linux-x86_64-musl'];
+if (!QVL_ENTRY || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(QVL_ENTRY.asset ?? '') || !/^[a-f0-9]{64}$/.test(QVL_ENTRY.sha256 ?? '')) throw new Error('INVALID_VERIFIER_PIN');
+const QVL_SHA256 = QVL_ENTRY.sha256;
+const QVL_PATH = join(REPO, 'work/tools/dcap-qvl-v' + verifierPin.version + '/' + QVL_ENTRY.asset);
 const sha = value => createHash('sha256').update(value).digest('hex');
 const fail = (ok, message) => {if (!ok) throw new Error(message);};
 const fixed = new Set(['Dockerfile', '.dockerignore', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json',
@@ -172,7 +179,7 @@ async function main() {
   fail(!options.snapshot || !options.profile, 'PROFILE_IS_BOUND_TO_SNAPSHOT');
   let result;
   if (options.output) result = await createThotBuildSnapshot({sourceRoot: options.source ?? REPO, outputDir: options.output,
-    verifierPath: options.verifier ?? join(REPO, 'work/tools/dcap-qvl-v0.6.1/dcap-qvl-linux-x86_64-musl'), profile: options.profile ?? 'public'});
+    verifierPath: options.verifier ?? QVL_PATH, profile: options.profile ?? 'public'});
   if (options.build) {
     fail(typeof options.image === 'string' && /^[a-z0-9][a-z0-9._/:+-]{0,199}$/.test(options.image), 'LOCAL_IMAGE_TAG_REQUIRED');
     const {output, manifest} = await verifyThotBuildSnapshot(result?.output ?? options.snapshot, result?.manifest_sha256 ?? options['expected-manifest-sha256']);

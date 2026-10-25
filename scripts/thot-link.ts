@@ -11,8 +11,9 @@ import {readiness,savedThotOrigin,savedRobinhoodConfig,thotOrigin} from '../pack
 import {startRobinhoodPairing} from '../packages/capture/src/robinhood-pairing.ts';
 
 const argv=process.argv.slice(2),args=new Map<string,string>();
-if(argv[0]!=='robinhood'||argv.includes('--help')){console.log('Usage: thot-link robinhood [--thot-url ORIGIN] [--config PRIVATE_CONFIG] [--trade-trace TRACE --symbol SYMBOL --window-days N]\n\nOpen the printed Thot link in Chrome. The website guides extension setup and account verification.\nUses the saved Thot origin. No gate cookie or login token is needed in your terminal.');process.exit(argv.includes('--help')?0:1);}
-for(let i=1;i<argv.length;i+=2){if(!['--thot-url','--thot-url','--config','--trade-trace','--symbol','--window-days'].includes(argv[i])||!argv[i+1])throw Error('INVALID_ARGUMENTS');args.set(argv[i],argv[i+1]);}
+if(argv[0]!=='robinhood'||argv.includes('--help')){console.log('Usage: thot-link robinhood [--thot-url ORIGIN] [--config PRIVATE_CONFIG] [--trade-trace TRACE --symbol SYMBOL --window-days N] [--pairing code|loopback]\n\nOpen the printed Thot link in Chrome. The website guides extension setup and account verification.\nUses the saved Thot origin. No gate cookie or login token is needed in your terminal.\nPairing uses loopback first and falls back to a short code after 30 seconds; --pairing code (or THOT_PAIRING=code) skips loopback for browsers on another device.');process.exit(argv.includes('--help')?0:1);}
+for(let i=1;i<argv.length;i+=2){if(!['--thot-url','--thot-url','--config','--trade-trace','--symbol','--window-days','--pairing'].includes(argv[i])||!argv[i+1])throw Error('INVALID_ARGUMENTS');args.set(argv[i],argv[i+1]);}
+const pairingChoice=args.get('--pairing');if(pairingChoice!==undefined&&!['code','loopback'].includes(pairingChoice))throw Error('INVALID_ARGUMENTS');
 const tradeFlags=['--trade-trace','--symbol','--window-days'];
 const tradeRequest=tradeFlags.some(k=>args.has(k))?{trace_id:args.get('--trade-trace')??'',symbol:(args.get('--symbol')??'').trim().toUpperCase(),window_days:Number(args.get('--window-days'))}:undefined;
 if(tradeRequest&&(!/^[-A-Za-z0-9:_]{1,200}$/.test(tradeRequest.trace_id)||!/^[A-Z][A-Z0-9.-]{0,14}$/.test(tradeRequest.symbol)||!Number.isInteger(tradeRequest.window_days)||tradeRequest.window_days<1||tradeRequest.window_days>365))throw Error('INVALID_TRADE_REQUEST');
@@ -49,7 +50,7 @@ if(existingConfig){
   await writeFile(join(extensionDir,'config.js'),'globalThis.THOT_ROBINHOOD_CONFIG='+JSON.stringify({bridgeUrl:`http://127.0.0.1:${pairing.port}/${pairing.capability}`})+';\n',{mode:0o600});
   config={pythonExecutable:checks.python,bridgePath:join(root,'trace-vault/browser_capture.py'),measurementsPath:join(root,'trace-vault/deploy/robinhood-measurements.json'),qvlPath:checks.qvl,extensionBridge:pairing};
 }
-const bridge=await startRobinhoodPairing({origin,tradeRequest,extensionDir,launch(input,update){
+const bridge=await startRobinhoodPairing({origin,tradeRequest,extensionDir,pairing:(pairingChoice??undefined) as 'code'|'loopback'|undefined,log:text=>console.log(text),launch(input,update){
   const child=spawn(process.execPath,[join(root,'scripts/robinhood-existing-browser.mjs')],{stdio:['pipe','pipe','pipe']});
   let gotEvidence=false,outputBytes=0;
   child.stdout.on('data',chunk=>{outputBytes+=chunk.length;if(outputBytes>1_000_000){update({error:'CONNECTOR_OUTPUT_LIMIT'});child.kill();}});

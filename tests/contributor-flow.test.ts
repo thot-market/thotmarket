@@ -213,3 +213,22 @@ test('private import preparation masks known credentials while retaining useful 
   const scrubbed=await app.service.privacy.open(demoUser.id,trace.scrub_ref);assert.equal(scrubbed.turns[0].content,'[REDACTED]');assert.equal(scrubbed.turns[1].role,'assistant');assert.doesNotMatch(JSON.stringify(scrubbed),/super-secret-value/);
   assert.match(JSON.stringify(await app.service.privacy.open(demoUser.id,trace.raw_ref)),/super-secret-value/);
 });
+
+// `codex exec --json` output is the only Codex stream a sandboxed agent can
+// keep; it must preview and save privately exactly like a rollout file.
+const codexExecHistory=()=>[
+  JSON.stringify({type:'thread.started',thread_id:'0199execstream00000000000000000ff'}),
+  JSON.stringify({type:'turn.started'}),
+  JSON.stringify({type:'item.completed',item:{id:'item_0',type:'agent_message',text:'Review the streamed exec output.'}}),
+  JSON.stringify({type:'item.completed',item:{id:'item_1',type:'command_execution',command:'node scripts/check.mjs',aggregated_output:'ok',exit_code:0,status:'completed'}}),
+  JSON.stringify({type:'turn.completed',usage:{input_tokens:99,cached_input_tokens:0,output_tokens:7}}),
+].join('\n');
+
+test('codex exec event streams preview and save privately with unverified provenance',async t=>{
+  const app=await setup(t),text=codexExecHistory();
+  const preview=app.portfolio.preview(demoUser,{filename:'exec-stream.jsonl',text});
+  assert.equal(preview.format,'Codex exec JSONL');assert.equal(preview.turn_count,3);assert.equal(preview.source_label,'Codex (user supplied)');
+  const imported=await app.portfolio.import(demoUser,'codex-exec-import',{filename:'exec-stream.jsonl',text,content_commitment:preview.content_commitment,save_privately:true});
+  assert.ok(imported.item);assert.equal(imported.item.evidence.status,'IMPORTED_UNVERIFIED');
+  assert.equal(imported.item.source,'Codex (user supplied)');assert.equal(imported.item.title,'Codex session');
+});

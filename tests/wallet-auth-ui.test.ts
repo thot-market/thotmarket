@@ -164,11 +164,12 @@ test('a returning embedded wallet restores only the same server-bound wallet wit
   await a.ui.signOut();assert.equal(a.ui.getProvider(),null);a.ui.destroy();
 });
 
-test('logout invalidates a pending embedded-provider restoration before private data can appear',async()=>{
+test('a returning email wallet shows the server session before the wallet SDK loads, and logout still wins',async()=>{
   let release!:(value:any)=>void;
   const a=fixture({window:{ethereum:undefined},additionalProviders:()=>new Promise(resolve=>{release=resolve;})});
-  const pending=a.ui.restore();await tick();await a.ui.signOut();release([provider().p]);
-  assert.equal(await pending,false);assert.equal(a.sessions.length,0);assert.equal(a.ui.getProvider(),null);a.ui.destroy();
+  const pending=a.ui.restore();await tick();await tick();assert.equal(a.sessions.length,1,'workspace opens without waiting for the SDK');
+  await a.ui.signOut();release([provider().p]);
+  assert.equal(await pending,false);assert.equal(a.ui.getProvider(),null);assert.ok(a.signedOut.length>=1);a.ui.destroy();
 });
 
 
@@ -250,8 +251,8 @@ test('a stalled noninteractive injected provider cannot block a matching embedde
 test('optional provider restoration has a deadline and never accepts a late provider',async()=>{
   let release!:(value:any)=>void;
   const a=fixture({window:{ethereum:undefined},additionalProvidersTimeoutMs:10,additionalProviders:()=>new Promise(resolve=>{release=resolve;})});
-  assert.equal(await a.ui.restore(),false);assert.match(a.errors[0].message,/restoration took too long/);assert.equal(a.sessions.length,0);
-  release([provider().p]);await tick();assert.equal(a.sessions.length,0);assert.equal(a.ui.getProvider(),null);a.ui.destroy();
+  assert.equal(await a.ui.restore(),false);assert.match(a.errors[0].message,/restoration took too long/);assert.equal(a.sessions.length,1);assert.equal(a.signedOut.length,1);
+  release([provider().p]);await tick();assert.equal(a.sessions.length,1);assert.equal(a.ui.getProvider(),null);a.ui.destroy();
 });
 
 

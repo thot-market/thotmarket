@@ -1,3 +1,4 @@
+import {isResearch,validateResearchPackage,selectResearchFiles} from '../../content/src/research.ts';
 import {canonicalHash,canonicalJson} from '../../protocol/src/index.ts';
 import {ensure,type Document,type Transaction} from '../../storage/src/index.ts';
 import type {Actor,ThotService} from './service.ts';
@@ -9,6 +10,7 @@ const digest=(value:unknown)=>'0x'+canonicalHash(value);
 const state=(trace:Document)=>canonicalHash({scrub_ref:trace.scrub_ref,normalized_hash:trace.normalized_hash,rights_id:trace.rights_id,
   provenance_id:trace.provenance_id,save_privately:trace.save_privately??false,revision:trace.release_revision??0});
 const bounded=(content:Document)=>{
+  if(isResearch(content)){validateResearchPackage(content);return;}
   ensure(content&&Array.isArray(content.turns)&&content.turns.length>0&&content.turns.length<=RELEASE_PREVIEW_LIMITS.max_turns,'RELEASE_PREVIEW_LIMIT',413);
   ensure(Buffer.byteLength(canonicalJson(content))<=RELEASE_PREVIEW_LIMITS.max_bytes,'RELEASE_PREVIEW_LIMIT',413);
 };
@@ -50,25 +52,28 @@ export class ReleasePreview {
     return {trace_id:input.trace_id,content_hash:digest(content),content,capture_model:current.trace.capture_model??null,
       rights_status:current.trace.rights_status,provenance:current.provenance.confidence_tier,provenance_status:current.trace.provenance_status,
       sale_eligibility:current.eligibility,exclusion:current.exclusion,release_revision:current.trace.release_revision??0,
-      metrics:{turns:content.turns.length,tool_turns:content.turns.filter((turn:Document)=>turn.role==='tool'||turn.role==='function').length},
+      metrics:{...(isResearch(content)?{files:content.files.length,bytes:content.files.reduce((n,f)=>n+f.bytes,0)}:{}),turns:content.turns?.length??0,tool_turns:(content.turns??[]).filter((turn:Document)=>turn.role==='tool'||turn.role==='function').length},
       privacy:{flags:current.rights.flags??[],limitations:['Local baseline filtering cannot reliably detect all personal information or confidential context. Review every included message.']},
-      limits:RELEASE_PREVIEW_LIMITS,notice:'Exact proposed conversation content. License terms and any separately selected evidence are added when you prepare the listing. This review does not authorize a sale.'};
+      limits:RELEASE_PREVIEW_LIMITS,content_kind:isResearch(content)?'research':'trace',notice:'Exact proposed release content. License terms and any separately selected evidence are added when you prepare the listing. This review does not authorize a sale.'};
   }
   async exclude(actor:Actor,key:string,input:Document){
     ensure(actor.role==='user','FORBIDDEN',403);
-    ensure(input&&Object.keys(input).every(k=>['trace_id','content_hash','excluded_turns','rights_confirmed','model_output_licensed'].includes(k)),'INVALID_RELEASE_EXCLUSION');
+    ensure(input&&Object.keys(input).every(k=>['trace_id','content_hash','excluded_turns','excluded_files','rights_confirmed','model_output_licensed'].includes(k)),'INVALID_RELEASE_EXCLUSION');
     ensure(typeof input.trace_id==='string'&&input.trace_id.length>0&&input.trace_id.length<=160&&/^0x[a-f0-9]{64}$/.test(input.content_hash??''),'INVALID_RELEASE_EXCLUSION');
     ensure(input.rights_confirmed===true,'IMPORT_RIGHTS_CONFIRMATION_REQUIRED');
     ensure(typeof input.model_output_licensed==='boolean','IMPORT_OUTPUT_CHOICE_REQUIRED');
-    const indices=input.excluded_turns;
-    ensure(Array.isArray(indices)&&indices.length>0&&indices.length<=RELEASE_PREVIEW_LIMITS.max_turns&&indices.every(i=>Number.isSafeInteger(i)&&i>=0)&&new Set(indices).size===indices.length,'INVALID_RELEASE_EXCLUSION');
+    const fileMode=Array.isArray(input.excluded_files);
+    ensure(fileMode?input.excluded_turns===undefined:input.excluded_files===undefined,'INVALID_RELEASE_EXCLUSION');
+    const indices=fileMode?input.excluded_files:input.excluded_turns;
+    ensure(Array.isArray(indices)&&indices.length>0&&indices.length<=RELEASE_PREVIEW_LIMITS.max_turns&&indices.every(i=>fileMode?typeof i==='string'&&i.length<=180:Number.isSafeInteger(i)&&i>=0)&&new Set(indices).size===indices.length,'INVALID_RELEASE_EXCLUSION');
     await this.service.staged.run(actor.id,key,{action:'releaseExclude',input},'projection',async stage=>{
       const before=await this.service.db.transaction(tx=>this.snapshot(tx,actor,input.trace_id));
       ensure(before.exclusion.supported,before.exclusion.reason_code??'RELEASE_NOT_READY',409);
       const content=await stage.open(before.trace.scrub_ref);bounded(content);
       ensure(digest(content)===input.content_hash&&canonicalHash(content)===before.trace.normalized_hash,'RELEASE_CHANGED',409);
-      ensure(indices.every(i=>i<content.turns.length)&&indices.length<content.turns.length,'INVALID_RELEASE_EXCLUSION');
-      const excluded=new Set(indices),selected={turns:content.turns.filter((_:unknown,i:number)=>!excluded.has(i))};
+      ensure(fileMode===isResearch(content),'INVALID_RELEASE_EXCLUSION');
+      if(!fileMode)ensure(indices.every(i=>i<content.turns.length)&&indices.length<content.turns.length,'INVALID_RELEASE_EXCLUSION');
+      const excluded=new Set(indices),selected=isResearch(content)?selectResearchFiles(content,indices):{turns:content.turns.filter((_:unknown,i:number)=>!excluded.has(i))};
       // Reassess only already permitted content. Previously removed assistant
       // output or sensitive spans cannot be restored by a new checkbox choice.
       const assessment=await this.service.privacy.assess(input.trace_id,selected,before.trace.category,{rights_confirmed:true,
@@ -90,10 +95,10 @@ export class ReleasePreview {
         // An edited release requires its own listing signature; an older
         // standing mandate must not discover the replacement automatically.
         trace.thot_listing_only=true;
-        trace.release_edit={previous_content_hash:input.content_hash,content_hash:'0x'+hash,excluded_turns:indices.length,revision:trace.release_revision};
+        trace.release_edit={previous_content_hash:input.content_hash,content_hash:'0x'+hash,...(fileMode?{excluded_files:indices.length}:{excluded_turns:indices.length}),revision:trace.release_revision};
         await tx.update('traces',trace.trace_id,trace);
         await enqueueTraceQc(tx,trace,this.service.now(),['release']);
-        await tx.audit(actor.id,'ReleaseMessagesExcluded',{trace_id:trace.trace_id,previous_content_hash:input.content_hash,content_hash:'0x'+hash,excluded_turns:indices.length,revision:trace.release_revision});
+        await tx.audit(actor.id,'ReleaseMessagesExcluded',{trace_id:trace.trace_id,previous_content_hash:input.content_hash,content_hash:'0x'+hash,...(fileMode?{excluded_files:indices.length}:{excluded_turns:indices.length}),revision:trace.release_revision});
         // Idempotency responses live in metadata storage: never persist plaintext
         // preview content there. Re-read the encrypted preview after commit.
         return {trace_id:trace.trace_id,content_hash:'0x'+hash,release_revision:trace.release_revision};

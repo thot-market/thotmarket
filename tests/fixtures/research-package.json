@@ -1,0 +1,42 @@
+{
+  "schema_version": "thot.research-package/1",
+  "kind": "research",
+  "title": "Synthetic arithmetic research",
+  "entrypoint": "report.md",
+  "files": [
+    {
+      "path": "report.md",
+      "text": "# Synthetic report\nTwo plus two equals four.\n",
+      "media_type": "text/markdown",
+      "role": "report",
+      "bytes": 45,
+      "sha256": "752dda58700b9b6ddb8009687400aa418b7d97ec5fad1e272fdd05745021cb40"
+    },
+    {
+      "path": "calculate.py",
+      "text": "print(2 + 2)\n",
+      "media_type": "text/x-python",
+      "role": "code",
+      "bytes": 13,
+      "sha256": "02345e659ec3aaa1b1811d4186d7674828ce9147c0f36202b65a79d8cb163f23"
+    },
+    {
+      "path": "results.json",
+      "text": "{\"result\":4,\"synthetic\":true}\n",
+      "media_type": "application/json",
+      "role": "data",
+      "bytes": 30,
+      "sha256": "3f1ff854d394d02dd809b9b23c756fe7db2c5005c70503582c33dbc5f8cd6cc3"
+    }
+  ],
+  "relationships": [
+    {
+      "from": "results.json",
+      "relation": "generated_by",
+      "to": "calculate.py"
+    }
+  ],
+  "provenance": {
+    "mode": "imported_declaration"
+  }
+}

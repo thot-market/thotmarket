@@ -31,7 +31,7 @@ test('static production and configured private bundles give every ordinary CTA i
   const outputParent=await mkdtemp(join(tmpdir(),'thot-public-entry-'));
   t.after(()=>rm(outputParent,{recursive:true,force:true}));
   for(const appUrl of [undefined,'https://configured.example/app']){
-    const build=await buildCloudflarePages({outputParent,appUrl,zip:false});
+    const build=await buildCloudflarePages({outputParent,appUrl,zip:false,...(appUrl===undefined?{launch:{state:'launched',tokenAddress:'0x1111111111111111111111111111111111111111',ponsLaunchAddress:'0x2222222222222222222222222222222222222222'}}:{})});
     const target=appUrl??'https://app.thot.market/app';
     const config=JSON.parse(await readFile(join(build.directory,'v1/public/site-config.json'),'utf8'));
     assert.equal(config.appUrl,target);

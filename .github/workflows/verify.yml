@@ -1,5 +1,11 @@
 name: Public source checks
-on: [push, pull_request, workflow_dispatch]
+on:
+  pull_request:
+    paths-ignore: ['steering/**', 'reports/**', 'rc-dry-run/**', '**/*.md']
+  push:
+    branches: [main]
+    paths-ignore: ['steering/**', 'reports/**', 'rc-dry-run/**', '**/*.md']
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -13,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [unit, contracts, evidence, browser, packaging]
+        suite: [unit, 'contracts:1/3', 'contracts:2/3', 'contracts:3/3', evidence, browser, packaging]
     services:
       storage-postgres:
         image: postgres:17-alpine
@@ -46,7 +52,7 @@ jobs:
       - run: node scripts/check-public-branding.mjs
       - run: pnpm build
       - uses: foundry-rs/foundry-toolchain@v1
-        if: matrix.suite == 'contracts' || matrix.suite == 'browser'
+        if: startsWith(matrix.suite, 'contracts') || matrix.suite == 'browser'
         with:
           version: v1.7.1
           cache: false

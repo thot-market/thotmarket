@@ -11,7 +11,7 @@ import {welcomeHTML} from '../apps/dashboard/connected-journey-ui.js';
 const applicationSource = await readFile(new URL('../apps/dashboard/app.js', import.meta.url), 'utf8');
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
 // replaced by inert collaborators and only the automatic initial network bootstrap is disabled.
-const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace('import(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)', 'globalThis.importPrivyModule(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
+const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace('import(bundlePath)', 'globalThis.importPrivyModule(bundlePath)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
 globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, navigateView, acceptViewRoute, routeView, refreshPurchases, pendingPurchases, refresh, acceptClerkSession, loadCatalogue, renderCatalogue, acceptMarketFragment, invalidatePrivateState,loadContributorRecords,
   makeDeferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; },
   setAuthMode(value) { authMode = value; }, setClerkAuth(value) { clerkAuth = value; } };
@@ -84,6 +84,7 @@ function dashboard(t: any, transport: (url: string, init: any) => Promise<any>, 
     createWalletAuth: options.walletAuthFactory??(() => ({})), importPrivyModule:options.importPrivyModule??(()=>{throw Error('Unexpected Privy import');}),
     createOpenRouterUI: () => ({reset(){},intro:()=>'',handle:async()=>false}),
     createAgentCaptureUI: () => ({ authReady() {}, authLost() {}, onDialogClose() {}, handle: async () => false, onChange: () => false }),
+    createDevicePairingUI: () => ({ acceptFragment() { return false; }, authReady() {}, authLost() {}, handle: async () => false }),
     createLibraryUI: ({state}:any) => ({ reset() {}, ready() {}, onDialogClose() {}, queryString: () => '', sectionHTML: () => '<section id="conversation-library">'+(state.traceLibrary?.items??[]).map((i:any)=>i.title??i.trace_id).join('|')+'</section>', handle: async () => false, onChange: () => false, onSubmit: options.librarySubmit??(async () => false), acceptFragment: async () => {} }),
     createTraceExplorerUI: () => ({ reset() {}, sectionHTML: () => '', handle: async () => false, onChange: () => false }),
   };
@@ -421,6 +422,7 @@ test('wallet workspace banner names the selected local, testnet, or mainnet envi
     const banner=a.elements.get('.environment').innerHTML;
     assert.match(banner,new RegExp(`Wallet workspace · ${label}`));
     if(chainId===4663)assert.doesNotMatch(banner,/testnet|test assets/i);
+    if(chainId===4663)assert.equal(a.elements.get('.environment').hidden,true,'the live market needs no environment label');
   }
 });
 

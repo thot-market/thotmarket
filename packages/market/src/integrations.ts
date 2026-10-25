@@ -1,3 +1,4 @@
+import {isResearch,validateResearchPackage,researchPreview,RESEARCH_FORMAT} from '../../content/src/research.ts';
 import type {RemoteAccounting} from '../../vault/src/remote-accounting.ts';
 import {CAPTURE_PART_JSON_BYTES} from '../../capture/src/limits.ts';
 import { createPrivateKey, createPublicKey, createHmac, randomBytes } from 'node:crypto';
@@ -5,7 +6,7 @@ import { canonicalHash, canonicalJson, signCanonical, uuidv7, validateProvenance
 import { assertTraceContent, createDevelopmentBundle, verifyDevelopmentBundle, ExternalProvenanceVerifier, type DevelopmentBundle, type ExternalVerifierConfig } from '../../provenance/src/index.ts';
 import { VaultStore, LocalMasterKeyProvider, type VaultQuotaOptions, type CiphertextStore, type KeyProvider } from '../../vault/src/index.ts';
 import { evaluateRights, type RightsFlag } from '../../policy/src/index.ts';
-import { scanSecrets, redactTraceCredentials, scrubTrace, extractPrivacySafeFeatures, type TraceFeatures } from '../../scrubber/src/index.ts';
+import { scanSecrets, redactCredentialSpans, redactTraceCredentials, scrubTrace, extractPrivacySafeFeatures, type TraceFeatures } from '../../scrubber/src/index.ts';
 import { MockCredentialProvider, SignedCredentialProvider, type CredentialReceipt, type SignedCredentialConfig } from '../../credentials/src/index.ts';
 import { MockOutcomeProvider, SignedOutcomeVerifier, type OutcomeReceipt } from '../../outcomes/src/index.ts';
 import { IsolatedAssayRunner } from '../../assays/src/index.ts';
@@ -57,9 +58,13 @@ export class PrivacyIntegrations implements PrivacyFacade {
     this.outcomes=options.development?new MockOutcomeProvider({records:[],now:this.clock}).verifier:new SignedOutcomeVerifier({trustedIssuers:options.outcomeIssuers??{},now:this.clock});
     this.assays=new IsolatedAssayRunner({now:this.clock});
   }
-  async verify(bundle:unknown,traceId:string,owner:string) {
+  async verify(bundle:unknown,traceId:string,owner:string):Promise<{receipt:Document;content:Document;capture_model?:Document;model_history?:Document[]}> {
     let result, importedModel:Document|undefined, importedModels:Document[]|undefined;
-    if(['thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(String((bundle as Document)?.format))) {
+    if((bundle as Document)?.format===RESEARCH_FORMAT){
+      const source=bundle as Document;ensure(Object.keys(source).every(k=>['format','content'].includes(k)),'INVALID_RESEARCH_BUNDLE');
+      const content=validateResearchPackage(source.content),now=this.clock().toISOString();
+      result={trace:content,normalizedReceipt:{schema_version:'trace.provenance/1' as const,receipt_id:uuidv7(),trace_id:traceId,path:'legacy_import' as const,confidence_tier:'P0_OPERATOR' as const,temporal:{observed_start:now,observed_end:now},commitments:{raw_trace_hash:canonicalHash(content),source_bundle_hash:canonicalHash(bundle)},claims:['THOT recorded this research package commitment at import time.'],limitations:['Imported declarations only; no provider, authorship, source completeness or research correctness is authenticated.','No witness or TEE capture provenance is established.'],verifier:{implementation:'thot-research-import',version:'1',verified_at:now}}};
+    } else if(['thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(String((bundle as Document)?.format))) {
       const source=bundle as Document;
       ensure(Object.keys(source).every(k=>['format','text'].includes(k))&&typeof source.text==='string','INVALID_HISTORY_BUNDLE');
       const parsed=parseCodingSessionJsonl(source.text);
@@ -94,7 +99,8 @@ export class PrivacyIntegrations implements PrivacyFacade {
     ensure(ref.ownerUserId===owner,'VAULT_ACCESS_DENIED',403);
     try{await this.vault.delete({ownerUserId:owner,objectId:ref.objectId});}catch(error:any){if(error.code!=='ENOENT')throw error;}
   }
-  async assess(traceId:string,content:Document,category:string,input:Document) {
+  async assess(traceId:string,content:Document,category:string,input:Document):Promise<{rights:Document;scrub:Document;content:Document;features:Document}> {
+    if(isResearch(content))return this.assessResearch(traceId,content,category,input);
     assertTraceContent(content);
     const text=content.turns.map(t=>t.content).join('\n');
     const flags:RightsFlag[]=[...(input.rights_flags??[])];
@@ -133,6 +139,15 @@ export class PrivacyIntegrations implements PrivacyFacade {
     const features=extractPrivacySafeFeatures({trace:scrubbed.trace,traceId,rights,provenanceTier:'P0_OPERATOR',workflowType:workflow,topicLabels:[category==='research_flow'?'finance':category==='professional_flow'?'contracts':workflow==='coding'?'coding':'other']});
     features.feature_model_version='thot-safe-features-user-keywords/2';
     return {rights,scrub:{...scrub,signature:signCanonical(scrub,this.signingKey)},content:scrubbed.trace,features};
+  }
+  private assessResearch(traceId:string,value:Document,category:string,input:Document){
+    const content=validateResearchPackage(value),text=content.files.map(f=>f.text).join('\n'),flags:RightsFlag[]=[...(input.rights_flags??[])];
+    if(content.files.some(f=>redactCredentialSpans(f.text).count>0))flags.push('secret');
+    for(const [pattern,flag] of [[/attorney.client privileged|privileged legal|legal privilege/i,'privileged_legal'],[/client confidential/i,'client_confidential'],[/employer confidential/i,'employer_confidential'],[/material non.?public|\bMNPI\b|unreleased earnings/i,'mnpi_like'],[/brokerage account number|bank account number|routing number/i,'financial_account_sensitive']] as [RegExp,RightsFlag][])if(pattern.test(text))flags.push(flag);
+    const rights=evaluateRights({traceId,flags,professionalFlow:category==='professional_flow',rightsConfirmed:input.rights_confirmed===true,components:content.files.map(f=>f.path),now:this.clock().toISOString()});
+    const scrub={schema_version:'research.review/1',scrub_id:uuidv7(),trace_id:traceId,input_hash:canonicalHash(content),output_hash:canonicalHash(content),generated_at:this.clock().toISOString(),scrubber_version:'research-exact-files/1',edits_count:0,limitations:['Exact file bytes retained. No automatic redaction; sensitive findings block sale. Review every included file and its licensing rights.']};
+    const features={schema_version:'research.features/1',trace_id:traceId,content_kind:'research',workflow_type:'research',topic_labels:['research'],counts:{turns:0,tool_calls:0,files:content.files.length,bytes:content.files.reduce((n,f)=>n+f.bytes,0)},signals:{},available_predicates:{credential_types:[],outcome_types:[]},rights_status:rights.status,provenance_tier:'P0_OPERATOR',feature_model_version:'research-inventory/1'};
+    return {rights,scrub:{...scrub,signature:signCanonical(scrub,this.signingKey)},content,features};
   }
   verifyCredential(receipt:Document,owner:string) { (receipt.predicate_type==='brokerage_control'?this.brokerageCredentials:this.credentials).verify(receipt as CredentialReceipt,{userId:owner}); }
   normalizeBrokerage(owner:string,subject:string,evidenceHash:string,verifiedAt:string,validUntil:string,source:{provider:string;provider_method:string;issuer_key_id:string;claims:string[]}={provider:'robinhood',provider_method:'attested_witness_link',issuer_key_id:'thot-brokerage-bridge-v1',claims:['The configured verifier accepted an attested Robinhood account-control credential bound to this contributor link job.']}):CredentialReceipt {

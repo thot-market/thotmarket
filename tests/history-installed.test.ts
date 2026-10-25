@@ -44,7 +44,7 @@ test('source-installed and npm-installed history executables complete a syntheti
   t.after(async()=>{await new Promise<void>(r=>server.close(()=>r()));await app.close();await rm(temporary,{recursive:true,force:true});});
   const origin='http://127.0.0.1:'+(server.address() as {port:number}).port;
   const source=join(temporary,'reviewed source');await packagedSource(source);
-  const taskEnv={...process.env,THOT_URL:'',NPM_CONFIG_USERCONFIG:'/dev/null',NPM_CONFIG_CACHE:join(temporary,'npm cache')};
+  const taskEnv={...process.env,THOT_URL:'',THOT_VERIFIER_AUTO_INSTALL:'0',NPM_CONFIG_USERCONFIG:'/dev/null',NPM_CONFIG_CACHE:join(temporary,'npm cache')};
   const sourceHome=join(temporary,'source user'),packageHome=join(temporary,'package user'),prefix=join(temporary,'installed package');
   const installCommands=historySetupCommands(origin,'claude');
   await checked('/bin/sh',['-c',installCommands.install],{cwd:source,env:{...taskEnv,THOT_USER_HOME:sourceHome}});

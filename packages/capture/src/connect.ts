@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {loadPrivate,storePrivate} from './local-state.ts';
 import {captureOrigin,type CaptureConnection} from './sync.ts';
 import {openBrowser} from './browser.ts';
+import {pairingMode,createDevicePairing,awaitDevicePairing,printDevicePairing,type PairingMode} from './device-pairing.ts';
 import type {CaptureClient} from './index.ts';
 
 type Device={device_id:string;device_token:string;account_id:string;client:CaptureClient;expires_at:string};
@@ -16,7 +17,7 @@ async function devicePost(origin:string,device:Device,action:string,body:unknown
   return result;
 }
 const reauthorize=new Set(['INVALID_CAPTURE_DEVICE','INVALID_CAPTURE_DEVICE_TOKEN','CAPTURE_DEVICE_REVOKED','CAPTURE_DEVICE_EXPIRED','AUTH_ACTOR_UNAVAILABLE']);
-export async function connectCapture(options:{origin:string;client:CaptureClient;project:string;root:string;open?:(url:string)=>Promise<boolean>;log?:(message:string)=>void;transport?:typeof fetch}):Promise<CaptureConnection&{account_id:string;automatic_sales?:boolean}> {
+export async function connectCapture(options:{origin:string;client:CaptureClient;project:string;root:string;open?:(url:string)=>Promise<boolean>;log?:(message:string)=>void;transport?:typeof fetch;pairing?:PairingMode;fallbackMs?:number}):Promise<CaptureConnection&{account_id:string;automatic_sales?:boolean}> {
   const origin=captureOrigin(options.origin),transport=options.transport??fetch,log=options.log??(s=>process.stdout.write(s+'\n'));
   const dir=connectionDirectory(options.root,origin,options.client);
   async function begin(device:Device){
@@ -32,8 +33,28 @@ export async function connectCapture(options:{origin:string;client:CaptureClient
     if((error as NodeJS.ErrnoException).code!=='ENOENT'&&!reauthorize.has((error as Error).message))throw error;
     if(reauthorize.has((error as Error).message))log('Reconnect this tool: '+(error as Error).message.toLowerCase().replaceAll('_',' ')+'.');
   }
-  const nonce=randomBytes(24).toString('hex');let accepting=false,resolvePair!:(v:any)=>void,rejectPair!:(e:Error)=>void;
-  const paired=new Promise<CaptureConnection&{account_id:string}>((resolve,reject)=>{resolvePair=resolve;rejectPair=reject;});
+  // Both paths deliver the same result: a browser-confirmed device credential
+  // immediately exchanged for this session's capture connection.
+  const valid=(device:Device)=>{
+    if(!/^[a-f0-9-]{36}$/.test(device.device_id)||!/^[A-Za-z0-9_-]{43}$/.test(device.device_token)||device.client!==options.client||typeof device.account_id!=='string'||device.account_id.length>256||!Number.isFinite(Date.parse(device.expires_at))||Date.parse(device.expires_at)<=Date.now())throw Error('INVALID_PAIR');
+  };
+  const complete=async(device:Device)=>{valid(device);const result=await begin(device);await storePrivate(dir,{origin,device});return result;};
+  const deviceFromPairing=(payload:any)=>({device_id:payload.device_id,device_token:payload.device_token,account_id:payload.account_id,client:payload.client,expires_at:payload.expires_at}) as Device;
+  let settled=false;
+  async function pairByCode(openUrl:boolean){
+    const session=await createDevicePairing(origin,{flow:'capture',client:options.client,device_name:hostname().slice(0,80)},transport);
+    printDevicePairing(session,log);
+    if(openUrl)await (options.open??openBrowser)(session.verification_uri_complete);
+    const payload=await awaitDevicePairing(origin,session,{transport,shouldStop:()=>settled});
+    return complete(deviceFromPairing(payload));
+  }
+  if((options.pairing??pairingMode())==='code'){
+    log('Pairing by code: finish in a browser on any signed-in device.');
+    return await pairByCode(true);
+  }
+  const nonce=randomBytes(24).toString('hex');let accepting=false;
+  let resolvePair!:(v:any)=>void,rejectPair!:(e:Error)=>void;
+  const paired=new Promise<CaptureConnection&{account_id:string}>((resolve,reject)=>{resolvePair=v=>{settled=true;resolve(v);};rejectPair=e=>{settled=true;reject(e);};});
   const bridge=createServer(async(req,res)=>{
     const address=bridge.address(),host=address&&typeof address!=='string'?'127.0.0.1:'+address.port:'';
     res.setHeader('Cache-Control','no-store');
@@ -44,8 +65,7 @@ export async function connectCapture(options:{origin:string;client:CaptureClient
     try{
       let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>4096)throw Error('INVALID_PAIR');}
       const device=JSON.parse(raw) as Device;
-      if(!/^[a-f0-9-]{36}$/.test(device.device_id)||!/^[A-Za-z0-9_-]{43}$/.test(device.device_token)||device.client!==options.client||typeof device.account_id!=='string'||device.account_id.length>256)throw Error('INVALID_PAIR');
-      const result=await begin(device);await storePrivate(dir,{origin,device});
+      const result=await complete(device);
       res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({paired:true,capture_id:result.capture_id,automatic_sales:result.automatic_sales===true}));resolvePair(result);
     }catch{accepting=false;res.writeHead(400,{'Content-Type':'application/json'});res.end('{"error":"CAPTURE_CONNECTION_FAILED"}');}
   });
@@ -54,11 +74,14 @@ export async function connectCapture(options:{origin:string;client:CaptureClient
   const value={version:2,callback:`http://127.0.0.1:${address.port}/pair/${nonce}`,client:options.client,device_name:hostname().slice(0,80)};
   const url=origin+'/#thot='+Buffer.from(JSON.stringify(value)).toString('base64url');
   const timeout=setTimeout(()=>rejectPair(Error('PAIRING_EXPIRED_RESTART_HELPER')),10*60_000);
+  // If no browser reaches the loopback callback within a short window, the
+  // same pairing continues by code on any other signed-in device.
+  const fallback=setTimeout(()=>void pairByCode(false).then(resolvePair,error=>{if((error as Error).message!=='PAIRING_SUPERSEDED'&&!settled)rejectPair(error as Error);}),options.fallbackMs??30_000);
   try{
     log('Opening THOT to connect '+(options.client==='codex'?'Codex':'Claude Code')+' on this computer…');
     if(!await (options.open??openBrowser)(url))log('Open this link in your browser to connect:\n'+url);
     return await paired;
-  }finally{clearTimeout(timeout);bridge.closeAllConnections();await new Promise<void>(resolve=>bridge.close(()=>resolve()));}
+  }finally{clearTimeout(timeout);clearTimeout(fallback);bridge.closeAllConnections();await new Promise<void>(resolve=>bridge.close(()=>resolve()));}
 }
 export async function disconnectCapture(root:string,origin:string,client:CaptureClient,transport:typeof fetch=fetch){
   const dir=connectionDirectory(root,origin,client),remembered=await loadPrivate(dir);

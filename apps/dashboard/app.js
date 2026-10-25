@@ -14,6 +14,7 @@ import { createContributorUI } from './contributor-ui.js';
 import { createClerkAuthUI } from './clerk-auth-ui.js';
 import { createAgentCaptureUI } from './agent-capture-ui.js';
 import { createRobinhoodSetupUI } from './robinhood-setup-ui.js';
+import { createDevicePairingUI } from './device-pairing-ui.js';
 import { copySetupCommand } from './setup-ui.js';
 const state = { token: null, actor: null, role: 'user', view: 'vault', traces: [], candidates: [], earnings: { entitlements: [], settlements: [], burn_allocations: [] }, mandates: [], contributorPortfolio: {items:[],robinhood:{status:'not_linked'}}, contributorLoaded: false, loaded: false, catalogue: null, catalogueError: false, workspaceError: false, generation: 0, inferenceCapabilities: {enabled:false}, inferenceRequests: [] };
 const main = document.querySelector('#main');
@@ -70,7 +71,7 @@ function writeViewRoute(view,method='pushState'){
 }
 function navigateView(view,{fromHistory=false}={}){
   if(signingOut||!allowedView(view))return false;
-  if(!state.actor){if(!fromHistory)writeViewRoute(view);return true;}
+  if(!state.actor){if(!fromHistory)writeViewRoute(view);showIdentityLogin(signedOutMessage);return true;}
   if(dialog.open)dialog.close();
   const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;
   state.view=view;purchasesAttempts=0;scrolledMarketFragment=null;
@@ -85,12 +86,14 @@ function navigateView(view,{fromHistory=false}={}){
   render();return true;
 }
 function acceptViewRoute(){
-  if(!state.actor||signingOut)return false;
+  if(signingOut)return false;
+  // Signed out, a history change still selects which sign-in state to show.
+  if(!state.actor){navigateView(routeView()??'vault',{fromHistory:true});return true;}
   const view=routeView();
   if(view)return navigateView(allowedView(view)?view:initialView(state.role),{fromHistory:true});
   // Capability fragments have their own handlers and must never be interpreted
   // as a workspace view or copied to another origin.
-  if(/^#(?:thot(?:-(?:capture|history|robinhood|import))?|trace)=/.test(window.location?.hash??''))return false;
+  if(/^#(?:thot(?:-(?:capture|history|import|pair|robinhood))?|trace)=/.test(window.location?.hash??''))return false;
   return navigateView(initialView(state.role),{fromHistory:true});
 }
 const marketFragments=new Set(['#thot-available','#thot-purchases','#thot-history','#thot-contribute']);
@@ -100,6 +103,17 @@ function scrollMarketFragment(){
   const target=document.querySelector(hash);if(target){if(target.tagName==='DETAILS')target.open=true;target.scrollIntoView({block:'start'});scrolledMarketFragment=hash;}
 }
 function acceptMarketFragment(){return marketFragment()?navigateView('market',{fromHistory:true}):false;}
+// Signed out, the workspace still answers the navigation the visitor asked for:
+// the buyer view keeps its own sign-in state, title and nav highlight, and
+// Back/Forward replay it consistently because the route itself selects it.
+let signedOutViewState='vault',signedOutMessage='';
+function signedOutView(){const routed=routeView();return routed==='market'||marketFragment()?'market':routed==='referrals'?'referrals':'vault';}
+function renderSignedOutView(view){
+  signedOutViewState=allowedView(view)&&['market','referrals'].includes(view)?view:'vault';
+  const buyer=signedOutViewState==='market';
+  document.title=({market:'Buy traces',referrals:'Referrals',vault:'My work'})[signedOutViewState]+' · thot market';
+  document.querySelectorAll('[data-view].nav-item').forEach(button=>{const active=button.dataset.view===(buyer?'market':'vault');button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
+}
 
 function restoredView(){
   const routed=routeView();if(routed&&allowedView(routed))return routed;
@@ -167,7 +181,7 @@ function scheduleEarningsRefresh() {
   earningsTimer=setTimeout(async()=>{
     earningsTimer=null;
     try { await refreshEarnings(); } finally { scheduleEarningsRefresh(); }
-  },15000);
+  },60000); // proceeds settle over hours; a minute keeps the view fresh without re-reading the chain constantly
 }
 async function refreshEarnings() {
   if (!earningsVisible() || earningsRefreshRunning || fullRefreshCount || dialog.open) return;
@@ -222,6 +236,7 @@ const openrouterUI=createOpenRouterUI({state,api,openDialog,dialog,refresh,escap
 const agentCaptureUI=createAgentCaptureUI({state,api,openDialog,dialog,refresh,toast,escape,getProvider:()=>authMode==='wallet_siwe'?walletAuth?.getProvider():window.ethereum});
 const historySyncUI=createHistorySyncUI({state,api,openDialog,dialog,escape,toast,refresh});
 const robinhoodSetupUI=createRobinhoodSetupUI({state,api,openDialog,dialog,refresh,toast,escape});
+const devicePairingUI=createDevicePairingUI({state,api,openDialog,dialog,escape,flows:{capture:agentCaptureUI,history:historySyncUI,robinhood:robinhoodSetupUI}});
 function money(value, currency = 'USD') {
   try {
     if (!/^-?\d+$/.test(String(value))) return 'Unavailable';
@@ -369,6 +384,7 @@ async function session(role) {
   agentCaptureUI.authLost();
   historySyncUI.authLost();
   robinhoodSetupUI.authLost();
+  devicePairingUI.authLost();
   contributorUI.reset();
   resetCatalogue();resetContributorRecords();state.traces=[];state.candidates=[];state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.generation++; state.loaded = false; state.token = null; state.actor = null; state.thot=null; state.thotSampling=null; state.money=null; state.canExplore=false;state.traceExplorer=null; state.role = role;state.environmentOverview=null;
   activePreview = null; if (dialog.open) dialog.close();document.querySelector('#dialog-content').innerHTML='';thotUI.clearPrivateReview?.(); loading();
@@ -491,7 +507,7 @@ async function refreshWorkspace({full=false}={}) {
   // A view change can also happen during a later role-specific read, after the
   // first scope check. Resolve the requested full view before marking it ready.
   if(thotWorkspace?.workspace_scope==='buyer'&&needsFullWorkspace())return refreshWorkspace({full:true});
-  state.loaded = true;state.workspaceError=false; document.querySelector('#notice').hidden = true; render(); libraryUI.ready(); agentCaptureUI.authReady(); robinhoodSetupUI.authReady(); historySyncUI.authReady();
+  state.loaded = true;state.workspaceError=false; document.querySelector('#notice').hidden = true; render(); libraryUI.ready(); agentCaptureUI.authReady(); robinhoodSetupUI.authReady(); historySyncUI.authReady(); devicePairingUI.authReady();
   }catch(error){if(generation===state.generation){state.workspaceError=true;renderCatalogue();}throw error;}
 }
 function heading(eyebrow, title, description, action = '') { return `<section class="page-heading"><div><p class="eyebrow">${escape(eyebrow)}</p><h1>${escape(title)}</h1><p>${escape(description)}</p></div>${action}</section>`; }
@@ -630,7 +646,15 @@ function restoreCatalogueReading(reading){
   const anchor=reading.anchor&&cards.find(card=>card.dataset.listingId===reading.anchor.id);
   if(anchor&&window.scrollBy){const delta=anchor.getBoundingClientRect().top-reading.anchor.top;if(Math.abs(delta)>1)window.scrollBy({top:delta,behavior:'instant'});}
 }
-function render() {
+// Re-rendering the same view (refresh, polling, loaded data) keeps the reader where they were.
+let lastRenderedView=null;
+function render(){
+  const y=window.scrollY,view=state.view,fragment=scrolledMarketFragment;renderView();
+  // The market restores its own reading position (captureCatalogueReading).
+  if(view===lastRenderedView&&view!=='market'&&fragment===scrolledMarketFragment&&typeof y==='number'&&window.scrollY!==y)window.scrollTo?.(0,y);
+  lastRenderedView=view;
+}
+function renderView() {
   if(renderCatalogue())return;
   if(renderContributorLoading())return;
   const catalogueReading=renderedCatalogue&&state.loaded&&state.view==='market'?captureCatalogueReading():null;renderedCatalogue=null;
@@ -719,12 +743,13 @@ function download(value, filename) {
 async function runAction(action, button) {
   const privateLibraryAction=state.role==='user'&&state.libraryLoaded&&[
     'qc-review','qc-retry',
-    'journey-add','journey-local','journey-connections','library-open','library-earlier','library-later','library-bookmark','library-next','library-previous','library-filter-bookmarks','library-connections','import-research','confirm-research',
+    'journey-add','journey-local','journey-connections','library-open','library-earlier','library-later','library-bookmark','library-next','library-previous','library-filter-bookmarks','library-connections','import-research','import-research-package','library-package-download','confirm-research',
     'history-sync-open','history-sync-manage','history-sync-cancel','copy-setup-command','start-agent-capture','setup-codex','setup-claude','setup-zai','capture-start-codex','capture-start-claude','capture-start-zai','cancel-agent-capture','openrouter-open','openrouter-usage'
   ].includes(action);
-  if(state.actor&&!state.loaded&&!privateLibraryAction&&!['retry-library','refresh','thot-refresh','thot-copy-seller-wallet','identity-sign-out','dismiss-notice','close-dialog'].includes(action))throw Error('Account details are still loading. Wait for them or use Refresh to retry.');
+  if(state.actor&&!state.loaded&&!privateLibraryAction&&!['retry-library','refresh','thot-refresh','thot-copy-seller-wallet','identity-sign-out','dismiss-notice','close-dialog','device-pairing-submit'].includes(action))throw Error('Account details are still loading. Wait for them or use Refresh to retry.');
   if(action==='retry-library'){state.contributorLoaded=false;return loadContributorRecords();}
   if(action==='thot-list-configure'&&state.thot?.workspace_scope==='buyer')await refresh({full:true});
+  if(await devicePairingUI.handle(action,button))return;
   if(await historySyncUI.handle(action,button))return;
   if(await journeyUI.handle(action,button))return;
   if(await analyticsUI.handle(action,button))return;
@@ -868,7 +893,7 @@ document.addEventListener('submit', event => {
     let bundle; try { bundle = JSON.parse(document.querySelector('#bundle-json').value); } catch { throw new Error('The source bundle is not valid JSON. Check the file or pasted text.'); }
     if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) throw new Error('The source bundle must be a JSON object.');
     const result = await api('/v1/traces/import', { method: 'POST', body: { bundle, category: document.querySelector('#bundle-category').value } });
-    dialog.close(); await refresh(); toast(result.duplicate ? 'This conversation already exists in your vault. No duplicate trace was created. No duplicate trace was created.' : 'Source bundle imported. Inspect the returned claims and rights assessment.');
+    dialog.close(); toast(result.duplicate ? 'This conversation already exists in your vault. No duplicate trace was created.' : 'Source bundle imported. Inspect the returned claims and rights assessment.'); await refresh();
   }, button);
 });
 dialog.addEventListener('close', () => {
@@ -892,6 +917,7 @@ function invalidatePrivateState(){
   agentCaptureUI.authLost();
   historySyncUI.authLost();
   robinhoodSetupUI.authLost();
+  devicePairingUI.authLost();
   const accountControl=document.querySelector('#clerk-user-button');
   if(accountControl){clerkAuth?.unmountUserButton(accountControl);accountControl.remove();}
   contributorUI.reset();resetContributorRecords();state.generation++;state.token=null;state.actor=null;state.canExplore=false;state.traceExplorer=null;state.loaded=false;state.traces=[];state.candidates=[];state.mandates=[];state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.inferenceRequests=[];
@@ -937,7 +963,8 @@ async function loadPrivyAuth() {
     }
     // Browsers retain pending and failed imports, including nested chunks.
     // A fresh path gives every relative import a new URL on explicit retry.
-    import(`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`).then(module=>{
+    const bundlePath=`./privy-auth/v1/${attemptNamespace}/privy-auth.bundle.js`; // a variable keeps the app bundler from inlining Privy
+    import(bundlePath).then(module=>{
       if(finished)return;finished=true;clean();resolve(module);
     },()=>fail(new Error('Sign-in could not download. Check your connection and try again.')));
   });
@@ -986,27 +1013,52 @@ async function openPrivyLogin(){
   }
   finally {privyLoginBusy=false;setPrivyLoginPhase('');}
 }
+// Start downloading the sign-in bundle when the pointer reaches "Sign in" (not for every visitor),
+// so the modal opens sooner. A failed prefetch moves the real attempt to a fresh path, because
+// browsers remember failed imports.
+let privyPrefetched=false;
+function prefetchPrivy(){
+  if(privyPrefetched||privyAuth)return;privyPrefetched=true;
+  const namespace=privyImportRetry,path=`./privy-auth/v1/${namespace}/privy-auth.bundle.js`;
+  import(path).catch(()=>{if(privyImportRetry===namespace)privyImportRetry=namespace+1;});
+}
+// Signed-out buyers can browse what is for sale; buying still needs a wallet session.
+async function showPublicCatalogue(){
+  const response=await fetch('/v1/public/listings',{headers:{Accept:'application/json'},cache:'no-store'}).catch(()=>null);
+  const listings=response?.ok?(await response.json()).listings??[]:[];
+  if(state.actor||signedOutViewState!=='market'||main.querySelector('#public-catalogue'))return;
+  const price=atoms=>{const n=BigInt(atoms??0),base=10n**18n,frac=String(n%base).padStart(18,'0').slice(0,2).replace(/0+$/,'');return (n/base).toLocaleString()+(frac?'.'+frac:'')+' THOT';};
+  const cards=listings.map(l=>`<li class="public-listing"><a href="${escape(l.public_path)}"><strong>${escape(l.title||'Untitled trace')}</strong><span>${escape(price(l.price_atoms))}</span><small>${escape([l.workflow,l.turn_count?l.turn_count+' turns':'',l.capture_model?.claimed_model].filter(Boolean).join(' · '))}</small></a></li>`).join('');
+  main.insertAdjacentHTML('beforeend',`<section id="public-catalogue" class="public-catalogue" aria-labelledby="public-catalogue-title"><h2 id="public-catalogue-title">For sale now</h2>${cards?`<ul>${cards}</ul>`:'<p class="journey-fine">No traces are listed yet.</p>'}</section>`);
+}
 function showIdentityLogin(message='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'){
+  signedOutMessage=message;
+  // The login screen is interactive: signed-out navigation (Buy traces, My
+  // work, Back/Forward) must keep working from here.
+  signingOut=false;
   const operationsLink=document.querySelector('#operations-console-link');if(operationsLink)operationsLink.hidden=true;
   const explorerNav=document.querySelector('#trace-explorer-nav');if(explorerNav)explorerNav.hidden=true;
   const treasuryNav=document.querySelector('[data-view=operator].nav-item');if(treasuryNav)treasuryNav.hidden=true;
   invalidatePrivateState();document.querySelector('#role').disabled=true;
   const menu=document.querySelector('.journey-menu');if(menu){menu.open=false;menu.hidden=true;}
   document.querySelector('.local-tools').hidden=true;
+  renderSignedOutView(signedOutView());
+  const variant=signedOutViewState==='market'?'buyer':signedOutViewState==='referrals'?'referrals':'contributor';
   if(authMode==='wallet_siwe'){
     if(privyConfig){
       const feedback=['Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.','Connect your EVM wallet to continue.','Connect your wallet to continue.'].includes(message)?'':message;
       const status=privyLoginPhase||feedback;
-      main.innerHTML=welcomeHTML(`<section aria-label="Sign in"><button class="button" data-privy-login${privyLoginBusy?' disabled aria-busy="true"':''}>${privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in'}</button><p id="privy-login-status" role="status" aria-live="polite"${status?'':' hidden'}>${escape(status)}</p><div id="privy-wallet-choices"></div></section>`);
+      main.innerHTML=welcomeHTML(`<section aria-label="${variant==='buyer'?'Sign in to browse traces':variant==='referrals'?'Sign in to view your referral dashboard':'Sign in'}"><button class="button" data-privy-login${privyLoginBusy?' disabled aria-busy="true"':''}>${privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in'}</button><p class="journey-fine" id="privy-signin-stages">Verify your email, then sign a free message to unlock your workspace.</p><p id="privy-login-status" role="status" aria-live="polite"${status?'':' hidden'}>${escape(status)}</p><div id="privy-wallet-choices"></div></section>`,{variant});
     }else{
-      main.innerHTML=welcomeHTML(heading('YOUR PRIVATE WORKSPACE','Sign in with your wallet.',message==='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'?'Connect an EVM wallet and sign a one-time login message.':message)+`<section class="panel audit-card"><h2>Your wallet is your account.</h2><p>Sign-in does not approve a token transfer or authorize a trace sale.</p><div class="actions"><button class="button secondary" data-wallet-login="metamask">MetaMask</button><button class="button secondary" data-wallet-login="phantom">Phantom · EVM</button><button class="button secondary" data-wallet-login="injected">Other EVM wallet</button></div></section>`);
+      main.innerHTML=welcomeHTML(heading(variant==='buyer'?'BUY TRACES':variant==='referrals'?'REFERRALS':'YOUR PRIVATE WORKSPACE',variant==='buyer'?'Sign in with your wallet to browse traces.':variant==='referrals'?'Sign in to view your referral dashboard.':'Sign in with your wallet.',message==='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'?'Connect an EVM wallet and sign a one-time login message.':message)+`<section class="panel audit-card"><h2>Your wallet is your account.</h2><p>Sign-in does not approve a token transfer or authorize a trace sale.</p><div class="actions"><button class="button secondary" data-wallet-login="metamask">MetaMask</button><button class="button secondary" data-wallet-login="phantom">Phantom · EVM</button><button class="button secondary" data-wallet-login="injected">Other EVM wallet</button></div></section>`,{variant});
     }
-    const privyButton=main.querySelector('[data-privy-login]');if(privyButton)privyButton.addEventListener('click',()=>void safely(openPrivyLogin));
+    if(variant==='buyer')void showPublicCatalogue();
+    const privyButton=main.querySelector('[data-privy-login]');if(privyButton){privyButton.addEventListener('click',()=>void safely(openPrivyLogin));for(const intent of ['pointerenter','touchstart'])privyButton.addEventListener(intent,prefetchPrivy,{once:true,passive:true});}
     privyAuth?.mount(document.querySelector('#privy-wallet-choices'));
     for(const button of main.querySelectorAll('[data-wallet-login]'))button.addEventListener('click',()=>{walletLoginAttempt++;signingOut=false;void safely(()=>walletAuth?.signIn(button.dataset.walletLogin),button);});return;
   }
   if(authMode==='clerk'){
-    main.innerHTML=heading('YOUR PRIVATE WORKSPACE','Continue with email.',message)+`<section class="panel audit-card"><div id="clerk-sign-in"></div></section>`;
+    main.innerHTML=heading(variant==='buyer'?'BUY TRACES':variant==='referrals'?'REFERRALS':'YOUR PRIVATE WORKSPACE',variant==='buyer'?'Sign in to browse traces.':variant==='referrals'?'Sign in to view your referral dashboard.':'Continue with email.',message)+`<section class="panel audit-card"><p class="legal-note">Verify your email, then sign a free message to unlock your workspace.</p><div id="clerk-sign-in"></div></section>`;
     clerkAuth?.mountSignIn(document.querySelector('#clerk-sign-in'));
     return;
   }
@@ -1049,6 +1101,7 @@ async function startAuthentication(){
   const environment=document.querySelector('.environment');
   const walletNetwork={31337:'local Anvil',46630:'testnet',4663:'mainnet'}[capability.wallet?.chain_id]??'unknown network';
   if(environment)environment.innerHTML=`<span class="status-dot"></span>${authMode==='development'?'Local demo workspace':authMode==='wallet_siwe'?`Wallet workspace · ${walletNetwork}`:'Invited reviewer workspace'}`;
+  if(environment&&capability.wallet?.chain_id===4663)environment.hidden=true; // the live market needs no environment label
   if(authMode!=='development'){
     document.querySelector('#role').hidden=true;
     const roleLabel=document.querySelector('label[for="role"]');if(roleLabel)roleLabel.hidden=true;
@@ -1073,7 +1126,7 @@ async function startAuthentication(){
 void safely(startAuthentication);
 
 window.addEventListener('popstate',()=>acceptViewRoute());
-window.addEventListener('hashchange',()=>{acceptViewRoute();void libraryUI.acceptFragment();agentCaptureUI.acceptFragment();robinhoodSetupUI.acceptFragment();historySyncUI.acceptFragment?.();});
+window.addEventListener('hashchange',()=>{acceptViewRoute();void libraryUI.acceptFragment();agentCaptureUI.acceptFragment();robinhoodSetupUI.acceptFragment();historySyncUI.acceptFragment?.();devicePairingUI.acceptFragment();});
 document.addEventListener('visibilitychange',()=>{scheduleEarningsRefresh();schedulePurchasesRefresh();});
 window.addEventListener('pagehide',()=>{stopEarningsRefresh();stopPurchasesRefresh();});
 

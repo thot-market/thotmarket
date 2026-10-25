@@ -75,6 +75,11 @@ test('both image profiles retain runnable QC with upstream attribution and exclu
       const bytes = await readFile(new URL('../packages/qc/' + path, import.meta.url));
       original.set(path, bytes); await f.put('packages/qc/' + path, bytes);
     }
+    // Populate the real pure adapter dependencies, without application/database drivers.
+    const dependencies=['packages/content/src/research.ts','packages/storage/src/errors.ts',
+      'packages/scrubber/src/index.ts','packages/provenance/src/index.ts','packages/provenance/src/upstream.ts','packages/provenance/src/dcap.ts',
+      ...['index.ts','canonical.ts','crypto.ts','money.ts','uuid.ts','types.ts','validation.ts'].map(name=>'packages/protocol/src/'+name)];
+    for(const path of dependencies)await f.put(path,await readFile(new URL('../'+path,import.meta.url)));
     await f.put('packages/market/src/trace-qc.ts', 'export {runTraceQc} from "../../qc/index.ts";\n');
     for (const path of ['README.md', 'fixture.json', 'fixtures/session.json', 'test-fixtures/session.ts',
       'tests/check.test.ts', 'src/unreviewed.ts', 'vendor/unreviewed.ts', 'vendor/extra.LICENSE', '.env']) {
@@ -95,6 +100,8 @@ test('both image profiles retain runnable QC with upstream attribution and exclu
       const {runSemanticQc} = await import(pathToFileURL(join(result.output, 'source/packages/qc/semantic.ts')).href);
       const trace = {turns: [{role: 'user', content: 'Explain this synthetic queue.'}, {role: 'assistant', content: 'The synthetic queue drains in FIFO order.'}]};
       assert.equal(runTraceQc(trace, {scope: 'private'}).status, 'pass');
+      const research=JSON.parse(await readFile(new URL('./fixtures/research-package.json',import.meta.url),'utf8'));
+      const researchQc=runTraceQc(research,{scope:'private'});assert.equal(researchQc.status,'pass');assert.equal(researchQc.content_kind,'research');assert.equal(researchQc.coverage.evaluated_files,3);
       assert.equal((await runSemanticQc(trace, undefined, {scope: 'private'})).status, 'not_run');
     }
     await rm(join(f.source, 'packages/qc/vendor/openjudge.LICENSE'));

@@ -112,7 +112,9 @@ failure with the underlying error left unmasked:
    The default profile is `private-anvil`; a tree that does not ship the four
    `scripts/private-anvil-*.mjs` sources records that as a finding and builds the
    reviewed `public` runtime profile instead. The pinned DCAP verifier must be at
-   `work/tools/dcap-qvl-v0.6.1/dcap-qvl-linux-x86_64-musl`.
+   `work/tools/dcap-qvl-v<version>/<asset>` as named by
+   `packages/capture/src/verifier-pin.json` (currently
+   `work/tools/dcap-qvl-v0.6.1/dcap-qvl-linux-x86_64-musl`).
 4. `cvm image-push agent-rc-<short-sha> <image>` returns the published `{ref, digest}`.
 5. A compose rendered for that exact reference is passed to
    `cvm create agent-rc-<short-sha> <compose> --private-registry --ttl 2`.
@@ -178,36 +180,7 @@ install/typecheck/test in the exported tree, image build with its snapshot
 manifest, `cvm image-push`, `cvm create --private-registry`, the health check on
 the CVM's public URL, the recorded purchase journey and `cvm delete`. Failures
 surface as the underlying error rather than being worked around, so a blocked
-run reports the blocker instead of an unverified health claim. See `rc-dry-run/`
-for the latest record.
-
-## Task wrap-up reports
-
-`node scripts/build-task-report.mjs <NNNN> [--evidence DIR ...]` ends every
-steering task with one self-contained page, `reports/<NNNN>/index.html`: the
-goal and success conditions quoted from `steering/<NNNN>-*.md`, the outcome, the
-PR link, the commits, the findings, and the evidence — screenshots inlined as
-base64, journey videos as `<video>` elements served from `reports/<NNNN>/media/`
-(deduplicated by content, re-encoded for size over 2 MiB, poster frames beside
-them). The page uses inline CSS only, no script and no external request, and is
-readable without JavaScript.
-
-The outcome and findings are authored next to the page they feed —
-`reports/<NNNN>/outcome.md` and `reports/<NNNN>/findings.md` are read by
-default, `--outcome FILE` and `--findings FILE` point elsewhere — so a rebuild
-needs no flags and the plain text stays reviewable in the diff. The PR link and
-commits come from git (the `task/NNNN-*` branch and its merge on `main`);
-`--pr N` states the number for a branch whose PR is not merged yet. Committed
-media is capped at 12 MiB per report and 12 MiB per dry-run evidence directory,
-keeping a task under the 25 MiB rule across both; over that, the builder fails
-and the dry run records a finding.
-
-Both builders keep their output inside the branding byte-scan: the forbidden
-legacy identity is elided in quoted task text (task files predate the rule and
-name the predecessor harness's browser variable), PNGs whose bytes or base64
-form collide with the sequence by chance are losslessly re-packed (identical
-pixels, hashes re-bound and noted), colliding videos are re-encoded, and every
-page, note and record is scanned before it reaches disk.
+run reports the blocker instead of an unverified health claim. 
 
 ## Deliberate exclusions
 

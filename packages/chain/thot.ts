@@ -134,6 +134,7 @@ export class ThotChain {
  provider:JsonRpcProvider; market:Contract; locks:Contract; token:Contract; reserve:Contract; config:ThotChainConfig;
  private guardInFlight?:Promise<void>;
  private bindingsVerified=false;
+ private guardPassedAt=0;
  private disputeWindowSeconds?:number;
  private sellerResponseWindowSeconds?:number;
  private disputeVoteWindowSeconds?:number;
@@ -164,7 +165,7 @@ export class ThotChain {
   this.config=Object.freeze({...config,token:address(config.token),market:address(config.market),locks:address(config.locks),reserve:address(config.reserve),codeHashes:Object.freeze({...config.codeHashes})});
   const request=new FetchRequest(config.rpcUrl);
   if(publicChain){request.timeout=20_000;request.setThrottleParams({maxAttempts:3,slotInterval:1000});}
-  this.provider=new (publicChain?ReadRetryProvider:JsonRpcProvider)(request,undefined,{cacheTimeout:-1,...(publicChain?{batchMaxCount:1}:{})});
+  this.provider=new (publicChain?ReadRetryProvider:JsonRpcProvider)(request,undefined,{cacheTimeout:-1,...(publicChain?{batchMaxCount:50}:{})});
   if(publicChain)this.provider.pollingInterval=5000;
   this.operatorSigner=runtime.operatorSigner;
   this.market=new Contract(this.config.market,THOT_MARKET_ABI,this.provider);
@@ -175,11 +176,12 @@ export class ThotChain {
   this.reserve=new Contract(this.config.reserve,config.reserveCampaigns?THOT_CAMPAIGN_RESERVE_ABI:THOT_RESERVE_ABI,this.provider);
  }
  async guard(){
-  // Coalesce only overlapping checks. Never reuse a successful check by timestamp:
-  // local Anvil resets and setCode can change state without increasing block height.
+  // Public deployments cannot reset or change pinned code, so a passed check is reused for a minute.
+  // Local Anvil can (resets, setCode) without a new block, so it rechecks every time.
+  if(this.publicChain()&&Date.now()-this.guardPassedAt<60_000)return;
   if(this.guardInFlight)return this.guardInFlight;
   const pending=this.checkDeployment();this.guardInFlight=pending;
-  try{await pending;}finally{if(this.guardInFlight===pending)this.guardInFlight=undefined;}
+  try{await pending;this.guardPassedAt=Date.now();}finally{if(this.guardInFlight===pending)this.guardInFlight=undefined;}
  }
  private async checkDeployment(){
   // Explicit RPC request avoids relying on a cached provider network object.
@@ -326,7 +328,7 @@ export class ThotChain {
   // Pause and account reads are independent at this confirmed height. Finish
   // this bounded (at most eight RPCs) phase before the existing order batches.
   const [account,paused]=await Promise.all([owner?this.accountAt(owner,block):null,this.market.paused({blockTag:block.number})]);
-  const offers=await boundedMap(offerIds,4,id=>this.offerAt(id,block,owner));
+  const offers=await boundedMap(offerIds,16,id=>this.offerAt(id,block,owner));
   const market_paused=Boolean(paused);
   if(!sharedBlock)await this.assertSnapshot(block);return {account,offers,market_paused,block};
  }

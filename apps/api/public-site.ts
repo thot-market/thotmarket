@@ -13,6 +13,7 @@ const assets: Record<string, [string, string]> = {
   '/referrals.css': ['referrals.css', 'text/css; charset=utf-8'],
   '/referrals.js': ['referrals.js', 'text/javascript; charset=utf-8'],
   '/site.css': ['site.css', 'text/css; charset=utf-8'],
+  '/listing.css': ['listing.css', 'text/css; charset=utf-8'],
   '/site.js': ['site.js', 'text/javascript; charset=utf-8'],
   '/reading.css': ['reading.css', 'text/css; charset=utf-8'],
   '/assets/thot-logo.png': ['assets/thot-logo.png', 'image/png'],

@@ -87,7 +87,7 @@ test('critical THOT reads and delivery sends fail closed after local runtime/cha
       const original = chain.provider.send.bind(chain.provider);
       let codeReads = 0, active = 0, maxActive = 0, advanced = false;
       let activeAccountReads = 0, maxAccountReads = 0, maxActiveOrders = 0;
-      const orderFanoutLimit = 4;
+      const orderFanoutLimit = 16;
       const orderReadMethods = ['offers', 'quoteDigest', 'paymentFor', 'disputeCases', 'disputeVotes', 'disputeDecisionHashes', 'tariffAtFunding'];
       const orderSelectors = new Map(orderReadMethods.map(name => [chain.market.interface.getFunction(name).selector, name]));
       const activeOrderReads = new Map(), observedOrderReads = new Map();
@@ -130,9 +130,9 @@ test('critical THOT reads and delivery sends fail closed after local runtime/cha
       try {
         const view = await chain.readWorkspace(owner, ids);
         assert.equal(advanced, true); assert.equal(codeReads, 4);
-        assert(maxActiveOrders >= 2 && maxActiveOrders <= orderFanoutLimit, 'a large workspace must read orders concurrently without exceeding four active orders');
+        assert(maxActiveOrders >= 2 && maxActiveOrders <= orderFanoutLimit, 'a large workspace must read orders concurrently without exceeding sixteen active orders');
         assert(maxAccountReads > 0 && maxAccountReads <= 8, 'the account and pause phase has at most eight independent RPC reads');
-        assert(maxActive <= orderFanoutLimit * orderReadMethods.length, 'RPC fanout stays bounded by four orders and their seven required fields');
+        assert(maxActive <= orderFanoutLimit * orderReadMethods.length, 'RPC fanout stays bounded by sixteen orders and their seven required fields');
         assert.equal(active, 0); assert.equal(activeAccountReads, 0); assert.equal(activeOrderReads.size, 0);
         assert.deepEqual([...observedOrderReads.keys()].sort(), [...ids].sort());
         for (const [orderId, methods] of observedOrderReads) assert.deepEqual(methods.sort(), [...orderReadMethods].sort(), `${orderId} reads each required order field exactly once`);

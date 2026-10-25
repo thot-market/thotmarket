@@ -171,7 +171,11 @@ async function main() {
         profile = 'public';
       }
     }
-    const verifier = join(REPO, 'work/tools/dcap-qvl-v0.6.1/dcap-qvl-linux-x86_64-musl');
+    // Same checked-in pin the helper and the cvm-image workflow use.
+    const verifierPin = JSON.parse(await readFile(join(REPO, 'packages/capture/src/verifier-pin.json'), 'utf8'));
+    const pinnedEntry = verifierPin.platforms?.['linux-x86_64-musl'];
+    fail(verifierPin.format === 'thot.dcap-qvl-pin/1' && /^[a-f0-9]{64}$/.test(pinnedEntry?.sha256 ?? ''), 'INVALID_VERIFIER_PIN');
+    const verifier = join(REPO, 'work/tools/dcap-qvl-v' + verifierPin.version + '/' + pinnedEntry.asset);
     fail(await exists(verifier), 'PINNED_DCAP_VERIFIER_MISSING:' + verifier);
     const image = 'thot-rc:' + short, snapshot = join(workDir, 'image-snapshot'), buildLog = join(workDir, 'image-build.log');
     record.image = {profile, local_tag: image};

@@ -10,26 +10,21 @@ ships.
 
 ## The loop
 
-1. A steward writes a task in `steering/NNNN-slug.md` from `steering/TEMPLATE.md`: the goal, checkable
-   success conditions, what is out of scope, and what the agent is authorized to do. The task lands on
-   `main` through its own `steering/NNNN-*` PR.
-2. An agent is dispatched on the task by name. It works on `task/NNNN-*`, runs the tests the task
-   names, and opens a PR against `main`.
-3. When the success conditions hold, the agent merges its own PR. The PR is the record, not a gate.
-   Before merging it commits a wrap-up page, `reports/NNNN/index.html` (built by
-   `scripts/build-task-report.mjs`): the ask, the outcome, the evidence, the commits.
-4. Anything left over becomes a new task file. Closed tasks are not edited.
+Small changes, straight to `main`.
 
-`steering/README.md` has the exact rules the agent follows. A steward reviewing the outcome should be
-able to read the report page and the PR without running anything.
+1. Describe the work where it happens: a GitHub issue or the PR description says the goal, how to
+   tell it is done, and anything beyond the defaults below that the work is authorized to do.
+   `steering/` holds longer briefs when one is useful; it is optional.
+2. Branch from `main`, keep the PR small, and merge it yourself when CI is green. UI changes attach
+   before/after screenshots to the PR. The PR is the record; there is no separate report page.
+3. Leftovers become a new issue or PR.
 
 ## What an agent may do
 
-By default, and never more than the task's Authorization section says: change code in this
-repository, run tests, launch disposable CVMs named `agent-*` through the `cvm` client, push its
-task branch, and open and merge its PR. Deploying to private dev or staging needs a task that
-authorizes it. Production is never deployed from the development environment, and nobody there
-publishes releases or modifies other branches.
+By default: change code in this repository, run tests, launch disposable `agent-*` CVMs through the
+`cvm` client, push branches, open and merge PRs, and deploy a merged `main` to private dev and
+staging. Production is never deployed from the development environment, and nobody there publishes
+releases.
 
 The agent's environment is an isolated VM whose internet traffic leaves through a VPN, with a broker
 for CVMs. It has its own GitHub account scoped to this repository, its own model key, a test wallet,
@@ -46,12 +41,12 @@ People can work the same way locally. The rules below apply either way.
 | Build and unit tests | Types, API, storage, capture, privacy, log hygiene | `pnpm build`, `pnpm test` |
 | Local chain | Contracts, purchase, delivery and payout on a disposable Anvil chain | `pnpm test:contracts`, `pnpm test:browser` |
 | Evidence and packaging | DCAP verification, provenance, image snapshot | `pnpm test:evidence`, `pnpm test:packaging` |
-| Disposable CVM | The candidate image actually boots and serves in a TEE, and answers on its logs-only port | `pnpm rc:dry-run <commit>` (see `TESTING.md`) |
+| Disposable CVM | The candidate image boots in a TEE (infrastructure changes only) | `pnpm rc:dry-run <commit>` (see `TESTING.md`) |
 | Private dev, staging | Persistent state, real registries, on-chain approval (staging) | `cvm deploy dev`, then `cvm deploy staging`, from the development VM |
 | Production | The live market | Maintainers only, from a tagged release |
 
-`TESTING.md` lists the exact suites and their prerequisites. A task should name the steps it needs
-and put their output in its report.
+`TESTING.md` lists the exact suites and their prerequisites. CI runs the suites on every PR; run
+locally what your change touches.
 
 Staging and production are governed on chain: every Compose change is approved by a Safe before the
 provider applies it. For staging, the development environment's broker holds an approval key, so
@@ -109,11 +104,19 @@ balances and the site after rollout; never reset the chain to solve confirmation
 
 ## Releases
 
-A release candidate is a commit on `main`. A maintainer exports it with the file allowlist, reviews
-the export (identity, redaction, the diff since the last release), tags `vX.Y.Z-rc.N`, builds the
-image once, and runs it on a disposable CVM (`rc:dry-run`). The same image digest then goes to
-staging and, after acceptance there, to production. Each step is recorded with the commit, the image
-digest and the Compose hash it produced.
+One image digest moves from dev to staging to production.
+
+1. `node scripts/release.mjs` (a maintainer with `gh` signed in): exports `origin/main` with the
+   branding and redaction checks, publishes it to the public repository as the next
+   `vX.Y.Z-rc.N`, waits for the public checks, builds the image from that tag (the image build
+   refuses a commit whose checks have not passed), creates the pre-release and prints
+   `image@sha256:…`.
+2. From the development VM: `node scripts/deploy-hosted.mjs dev IMAGE@DIGEST`, load the site, then
+   the same for `staging` (its Safe approval is automatic).
+3. Production: a maintainer promotes the same digest with the Safe-governed image update (inspect,
+   prepare, approve, commit, verify) and checks health and the app.
+
+`pnpm rc:dry-run` is for infrastructure changes (Compose, base image, boot path), not every release.
 
 ## Reading logs from a running CVM
 

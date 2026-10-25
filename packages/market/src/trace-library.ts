@@ -35,9 +35,8 @@ export class TraceLibrary {
   constructor(service:ThotService){this.service=service;}
   canExplore(actor:Actor){return actor.role==='operator_security'||(actor.role==='user'&&this.service.config.traceExplorerViewers?.includes(actor.id)===true);}
   private async meta(t:Document){
-    const owner=t.owner_id,privateMeta=t.private_metadata_ref?await this.service.privacy.open(owner,t.private_metadata_ref):{};
-    const personal=t.personal_ref?await this.service.privacy.open(owner,t.personal_ref):{};
-    const context=t.context_ref?await this.service.privacy.open(owner,t.context_ref):{};
+    const owner=t.owner_id,open=(ref:Document|undefined)=>ref?this.service.privacy.open(owner,ref):{};
+    const [privateMeta,personal,context]=await Promise.all([open(t.private_metadata_ref),open(t.personal_ref),open(t.context_ref)]) as Document[];
     return {title:personal.title??privateMeta.title??t.import_preview?.title??t.capture_preview?.title??'Saved conversation',project:context.project??'',bookmarked:personal.bookmarked===true,note:personal.note??'',answer_preview:privateMeta.answer_preview??''};
   }
   private captureState(trace:Document,capture?:Document){
@@ -48,7 +47,7 @@ export class TraceLibrary {
   }
   private async card(trace:Document,capture?:Document){
     const meta=await this.meta(trace),preview=trace.capture_preview??trace.import_preview??{};
-    return {trace_id:trace.trace_id,...meta,source:sourceName(trace),origin:trace.agent_capture_id?'capture':trace.openrouter_request_id?'relay':'upload',capture_id:trace.agent_capture_id??null,
+    return {trace_id:trace.trace_id,content_kind:trace.content_kind??'trace',file_count:preview.file_count??null,...meta,source:sourceName(trace),origin:trace.agent_capture_id?'capture':trace.openrouter_request_id?'relay':'upload',capture_id:trace.agent_capture_id??null,
       state:this.captureState(trace,capture),projection:trace.projection?.status??'READY',display_issues:trace.projection?.issues?.length??0,
       turn_count:preview.turn_count??0,exchanges:trace.capture_summary?.exchanges??0,
       created_at:trace.created_at,updated_at:trace.updated_at??trace.created_at,session_at:preview.source_date??(trace.agent_capture_id?trace.observed_at:null),
@@ -57,7 +56,7 @@ export class TraceLibrary {
       quality_check:qcCardSummary([trace],this.service.now()),sale_eligibility:traceSaleEligibility(trace,this.service.now()),evidence:trace.provenance_status,model_history:trace.model_history??[],capture_model:trace.capture_model??null,private:true,segments:1,native_conversations:trace.native_session_keys?.length??0};
   }
   private async groupCard(group:Document[],captures:Map<string,Document>):Promise<Document>{
-    const cards:Document[]=[];for(const trace of group)cards.push(await this.card(trace,captures.get(trace.agent_capture_id)));
+    const cards=await Promise.all(group.map(trace=>this.card(trace,captures.get(trace.agent_capture_id))));
     const first=cards[0],last=cards.at(-1)!;
     const projection=groupProjection(cards.map(c=>c.projection));
     return {...first,quality_check:qcCardSummary(group,this.service.now()),...(group.length>1?{sale_eligibility:{status:'REVIEW_REQUIRED',reason_code:'GROUPED_RELEASE_REVIEW_REQUIRED',can_prepare_sale:false,can_list:false}}:{}),answer_preview:last.answer_preview,segments:group.length,updated_at:cards.map(c=>c.updated_at).sort().at(-1),
@@ -77,29 +76,32 @@ export class TraceLibrary {
     const q=String(query.q??'').trim().toLowerCase();ensure(q.length<=160,'LIBRARY_QUERY_TOO_LONG');
     const limit=Number(query.limit??30);ensure(Number.isSafeInteger(limit)&&limit>=1&&limit<=100,'INVALID_LIBRARY_LIMIT');
     let cursor:Document|undefined;if(query.cursor){try{cursor=JSON.parse(Buffer.from(String(query.cursor),'base64url').toString());}catch{ensure(false,'INVALID_LIBRARY_CURSOR');}ensure(typeof cursor?.created_at==='string'&&typeof cursor?.trace_id==='string','INVALID_LIBRARY_CURSOR');}
-    return this.service.db.transaction(async tx=>{
-      const now=this.service.now(),traces=(await tx.list('traces',actor.id)).filter(t=>!t.deleted&&t.retention_expires_at>now);
-      const captures=new Map((await tx.list('agent_captures',actor.id)).map(c=>[c.capture_id,c]));
-      const cards:Document[]=[];
-      for(const group of conversationGroups(traces))cards.push(await this.groupCard(group,captures));
-      cards.sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.trace_id.localeCompare(a.trace_id));
-      const projects=[...new Set(cards.map(c=>c.project).filter(Boolean))].sort();
-      const filtered:Document[]=[];
-      for(const card of cards){
-        if(query.source&&query.source!=='all'&&!card.source.toLowerCase().includes(String(query.source).toLowerCase().replace('zai','z.ai')))continue;
-        if(query.origin&&query.origin!=='all'&&query.origin!==card.origin)continue;
-        if(query.state&&query.state!=='all'&&query.state!==card.state)continue;
-        if(query.project&&card.project!==query.project)continue;
-        if(query.bookmarked==='true'&&!card.bookmarked)continue;
-        if(q&&!`${card.title}\n${card.project}\n${card.note}\n${card.source}`.toLowerCase().includes(q))continue;
-        filtered.push(card);
-      }
-      const page=filtered.filter(c=>!cursor||c.created_at<cursor.created_at||(c.created_at===cursor.created_at&&c.trace_id<cursor.trace_id));
-      const items=page.slice(0,limit),last=items.at(-1);
-      const attempts=[...captures.values()].filter(c=>!c.result?.trace_id&&c.expires_at>now).map(c=>({capture_id:c.capture_id,client:c.client,created_at:c.created_at,parts:Object.keys(c.parts??{}).length,status:c.last_error_code?'NEEDS_ATTENTION':'CONNECTING',error_code:c.last_error_code??null}));
-      return {items,total_matches:filtered.length,raw_trace_count:traces.length,next_cursor:page.length>limit&&last?Buffer.from(JSON.stringify({created_at:last.created_at,trace_id:last.trace_id})).toString('base64url'):null,
-        summary:{saved:cards.length,added_week:cards.filter(c=>recent(c.created_at,now,7*86400)).length,recording:cards.filter(c=>c.state==='RECORDING').length,bookmarked:cards.filter(c=>c.bookmarked).length,readable:cards.filter(c=>c.projection==='READY').length,display_issues:cards.filter(c=>['PARTIAL','UNREADABLE','ERROR'].includes(c.projection)).length},projects,attempts,refreshed_at:now,search_scope:'titles, projects, notes and source'};
-    });
+    const now=this.service.now();
+    const [traces,captures]=await this.service.db.transaction(async tx=>[
+      (await tx.list('traces',actor.id)).filter(t=>!t.deleted&&t.retention_expires_at>now),
+      new Map((await tx.list('agent_captures',actor.id)).map(c=>[c.capture_id,c])),
+    ] as const);
+    // Each card opens encrypted metadata, a network round trip on hosted storage: read them
+    // outside the transaction (which holds the service lock) and 16 groups at a time.
+    const groups=conversationGroups(traces),cards:Document[]=[];
+    for(let i=0;i<groups.length;i+=16)cards.push(...await Promise.all(groups.slice(i,i+16).map(group=>this.groupCard(group,captures))));
+    cards.sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.trace_id.localeCompare(a.trace_id));
+    const projects=[...new Set(cards.map(c=>c.project).filter(Boolean))].sort();
+    const filtered:Document[]=[];
+    for(const card of cards){
+      if(query.source&&query.source!=='all'&&!card.source.toLowerCase().includes(String(query.source).toLowerCase().replace('zai','z.ai')))continue;
+      if(query.origin&&query.origin!=='all'&&query.origin!==card.origin)continue;
+      if(query.state&&query.state!=='all'&&query.state!==card.state)continue;
+      if(query.project&&card.project!==query.project)continue;
+      if(query.bookmarked==='true'&&!card.bookmarked)continue;
+      if(q&&!`${card.title}\n${card.project}\n${card.note}\n${card.source}`.toLowerCase().includes(q))continue;
+      filtered.push(card);
+    }
+    const page=filtered.filter(c=>!cursor||c.created_at<cursor.created_at||(c.created_at===cursor.created_at&&c.trace_id<cursor.trace_id));
+    const items=page.slice(0,limit),last=items.at(-1);
+    const attempts=[...captures.values()].filter(c=>!c.result?.trace_id&&c.expires_at>now).map(c=>({capture_id:c.capture_id,client:c.client,created_at:c.created_at,parts:Object.keys(c.parts??{}).length,status:c.last_error_code?'NEEDS_ATTENTION':'CONNECTING',error_code:c.last_error_code??null}));
+    return {items,total_matches:filtered.length,raw_trace_count:traces.length,next_cursor:page.length>limit&&last?Buffer.from(JSON.stringify({created_at:last.created_at,trace_id:last.trace_id})).toString('base64url'):null,
+      summary:{saved:cards.length,added_week:cards.filter(c=>recent(c.created_at,now,7*86400)).length,recording:cards.filter(c=>c.state==='RECORDING').length,bookmarked:cards.filter(c=>c.bookmarked).length,readable:cards.filter(c=>c.projection==='READY').length,display_issues:cards.filter(c=>['PARTIAL','UNREADABLE','ERROR'].includes(c.projection)).length},projects,attempts,refreshed_at:now,search_scope:'titles, projects, notes and source'};
   }
   async item(actor:Actor,id:string):Promise<Document & {events:Document[]}>{
     ensure(actor.role==='user','FORBIDDEN',403);
@@ -110,10 +112,11 @@ export class TraceLibrary {
       const segments:Document[]=[];
       for(const segment of group){
         const turn_start=content.turns.length;
-        if(segment.raw_ref)appendConversationTurns(content.turns,(await this.service.privacy.open(actor.id,segment.raw_ref)).turns);
+        if(segment.raw_ref){const saved=await this.service.privacy.open(actor.id,segment.raw_ref);if(segment.content_kind==='research')Object.assign(content,saved);else appendConversationTurns(content.turns,saved.turns);}
         if(segment.agent_capture_id)segments.push({trace_id:segment.trace_id,capture_id:segment.agent_capture_id,from:segment.observed_at,through:segment.observed_end,last_checkpoint_at:segment.last_checkpoint_at,retention_expires_at:segment.retention_expires_at,exchanges:segment.capture_summary?.exchanges??0,evidence:segment.provenance_status,portable_export:segment.provenance_status==='VERIFIED'&&segment.capture_summary?.incremental===true,turn_start,turn_end:content.turns.length});
       }
-      card.turn_count=content.turns.length;
+      if(card.content_kind==='research')delete content.turns;
+      card.turn_count=content.turns?.length??0;
       const events=(await tx.sql.query("SELECT id,event_type,payload,created_at FROM audit_events WHERE owner_id=$1 AND (payload->>'trace_id'=ANY($2::text[]) OR payload->>'capture_id'=ANY($3::text[])) ORDER BY created_at DESC,id DESC LIMIT 100",[actor.id,group.map(t=>t.trace_id),[...captures.keys()]])).rows;
       return {...card,content,release_preparation:group.filter(t=>t.agent_capture_id&&t.release_preparation).map(t=>({capture_id:t.agent_capture_id,...t.release_preparation})),projection_details:{status:card.projection,issues:group.flatMap(t=>(t.projection?.issues??[]).map((issue:Document)=>({...issue,capture_id:t.agent_capture_id})))},events:events.filter(e=>eventNames[e.event_type]).map(e=>({id:e.id,label:eventNames[e.event_type],at:new Date(e.created_at).toISOString(),...(typeof e.payload.exchange_count==='number'?{exchanges:e.payload.exchange_count}:{}),...(e.payload.status?{status:e.payload.status}:{})})),checkpoint_count:[...captures.values()].reduce((n,c)=>n+(c.checkpoints?.length??0),0),
         receipt:(await tx.get('provenance_receipts',trace.provenance_id,actor.id)).receipt,

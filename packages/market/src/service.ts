@@ -1,3 +1,4 @@
+import {isResearch,validateResearchPackage,researchPreview,RESEARCH_FORMAT} from '../../content/src/research.ts';
 import {enqueueTraceQc,QC_EVENT} from './trace-qc-state.ts';
 import { StagedStorage } from './staged-storage.ts';
 import { canonicalHash, canonicalJson, parseMoney, uuidv7, validateUserPolicy, validateBuyerMandate } from '../../protocol/src/index.ts';
@@ -75,9 +76,11 @@ export class ThotService {
       const sourceHash = canonicalHash(bundle);
       let historyCommitment:string|undefined;
       const importConsentHash=traceImportConsentHash(input);
+      const research=bundle.format===RESEARCH_FORMAT;
       const privateHistory=input.save_privately===true;
+      if(research){const content=validateResearchPackage(bundle.content);historyCommitment=canonicalHash(content);ensure(input.content_commitment===historyCommitment,'IMPORT_PREVIEW_CHANGED',409);ensure(privateHistory,'RESEARCH_PRIVATE_IMPORT_REQUIRED');}
       ensure(input.save_privately===undefined||typeof input.save_privately==='boolean','INVALID_PRIVATE_IMPORT');
-      if(privateHistory)ensure(['thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(bundle.format)&&(input.rights_confirmed===undefined||input.rights_confirmed===false)&&(input.model_output_licensed===undefined||input.model_output_licensed===false),'PRIVATE_IMPORT_RELEASE_CONFLICT');
+      if(privateHistory)ensure([RESEARCH_FORMAT,'thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(bundle.format)&&(input.rights_confirmed===undefined||input.rights_confirmed===false)&&(input.model_output_licensed===undefined||input.model_output_licensed===false),'PRIVATE_IMPORT_RELEASE_CONFLICT');
       if(['thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(bundle.format)){
         historyCommitment=parseCodingSessionJsonl(bundle.text).preview.content_commitment;
         ensure(input.content_commitment===historyCommitment,'IMPORT_PREVIEW_CHANGED',409);
@@ -115,19 +118,19 @@ export class ThotService {
       const sourceRef=await stage.seal(input.bundle_json ?? canonicalJson(bundle));
       const rawRef=await stage.seal(verified.content);
       const scrubRef=await stage.seal(assessment.content);
-      const privateMetadataRef=await stage.seal({answer_preview:String(verified.content.turns.findLast((t:Document)=>t.role==='assistant')?.content??'').replace(/\s+/g,' ').slice(0,220)});
+      const privateMetadataRef=await stage.seal({...(research?{title:verified.content.title}:{}),answer_preview:String(verified.content.turns?.findLast((t:Document)=>t.role==='assistant')?.content??'').replace(/\s+/g,' ').slice(0,220)});
       return async tx=>{
         const duplicateResult=await duplicate(tx,verifiedContentHash);
         if(duplicateResult){stage.discard();await enqueueTraceQc(tx,await tx.get('traces',duplicateResult.trace_id,actor.id),this.now());return duplicateResult;}
         const bundleId=uuidv7(), provenanceId=verified.receipt.receipt_id;
-        await tx.insert('trace_bundles',bundleId,actor.id,{trace_id:traceId,source_bundle_hash:sourceHash,source_bundle_format:['thot.development-bundle/1','thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(bundle.format)?bundle.format:'attest-proxy-external-verifier/1',object_ref:sourceRef});
+        await tx.insert('trace_bundles',bundleId,actor.id,{trace_id:traceId,source_bundle_hash:sourceHash,source_bundle_format:[RESEARCH_FORMAT,'thot.development-bundle/1','thot.claude-code-jsonl/1','thot.coding-session-jsonl/1'].includes(bundle.format)?bundle.format:'attest-proxy-external-verifier/1',object_ref:sourceRef});
         await tx.insert('provenance_receipts',provenanceId,actor.id,{trace_id:traceId,receipt:verified.receipt});
         await tx.insert('rights_assessments',assessment.rights.assessment_id,actor.id,{trace_id:traceId,receipt:assessment.rights});
         await tx.insert('scrub_receipts',assessment.scrub.scrub_id,actor.id,{trace_id:traceId,receipt:assessment.scrub});
         await tx.insert('trace_features',traceId,actor.id,assessment.features);
         const eligible=!privateHistory&&['eligible','eligible_with_restrictions'].includes(assessment.rights.status),displayStatus=privateHistory?'PRIVATE':eligible?'AVAILABLE':'REJECTED';
         await tx.insert('traces',traceId,actor.id,{
-          trace_id:traceId,category,source_bundle_hash:sourceHash,source_bundle_id:bundleId,...(verified.capture_model?{capture_model:verified.capture_model,model_history:verified.model_history??[]}: {}),
+          trace_id:traceId,category,...(research?{content_kind:'research',import_preview:researchPreview(verified.content),thot_listing_only:true}:{}),source_bundle_hash:sourceHash,source_bundle_id:bundleId,...(verified.capture_model?{capture_model:verified.capture_model,model_history:verified.model_history??[]}: {}),
           import_consent_hash:importConsentHash,...(historyCommitment?{import_content_hash:historyCommitment}:{import_verified_content_hash:verifiedContentHash}),
           ...(trusted.historySync?{history_sync:trusted.historySync}:{}),
           provenance_id:provenanceId,rights_id:assessment.rights.assessment_id,scrub_id:assessment.scrub.scrub_id,

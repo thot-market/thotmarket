@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash,verify} from 'node:crypto';
 import {canonicalJson,canonicalHash} from '../../../protocol/src/canonical.ts';
 import {publicKey} from './channel.ts';
+import {recordedVerifier} from '../verifier.ts';
 export interface RecorderPolicy {url:string;expires_at?:string;instances:Record<string,{role:string;compose_hash:string;historical_compose_hashes?:string[];os_image_hash:string;image?:string;mrtd?:string;rtmr0?:string;rtmr1?:string;rtmr2?:string}>}
 export interface RecorderAssessment {hardware:'verified'|'unavailable';references:'matched'|'missing'|'mismatched'|'stale'|'unchecked';policy_source:string;app_id?:string;compose_hash?:string;quote_hash?:string;expected_compose_hash?:string}
 export async function getQuote(statement:unknown,socketPath='/var/run/dstack.sock'):Promise<any>{
@@ -13,6 +14,10 @@ export async function getQuote(statement:unknown,socketPath='/var/run/dstack.soc
 }
 async function qvlPath(){
  if(process.env.TV_DCAP_QVL){if(!isAbsolute(process.env.TV_DCAP_QVL))throw Error('DCAP_PATH_MUST_BE_ABSOLUTE');try{await access(process.env.TV_DCAP_QVL,constants.X_OK);}catch{throw Error('DCAP_VERIFIER_NOT_INSTALLED');}return process.env.TV_DCAP_QVL;}
+ // The automatically installed pinned verifier is recorded by absolute path,
+ // so no PATH edit or TV_DCAP_QVL override is needed to find it.
+ const recorded=await recordedVerifier();
+ if(recorded)return recorded.path;
  for(const dir of (process.env.PATH??'').split(':').filter(isAbsolute)){const path=join(dir,'dcap-qvl');try{await access(path,constants.X_OK);return path;}catch{}}
  throw Error('DCAP_VERIFIER_NOT_INSTALLED');
 }

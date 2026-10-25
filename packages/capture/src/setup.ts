@@ -1,10 +1,11 @@
 import {access,constants,readFile,lstat} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
-import {homedir} from 'node:os';
 import {join,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {thotUserHome,readThotConfigRecord} from './user-home.ts';
+import {loadVerifierPin,manualVerifierInstructions,recordedVerifier,verifierPlatformKey,verifierSlot} from './verifier.ts';
 
-export function thotUserHome(){const path=process.env.THOT_USER_HOME??process.env.THOT_USER_HOME??homedir();if(!isAbsolute(path))throw Error('INVALID_THOT_USER_HOME');return path;}
+export {thotUserHome} from './user-home.ts';
 
 export function thotOrigin(value:string) {
   const url=new URL(value);
@@ -45,8 +46,25 @@ export async function probe(command:string,args:string[],cwd?:string) {
   });
 }
 export type SetupCheck={id:string;label:string;ok:boolean;next:string};
+/** An explicit TV_DCAP_QVL wins; otherwise the recorded automatic install is
+ * preferred over whatever happens to be on PATH. */
+export async function resolveVerifierExecutable() {
+  if(process.env.TV_DCAP_QVL)return executable(process.env.TV_DCAP_QVL);
+  const recorded=await recordedVerifier();
+  return recorded?.path??executable('dcap-qvl');
+}
+async function verifierNext() {
+  if(process.env.TV_DCAP_QVL)return 'TV_DCAP_QVL is set but no executable verifier was found there. Point it at an absolute dcap-qvl path, or unset it to use the automatic install.';
+  try{
+    const pin=await loadVerifierPin(),key=verifierPlatformKey(),entry=pin.platforms[key];
+    if(!entry)return manualVerifierInstructions(pin,key);
+    return 'Run thot-setup (or node scripts/install-capture-helper.ts from your checkout) while online: it downloads '+entry.url+', checks its sha256 '+entry.sha256+' and records the path. Manual fallback: place those exact bytes at '+verifierSlot()+', make the file executable and rerun thot-setup; or set TV_DCAP_QVL to an absolute reviewed dcap-qvl path.';
+  }catch{
+    return 'Install the pinned dcap-qvl executable to enable independent hardware verification: run thot-setup while online, or set TV_DCAP_QVL to an absolute reviewed dcap-qvl path.';
+  }
+}
 export async function readiness(target:'codex'|'claude'|'zai'|'robinhood') {
-  const qvl=await executable(process.env.TV_DCAP_QVL??'dcap-qvl');
+  const qvl=await resolveVerifierExecutable();
   const python=await executable(process.env.THOT_CAPTURE_PYTHON??process.env.THOT_CAPTURE_PYTHON??'python3');
   const checks:SetupCheck[]=[{id:'node',label:'Node 24 or later',ok:Number(process.versions.node.split('.')[0])>=24,next:'Install Node 24 or later, then rerun this command.'}];
   if(target!=='robinhood') {
@@ -61,6 +79,7 @@ export async function readiness(target:'codex'|'claude'|'zai'|'robinhood') {
   }
   const pythonOK=!!python&&await probe(python,['-c',target==='robinhood'?'import browser_capture':'import json, ssl'],target==='robinhood'?fileURLToPath(new URL('../../../trace-vault/',import.meta.url)):undefined);
   checks.push({id:'python',label:target==='robinhood'?'Python account verifier dependencies':'Python 3',ok:pythonOK,next:target==='robinhood'?'Install Python 3 with cryptography and certifi. See the first-time setup guide.':'Install Python 3, then rerun this command.'});
-  checks.push({id:'verifier',label:'Hardware verifier executable (required for strict reference mode)',ok:!!qvl&&await probe(qvl,['--help']),next:'Install the reviewed dcap-qvl executable to enable independent hardware verification.'});
+  const verifierOK=!!qvl&&await probe(qvl,['--help']);
+  checks.push({id:'verifier',label:'Hardware verifier executable (required for strict reference mode)',ok:verifierOK,next:verifierOK?'':await verifierNext()});
   return {ready:checks.filter(c=>target==='robinhood'||!['verifier','python'].includes(c.id)).every(c=>c.ok),checks,python,qvl};
 }

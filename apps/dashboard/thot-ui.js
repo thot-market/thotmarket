@@ -1,3 +1,4 @@
+import {researchFilesHTML} from './library-ui.js';
 import {renderLiveStaking,parseStakingAmount} from './staking-ui.js';
 import {feePolicyCopy} from './fee-policy-ui.js';
 export const isClosedUnpaidPurchase=order=>order?.receipt?.status===0&&['blocked','complete'].includes(order.job_status)&&order.last_error==='AUTHORIZATION_UNAVAILABLE';
@@ -295,23 +296,25 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  const brokerageHTML=(value,listingId)=>value?tradeProofHTML(value,'Trade proof shared by the contributor')+(listingId?button('trade-evidence','Inspect trade proof',listingId):''):'';
  function releaseHTML(release){
   const content=release?.content??release,turns=Array.isArray(content?.turns)?content.turns:[];
-  const messages=turns.map((turn,index)=>`<article class="thot-message"><p class="eyebrow">${index+1} · ${escape(turn.role??'Message')}</p><div class="thot-message-content">${escape(typeof turn.content==='string'?turn.content:JSON.stringify(turn.content??''))}</div></article>`).join('');
-  return `<details class="thot-reader-terms"><summary>Licence and source details</summary>${release?.license?`<section class="thot-release-license"><h3>Buyer licence</h3><p>${escape(release.license)}</p><p>Content provenance: ${escape(release.provenance?.confidence_tier??'Unspecified')}.</p></section>`:''}${modelHTML(release?.capture_model)}${brokerageHTML(release?.brokerage_evidence)}${tradeEvidenceOptions(release)}</details><section class="thot-conversation" aria-label="Licensed conversation">${messages||'<p>No conversation turns are present in this release. Inspect the exact artifact below.</p>'}</section><details class="technical-details"><summary>Exact release artifact & commitments</summary><pre class="json-view">${json(release)}</pre></details>`;
+  const messages=content?.schema_version==='thot.research-package/1'?researchFilesHTML(content,escape):turns.map((turn,index)=>`<article class="thot-message"><p class="eyebrow">${index+1} · ${escape(turn.role??'Message')}</p><div class="thot-message-content">${escape(typeof turn.content==='string'?turn.content:JSON.stringify(turn.content??''))}</div></article>`).join('');
+  return `<details class="thot-reader-terms"><summary>Licence and source details</summary>${release?.license?`<section class="thot-release-license"><h3>Buyer licence</h3><p>${escape(release.license)}</p><p>Content provenance: ${escape(release.provenance?.confidence_tier??'Unspecified')}.</p></section>`:''}${content?.schema_version==='thot.research-package/1'?'<p>Imported research · source declarations are unverified.</p>':modelHTML(release?.capture_model)}${brokerageHTML(release?.brokerage_evidence)}${tradeEvidenceOptions(release)}</details><section class="thot-conversation" aria-label="${content?.schema_version==='thot.research-package/1'?'Licensed research package':'Licensed conversation'}">${messages||'<p>No conversation turns are present in this release. Inspect the exact artifact below.</p>'}</section><details class="technical-details"><summary>Exact release artifact & commitments</summary><pre class="json-view">${json(release)}</pre></details>`;
  }
  const listingMetadataHTML=metadata=>`${modelHTML(metadata?.capture_model)}<p>Rights: <strong>${escape(metadata?.rights_status??'unknown')}</strong> · provenance: <strong>${escape(metadata?.provenance??'unknown')}</strong>.</p><p>The release content stays private here. Inspect your saved trace in the vault before authorizing its exact committed release.</p>${tradeEvidenceOptions(metadata)}<details class="technical-details"><summary>Release commitment</summary><p><code>${escape(metadata?.content_hash??'unavailable')}</code></p></details>`;
  function listingComparableHTML(traceId){
+  if(listingMetadata?.content_kind==='research')return '<p>Choose a price for the selected research files and licence.</p>';
   const e=state.thot?.valuations?.find(row=>row.trace_id===traceId)?.estimate;
   const group=(g,label)=>g?.status==='estimated'?`<p><strong>${escape(label)} · ${escape(fmt(g.median_gross_atoms))}</strong><br>Middle range ${escape(fmt(g.p25_gross_atoms))}–${escape(fmt(g.p75_gross_atoms))} · ${escape(g.sample_count)} sales.</p>`:`<p>${escape(label)}: not enough comparable sales yet.</p>`;
   return `<section class="journey-review-comparables"><h3>What similar traces sold for</h3>${group(e?.independent,'Independent buyers')}${e?.sponsored?.status==='estimated'?group(e.sponsored,'Treasury-sponsored samples'):''}<p>Gross prices, not buyer offers or earnings. Your trace may not sell.</p></section>`;
  }
  function listingPreviewHTML(){
   const p=listingMetadata,editable=p.exclusion?.supported===true;
+  if(p.content_kind==='research')return `<section class="journey-release"><h3>What you’ll share</h3><p>Exact selected research files under one package licence. Review rights for report, code, data and evidence separately.</p>${researchFilesHTML(p.content,escape,{editable})}${editable?`<label><input id="release-exclusion-rights" type="checkbox"> I can license every remaining file under the proposed licence.</label>${button('release-exclude','Apply selected removals')}`:''}<p>Uploaded research is unverified. Local pattern checks do not establish truth, completeness or licensing rights. Removing files preserves your private original; relationships to removed files are removed too. To redact text, prepare and import a new reviewed package.</p></section>`;
   const sourceLabel=p.provenance_status==='IMPORTED_UNVERIFIED'?'Uploaded history · unverified':p.provenance??'Source unknown';
   return `<section class="journey-release"><header><h3>What you’ll share</h3><p>${p.content.turns.length} messages · ${escape(sourceLabel)}${editable?' · choose messages to remove below':''}</p></header><div class="journey-release-turns">${p.content.turns.map((turn,index)=>`<article class="journey-release-turn"><header><span>${index+1} · ${escape(turn.role??'Message')}</span>${editable?`<label><input type="checkbox" name="excluded_turn" value="${index}"> Remove from release</label>`:''}</header><pre>${escape(typeof turn.content==='string'?turn.content:JSON.stringify(turn.content??''))}</pre></article>`).join('')}</div>${editable?`<div class="journey-release-tools"><details><summary>Apply privacy changes</summary><p>Selected messages are removed from the actual release. Your private original stays unchanged. Recheck the new version before signing.</p><label class="check"><input id="release-exclusion-rights" type="checkbox"> I can license the remaining contributions.</label><label class="check"><input id="release-exclusion-outputs" type="checkbox"> I can also license the remaining assistant responses.</label><p>Without the second choice, assistant responses are excluded.</p>${button('release-exclude','Apply selected removals')}</details></div>`:''}${p.sale_eligibility?.can_list!==true?`<div class="library-attention"><strong>This release is not ready to list.</strong><p>${escape(p.sale_eligibility?.reason_code??'Refresh its release assessment before continuing.')}</p></div>`:''}<details class="journey-release-tools"><summary>Privacy checks & source</summary><p>Provenance tier: ${escape(p.provenance??'Unknown')}.</p><p>Review for anything confidential. Automated checks can miss private details.</p>${(p.privacy?.flags??[]).length?`<p>${escape(p.privacy.flags.join(' · '))}</p>`:''}<p>${escape((p.privacy?.limitations??[]).join(' '))}</p><p>${editable?'Removing messages reruns the release checks.':'This release cannot be edited here. Previously prepared or purchased releases retain their exact signed content.'}</p></details></section>`;
  }
  function showListingReview(){
    const feeCopy=feePolicyCopy(state.thot?.account?.economics,state.thot?.holder_rewards);
-   openDialog('Review & sell','Only this reviewed release is licensed. Your original conversation stays in your private library.',`<div class="journey-review">${listingPreviewHTML()}<aside>${listingComparableHTML(listingMetadata.trace_id)}<div class="thot-sale-form">
+   openDialog('Review & sell','Only this reviewed release is licensed. Your original source stays in your private library.',`<div class="journey-review">${listingPreviewHTML()}<aside>${listingComparableHTML(listingMetadata.trace_id)}<div class="thot-sale-form">
 <p class="thot-sale-intro">One sale · available for up to 30 days · content delivered after payment.</p>
 <div class="thot-sale-fields">
 <div class="thot-sale-field"><label for="thot-title">Public title</label><input id="thot-title" maxlength="100" placeholder="Give buyers a clear, specific title" value="${escape(state.traceLibrary?.items?.find(t=>t.trace_id===listingMetadata.trace_id)?.title??'')}"></div>
@@ -322,11 +325,38 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
 <label class="thot-consent"><input type="checkbox" id="thot-list-consent"><span>I reviewed this trace, have the rights to it, and authorize <strong>one automatic sale</strong> of this exact release with the public title and licence above.</span></label>
 <div class="thot-sale-optional"><label class="thot-consent"><input type="checkbox" id="thot-treasury-consent" aria-describedby="thot-reserve-help"><span>Include in reserve review <span class="thot-field-help">(optional)</span></span></label><p id="thot-reserve-help" class="thot-field-help">Three authorized reviewers can inspect one complete release selected from each stable group of 20 unique eligible traces you opt in. Repeated access, relisting and reviewer changes do not redraw it. You can sell without opting in.</p></div>
 ${tradeEvidenceOptions(listingMetadata)}
-<details class="thot-sale-details"><summary>Sale terms and trace details</summary><p>There is no ordinary pre-purchase trace preview. A buyer receives this release only after purchase. During an onchain dispute, non-conflicted governance reviewers can inspect the purchased release.</p><p>${escape(feeCopy.summary)}</p><p>${escape(feeCopy.details)}</p><p>Authorization lasts up to 30 days. Stop future purchases with an onchain revocation. A funded purchase retains its licensed copy for 30 days.</p><p>Register your referrer in THOT before your first accepted sale.</p>${modelHTML(listingMetadata?.capture_model)}<p>Rights: <strong>${escape(listingMetadata?.rights_status??'unknown')}</strong> · provenance: <strong>${escape(listingMetadata?.provenance??'unknown')}</strong>.</p><p>Release commitment: <code>${escape(listingMetadata?.content_hash??'unavailable')}</code></p></details>
-</div></aside></div>`,button('list-confirm','Sign & list trace','',listingMetadata.sale_eligibility?.can_list!==true,true));
+<details class="thot-sale-details"><summary>Sale terms and trace details</summary><p>There is no ordinary pre-purchase trace preview. A buyer receives this release only after purchase. After recorded delivery the buyer has a ${escape(disputeWindow())} to raise an onchain dispute; during a dispute, non-conflicted governance reviewers can inspect the purchased release.</p><p>Authorizing this listing is an off-chain wallet signature: it is not a blockchain transaction and costs no gas. The buyer's later purchase is the on-chain step.</p><p>${escape(feeCopy.summary)}</p><p>${escape(feeCopy.details)}</p><p>Authorization lasts up to 30 days. Stop future purchases with an onchain revocation. A funded purchase retains its licensed copy for 30 days.</p><p>Register your referrer in THOT before your first accepted sale.</p>${modelHTML(listingMetadata?.capture_model)}<p>Rights: <strong>${escape(listingMetadata?.rights_status??'unknown')}</strong> · provenance: <strong>${escape(listingMetadata?.provenance??'unknown')}</strong>.</p><p>Release commitment: <code>${escape(listingMetadata?.content_hash??'unavailable')}</code></p></details>
+</div></aside></div>`,button('list-confirm',listingMetadata.content_kind==='research'?'Sign & list package':'Sign & list trace','',listingMetadata.sale_eligibility?.can_list!==true,true));
+ }
+ // The public share link for a listing, as returned by the listing API. Composed
+ // against this origin when the server sends only the path.
+ function listingPublicUrl(listing){
+  if(!listing)return null;
+  if(typeof listing.public_url==='string'&&/^https:\/\//.test(listing.public_url))return listing.public_url;
+  if(typeof listing.public_path!=='string'||!/^\/l\/[A-Za-z0-9_-]+$/.test(listing.public_path))return null;
+  try{return new URL(listing.public_path,globalThis.window?.location?.origin??undefined).href;}catch{return listing.public_path;}
+ }
+ function showListingSignatureReview(){
+  const prepared=listingEnrollment.prepared,message=prepared.typed_data?.message??{};
+  const evidenceHash=typeof message.evidenceHash==='string'?message.evidenceHash:null,licenseHash=typeof message.licenseHash==='string'?message.licenseHash:null;
+  const research=listingMetadata.content_kind==='research';
+  openDialog('Review the exact commitments','Your wallet signature binds the two hashes below to this exact release.',`<div class="journey-review"><section class="journey-release"><h3>What you are signing</h3>
+   <div class="meta-pair"><span>Public title</span><strong>${escape(globalThis.document?.querySelector('#thot-title')?.value??prepared.title)}</strong></div>
+   <div class="meta-pair"><span>Sale price</span><strong>${escape(fmt(message.gross??prepared.price_atoms))}</strong></div>
+   <div class="meta-pair"><span>Signing wallet</span><strong class="mono">${escape(message.seller??state.thot?.wallet??'')}</strong></div>
+   <div class="thot-hash-field"><span id="thot-evidence-hash-label">evidenceHash being signed</span><code class="hash" aria-labelledby="thot-evidence-hash-label">${escape(evidenceHash??'unavailable — reopen this review')}</code></div>
+   <div class="thot-hash-field"><span id="thot-license-hash-label">licenseHash being signed</span><code class="hash" aria-labelledby="thot-license-hash-label">${escape(licenseHash??'unavailable — reopen this review')}</code></div>
+   <p class="legal-note">The evidenceHash is the digest of the complete release envelope — the displayed release/content commitment together with this licence, its provenance and your consent terms — and the licenseHash commits to exactly the licence text you reviewed.</p>
+   <p class="legal-note">Signing is an off-chain signature: no blockchain transaction is sent and no gas is charged. The buyer's later purchase is the on-chain step, and after its recorded delivery the buyer has a ${escape(disputeWindow())} to raise an onchain dispute.</p>
+   <details class="thot-sale-details"><summary>Licence and release commitment</summary><p>${escape(globalThis.document?.querySelector('#thot-license')?.value??prepared.license??'')}</p><p>Release/content commitment: <code>${escape(listingMetadata?.content_hash??'unavailable')}</code></p><p>Authorization lasts up to 30 days and authorizes one automatic sale.</p></details>
+   </section></div>`,button('list-cancel','Review again','',false)+button('list-sign','Open wallet to sign','',false,true));
+ }
+ function showListingListed(listing){
+  const url=listingPublicUrl(listing);
+  openDialog(listing?.content_kind==='research'?'Your package is listed':'Your trace is listed','A qualifying purchase now completes automatically; no second approval is needed.',`${url?`<div class="thot-hash-field"><span id="thot-listing-url-label">Public listing URL</span><div class="thot-url-row"><input id="thot-listing-url" readonly aria-labelledby="thot-listing-url-label" value="${escape(url)}"><button class="button secondary small" data-action="thot-copy-listing-url" data-id="${escape(url)}">Copy link</button></div><p class="legal-note">Anyone with this link sees the public listing details and a sign-in-to-buy action — never the conversation itself.</p></div>`:'<p class="legal-note">The public listing page for this trace is available in My work.</p>'}<p class="legal-note">Stop future purchases any time from the listing controls; already funded sales remain authorized.</p>`,button('close-dialog','Done'));
  }
  function onInput(element){
-  if(element.name==='excluded_turn'){listingDirty=[...document.querySelectorAll('input[name="excluded_turn"]')].some(input=>input.checked);const sign=document.querySelector('[data-action="thot-list-confirm"]');if(sign){sign.disabled=listingDirty||listingMetadata?.sale_eligibility?.can_list!==true;sign.textContent=listingDirty?'Apply removals before signing':'Sign & list trace';}return true;}
+  if(['excluded_turn','excluded_file'].includes(element.name)){listingDirty=[...document.querySelectorAll('input[name="excluded_turn"],input[name="excluded_file"]')].some(input=>input.checked);const sign=document.querySelector('[data-action="thot-list-confirm"]');if(sign){sign.disabled=listingDirty||listingMetadata?.sale_eligibility?.can_list!==true;sign.textContent=listingDirty?'Apply removals before signing':listingMetadata.content_kind==='research'?'Sign & list package':'Sign & list trace';}return true;}
   if(element.id!=='thot-price')return false;const target=document.querySelector('#thot-price-share');if(!target)return true;
   if(!/^(?:0|[1-9]\d*)(?:\.\d{0,18})?$/.test(element.value)){target.textContent='Enter a gross price to estimate your sale proceeds.';return true;}
   const [whole,fraction='']=element.value.split('.'),gross=BigInt(whole)*10n**18n+BigInt(fraction.padEnd(18,'0'));
@@ -347,7 +377,7 @@ ${tradeEvidenceOptions(listingMetadata)}
  }
  function listingCard(l,{browseOnly=false,workspace=state.thot}={}){
   const w=workspace;
-  return `<article class="thot-listing" data-listing-id="${escape(l.id)}"><div class="thot-listing-body"><h3>${escape(l.title)}</h3>${sellerWalletHTML(l.seller)}<p>${escape(l.workflow)} · ${escape(l.turn_count)} turns · ${escape(l.provenance)}</p>${modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}</div><div class="thot-listing-purchase"><p class="eyebrow">Listed price</p><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong><p class="legal-note">Review the exact total before signing.</p><details><summary>License</summary><p>${escape(l.license)}</p></details>${!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet)?button('assay','Check metadata',l.id)+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):'')+(purchasesPaused()?'':button('buy','View & buy',l.id,false,true)):''}${!browseOnly&&sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
+  return `<article class="thot-listing" data-listing-id="${escape(l.id)}"><div class="thot-listing-body"><h3>${escape(l.title)}</h3>${sellerWalletHTML(l.seller)}<p>${escape(l.workflow)} · ${l.content_kind==='research'?`${escape(l.file_count)} files`:`${escape(l.turn_count)} turns`} · ${escape(l.provenance)}</p>${l.content_kind==='research'?'<p>Imported research package · unverified source declarations.</p>':modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet)?l.id:undefined)}</div><div class="thot-listing-purchase"><p class="eyebrow">Listed price</p><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong><p class="legal-note">Review the exact total before signing.</p><details><summary>License</summary><p>${escape(l.license)}</p></details>${!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet)?(l.content_kind==='research'?'':button('assay','Check metadata',l.id))+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):'')+(purchasesPaused()?'':button('buy','View & buy',l.id,false,true)):''}${!browseOnly&&sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
  }
  function catalogueHTML(catalogue,{failed=false,catalogueError=false}={}){
   const listings=catalogue?.listings??[],available=listings.filter(l=>!sameWallet(l.seller,catalogue?.wallet));
@@ -487,7 +517,7 @@ ${tradeEvidenceOptions(listingMetadata)}
    `<section class="metrics"><article class="metric"><small>RESERVE INVENTORY</small><strong>${treasuryAmount(w.inventory_atoms)}</strong></article><article class="metric"><small>UNALLOCATED</small><strong>${treasuryAmount(w.unallocated_atoms)}</strong><p>Available for new campaigns.</p></article><article class="metric"><small>COMMITTED PURCHASES</small><strong>${treasuryAmount(w.total_gross_committed_atoms)}</strong></article></section>
    ${campaignCreationHTML(w)}${stakingBudgetHTML(w)}<section><div class="section-head"><h2>Acquisition campaigns</h2><p>${w.paused?'All new reserve purchases are paused.':'Choose an active campaign when buying a trace.'} Unspent budgets stay in the reserve.</p></div><div class="cards">${(w.campaigns??[]).map(c=>campaignCardHTML(c,w)).join('')||'<div class="panel"><p>No campaigns yet.</p></div>'}</div>${w.next_campaign_cursor?button('campaigns-more','Load more campaigns',w.next_campaign_cursor):''}</section>
    <section class="panel"><h2>Inspect the selected release</h2><p>Authorized reviewers see the same complete release from each stable group of 20 contributor opt-ins. Refreshing does not draw another sample. The contributor sets the asking price; choosing a campaign does not change it.</p><p>Reserve <code>${escape(w.capabilities.reserve)}</code></p></section>
-   <section class="cards">${traces.map(l=>`<article class="panel"><h3>${escape(l.title)}</h3>${modelHTML(l.capture_model)}<strong>${escape(fmt(l.price_atoms))}</strong><p>${escape(l.turn_count)} turns · inferred category ${escape(l.workflow)}</p>${w.reserve_buyer?button('buyer-sample','Inspect selected complete release',l.id)+button('reserve-buy','Buy using reserve',l.id,!!blocked):''}</article>`).join('')||'<div class="panel"><p>No eligible reserve samples yet.</p></div>'}</section>${blocked?`<p role="status">${escape(blocked)}</p>`:''}
+   <section class="cards">${traces.map(l=>`<article class="panel"><h3>${escape(l.title)}</h3>${l.content_kind==='research'?'<p>Imported research package · unverified source declarations.</p>':modelHTML(l.capture_model)}<strong>${escape(fmt(l.price_atoms))}</strong><p>${l.content_kind==='research'?`${escape(l.file_count)} files`:`${escape(l.turn_count)} turns`} · inferred category ${escape(l.workflow)}</p>${w.reserve_buyer?button('buyer-sample','Inspect selected complete release',l.id)+button('reserve-buy','Buy using reserve',l.id,!!blocked):''}</article>`).join('')||'<div class="panel"><p>No eligible reserve samples yet.</p></div>'}</section>${blocked?`<p role="status">${escape(blocked)}</p>`:''}
    <h2>Reserve purchases</h2><section class="cards">${(w.jobs??[]).map(j=>`<article class="panel"><h3>${escape(j.title)}</h3><p>${escape(fmt(j.gross))} · ${escape(status[j.receipt?.status]??j.status)}</p>${j.campaign_id?`<p>Campaign ${escape(j.campaign_id)}</p>`:''}${j.resume_available?button('reserve-resume','Resume purchase',j.id):''}${[2,3,4,5].includes(j.receipt?.status)?button('delivery','Open purchased trace',j.id):''}${j.receipt?settlementHTML(j.receipt):''}</article>`).join('')}</section>${governanceHTML(w.governance)}${disputesHTML()}`;
  }
  function manualReserveHTML(w){
@@ -496,7 +526,7 @@ ${tradeEvidenceOptions(listingMetadata)}
   return heading('Treasury','Inspect first. Buy from the reserve.','Your wallet selects the research. The vault enforces the shared spending limits.')+
    `<section class="metrics"><article class="metric"><small>RESERVE INVENTORY</small><strong>${escape(fmt(r.balance))}</strong></article><article class="metric"><small>AVAILABLE NOW</small><strong>${escape(fmt(r.allowance))}</strong><p>${escape(blocked||'Unused allowance stays in the vault.')}</p></article><article class="metric"><small>COMMITTED</small><strong>${escape(fmt(r.committed))}</strong></article></section>
    <section class="panel"><h2>Authorized reviewers. One persistent draw.</h2><p>All authorized reserve wallets inspect the same complete release selected from each stable group of 20 unique contributor opt-ins. Refreshes, relists and reviewer changes do not redraw it. Your wallet pays gas only if you choose to buy; the reserve pays THOT into escrow.</p><p>Reserve <code>${escape(w.capabilities.reserve)}</code></p></section>
-   ${governanceHTML(w.governance)}<section class="cards">${traces.map(l=>`<article class="panel"><h3>${escape(l.title)}</h3>${modelHTML(l.capture_model)}<strong>${escape(fmt(l.price_atoms))}</strong><p>${escape(l.turn_count)} turns · inferred category ${escape(l.workflow)}</p>${button('buyer-sample','Inspect selected complete release',l.id)}${button('reserve-buy','Buy using reserve',l.id,!!blocked||!w.reserve_buyer)}</article>`).join('')||'<div class="panel"><p>No complete one-in-20 contributor group has produced a reserve sample yet.</p></div>'}</section>
+   ${governanceHTML(w.governance)}<section class="cards">${traces.map(l=>`<article class="panel"><h3>${escape(l.title)}</h3>${l.content_kind==='research'?'<p>Imported research package · unverified source declarations.</p>':modelHTML(l.capture_model)}<strong>${escape(fmt(l.price_atoms))}</strong><p>${l.content_kind==='research'?`${escape(l.file_count)} files`:`${escape(l.turn_count)} turns`} · inferred category ${escape(l.workflow)}</p>${button('buyer-sample','Inspect selected complete release',l.id)}${button('reserve-buy','Buy using reserve',l.id,!!blocked||!w.reserve_buyer)}</article>`).join('')||'<div class="panel"><p>No complete one-in-20 contributor group has produced a reserve sample yet.</p></div>'}</section>
    <h2>Reserve purchases</h2><section class="cards">${(w.jobs??[]).map(j=>`<article class="panel"><h3>${escape(j.title)}</h3><p>${escape(fmt(j.gross))} · ${escape(status[j.receipt?.status]??j.status)}</p>${j.resume_available?button('reserve-resume','Resume purchase',j.id):''}${[2,3,4,5].includes(j.receipt?.status)?button('delivery','Open purchased trace',j.id):''}${j.receipt?settlementHTML(j.receipt):''}</article>`).join('')}</section>${disputesHTML()}`;
  }
  function samplingHTML(){
@@ -726,7 +756,7 @@ ${tradeEvidenceOptions(listingMetadata)}
    const trace_id=id||document.querySelector('#thot-trace')?.value;
    if(!trace_id)throw Error('Choose a saved trace to review.');
    const [metadata,preview]=await Promise.all([api('/v1/thot/listings/metadata',{method:'POST',body:{trace_id}}),api('/v1/thot/listings/preview',{method:'POST',body:{trace_id}})]);current();
-   if(preview.trace_id!==trace_id||preview.content_hash!==metadata.content_hash||!Array.isArray(preview.content?.turns))throw Error('The release changed while loading. Reopen this trace to review it again.');
+   if(preview.trace_id!==trace_id||preview.content_hash!==metadata.content_hash||!(Array.isArray(preview.content?.turns)||(preview.content_kind==='research'&&preview.content?.schema_version==='thot.research-package/1'&&Array.isArray(preview.content.files))))throw Error('The release changed while loading. Reopen this trace to review it again.');
    listingMetadata={...metadata,...preview};listingScope=current;listingEnrollment=null;listingDirty=false;
    showListingReview();return true;
   }
@@ -737,14 +767,15 @@ ${tradeEvidenceOptions(listingMetadata)}
   if(op==='release-exclude'){
    if(!listingMetadata||!listingScope||listingMetadata.exclusion?.supported!==true)throw Error('Reopen this release before changing it.');listingScope();
    if(!document.querySelector('#release-exclusion-rights')?.checked)throw Error('Confirm your rights to the remaining release first.');
+   const fileMode=listingMetadata.content_kind==='research',excluded_files=[...document.querySelectorAll('input[name="excluded_file"]:checked')].map(input=>input.value);
    const excluded_turns=[...document.querySelectorAll('input[name="excluded_turn"]:checked')].map(input=>Number(input.value));
-   if(!excluded_turns.length)throw Error('Select at least one message to remove.');
+   if(fileMode?!excluded_files.length:!excluded_turns.length)throw Error('Select at least one file or message to remove.');
    const trace_id=listingMetadata.trace_id,content_hash=listingMetadata.content_hash;
-   const preview=await api('/v1/thot/listings/exclude',{method:'POST',body:{trace_id,content_hash,excluded_turns,rights_confirmed:true,model_output_licensed:document.querySelector('#release-exclusion-outputs')?.checked===true}});current();listingScope();
+   const preview=await api('/v1/thot/listings/exclude',{method:'POST',body:{trace_id,content_hash,...(fileMode?{excluded_files}:{excluded_turns}),rights_confirmed:true,model_output_licensed:document.querySelector('#release-exclusion-outputs')?.checked===true}});current();listingScope();
    // Any previous prices, consent or prepared signature belong to the old view.
    listingMetadata=null;listingEnrollment=null;listingDirty=false;
    const metadata=await api('/v1/thot/listings/metadata',{method:'POST',body:{trace_id}});current();
-   if(preview.trace_id!==trace_id||preview.content_hash!==metadata.content_hash||!Array.isArray(preview.content?.turns))throw Error('The release changed. Reopen the trace and review its latest version.');
+   if(preview.trace_id!==trace_id||preview.content_hash!==metadata.content_hash||!(Array.isArray(preview.content?.turns)||(preview.content_kind==='research'&&preview.content?.schema_version==='thot.research-package/1'&&Array.isArray(preview.content.files))))throw Error('The release changed. Reopen the trace and review its latest version.');
    listingMetadata={...metadata,...preview};listingScope=current;showListingReview();toast('Release updated. Review the remaining messages and choose fresh sale terms.');return true;
   }
   if(op==='list-confirm'){
@@ -759,16 +790,49 @@ ${tradeEvidenceOptions(listingMetadata)}
    if(evidenceId&&evidenceDisclosure){const proof=(listingMetadata.trade_evidence??[]).find(e=>e.id===evidenceId);if(!proof?.evidence_hash)throw Error('Selected trade proof has no signed hash. Refresh and try again.');body.trade_evidence_id=evidenceId;body.trade_evidence_hash=proof.evidence_hash;body.trade_evidence_disclosure=true;}
    inFlight=true;element.disabled=true;
    try{
-    const from=await connected();current();listingScope();
-    const terms=JSON.stringify(body);if(listingEnrollment&&listingEnrollment.terms!==terms)throw Error('Finish activating the reviewed listing before changing its terms.');
+    await connected();current();listingScope();
+    const terms=JSON.stringify(body);
+    if(listingEnrollment&&listingEnrollment.terms!==terms){
+     // A signed authorization must finish; an unsigned prepared listing can be
+     // replaced when the contributor deliberately edits the reviewed terms.
+     if(listingEnrollment.signature)throw Error('Finish activating the reviewed listing before changing its terms.');
+     listingEnrollment=null;
+    }
     if(!listingEnrollment){const prepared=await api('/v1/thot/listings',{method:'POST',body});current();listingEnrollment={prepared,terms,signature:null,key:recoveryKey()};}
     const prepared=listingEnrollment.prepared;
     const domain=prepared.typed_data?.domain;if(capabilities().market&&(!domain||BigInt(domain.chainId??0)!==BigInt(capabilities().chain_id)||!sameWallet(domain.verifyingContract,capabilities().market)))throw Error('The sale authorization does not match this chain and market. Refresh and try again.');
-    if(!listingEnrollment.signature){const signature=await provider().request({method:'eth_signTypedData_v4',params:[from,JSON.stringify(prepared.typed_data)]});current();listingEnrollment.signature=signature;}
-    const signature=listingEnrollment.signature;const selected=await connected();current();if(!sameWallet(selected,from))throw Error('Wallet account changed. Review and authorize the listing again.');
-    await api('/v1/thot/listings/activate',{method:'POST',body:{id:prepared.id,signature}});current();
-    listingMetadata=null;listingScope=null;listingEnrollment=null;dialog.close();await refresh();toast('Automatic sale enabled. A qualifying purchase needs no second approval.');
+    showListingSignatureReview();
    }finally{inFlight=false;element.disabled=false;}return true;
+  }
+  if(op==='list-cancel'){if(!listingMetadata||!listingScope)throw Error('Review the listing details again.');listingScope();showListingReview();return true;}
+  if(op==='list-sign'){
+   if(!listingMetadata||!listingScope||!listingEnrollment||!listingEnrollment.prepared)throw Error('Review the listing details again.');listingScope();
+   inFlight=true;element.disabled=true;
+   const review=listingEnrollment;
+   try{
+    const from=await connected();current();listingScope();
+    if(!listingEnrollment.signature){
+     // The wallet prompt must be the topmost interactive element (#78): close
+     // this dialog first so no application dialog can cover it while signing.
+     dialog.close();
+     const signature=await provider().request({method:'eth_signTypedData_v4',params:[from,JSON.stringify(listingEnrollment.prepared.typed_data)]});
+     current();listingEnrollment.signature=signature;
+    }
+    const signature=listingEnrollment.signature;const selected=await connected();current();if(!sameWallet(selected,from))throw Error('Wallet account changed. Review and authorize the listing again.');
+    const activated=await api('/v1/thot/listings/activate',{method:'POST',body:{id:listingEnrollment.prepared.id,signature}});current();
+    listingMetadata=null;listingScope=null;listingEnrollment=null;await refresh();
+    showListingListed(activated??review.prepared);
+   }catch(error){
+    // A cancelled or failed signature returns the contributor to the same
+    // reviewed commitments, with the error shown inside that review.
+    if(listingEnrollment===review&&!listingEnrollment.signature)showListingSignatureReview();
+    throw error;
+   }finally{inFlight=false;element.disabled=false;}return true;
+  }
+  if(op==='copy-listing-url'){
+   if(typeof id!=='string'||!/^https:\/\//.test(id))throw Error('The public listing URL is unavailable. Refresh My work.');
+   try{await copyText(id);}catch{throw Error('Could not copy the listing link. Select and copy the address shown.');}
+   current();toast('Public listing link copied.');return true;
   }
   if(op==='unlist'){const prepared=await api('/v1/thot/listings/unlist',{method:'POST',body:{id}});current();review('Stop future automatic purchases',prepared);return true;}
   if(op==='sample-preview'){
@@ -838,7 +902,7 @@ ${tradeEvidenceOptions(listingMetadata)}
    download({release:r.release,receipt:r.receipt,delivery_hash:r.delivery_hash},`thot-licensed-trace-${String(id).replace(/[^a-zA-Z0-9_-]/g,'')}.json`);
    toast('Licensed trace downloaded. Its buyer licence is included.');return true;
   }
-  if(op==='delivery'){const r=await api('/v1/thot/offers/delivery',{method:'POST',body:{id}});current();const content=releaseHTML(r.release)+settlementHTML(r.receipt??{})+`<details><summary>Delivery receipt</summary><pre class="json-view">${json({receipt:r.receipt,delivery_hash:r.delivery_hash,notice:r.notice})}</pre></details>`;if(r.acknowledgment)review('Your licensed trace',{transactions:[r.acknowledgment],notice:`Confirm only if you received this licensed release. Confirmation starts the ${disputeWindow(r.receipt)}.`},content);else openDialog('Your licensed trace','Your purchased conversation. Keep and use it under the buyer licence.',content,button('download-delivery','Download licensed trace',id,false,true));return true;}
+  if(op==='delivery'){const r=await api('/v1/thot/offers/delivery',{method:'POST',body:{id}});current();const content=releaseHTML(r.release)+settlementHTML(r.receipt??{})+`<details><summary>Delivery receipt</summary><pre class="json-view">${json({receipt:r.receipt,delivery_hash:r.delivery_hash,notice:r.notice})}</pre></details>`;if(r.acknowledgment)review('Your licensed trace',{transactions:[r.acknowledgment],notice:`Confirm only if you received this licensed release. Confirmation starts the ${disputeWindow(r.receipt)}.`},content);else openDialog('Your licensed trace','Your purchased content. Keep and use it under the buyer licence.',content,button('download-delivery','Download licensed trace',id,false,true));return true;}
   if(op==='disputes-more'){
    if(state.role!=='operator_security'&&!state.thot?.account?.dispute_reviewer)throw Error('Governance reviewer access is required.');
    const page=await api('/v1/thot/disputes?after_id='+encodeURIComponent(id));current();

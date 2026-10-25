@@ -163,18 +163,71 @@ test('buyer roles can claim refunded purchase funds in Offers without accessing 
 });
 
 test('enrollment requires explicit consent then one signature and activation, without a seller payment transaction',async t=>{
- const signature='0x'+'ab'.repeat(65),typed={domain:{name:'thot market'},types:{SaleAuthorization:[]},message:{gross:atoms(100)}};
- const f=fixture(t,async p=>{assert.equal(p.method,'eth_signTypedData_v4');assert.deepEqual(JSON.parse(p.params[1]),typed);return signature;},async path=>path.endsWith('/metadata')?{trace_id:'trace',content_hash:hash(1)}:path.endsWith('/activate')?{id:'listing'}:{id:'listing',typed_data:typed});
+ const signature='0x'+'ab'.repeat(65),typed={domain:{name:'thot market',chainId:31337,verifyingContract:'0x0000000000000000000000000000000000000009'},types:{SaleAuthorization:[]},message:{gross:atoms(100),evidenceHash:'0x'+'1'.repeat(64),licenseHash:'0x'+'2'.repeat(64),seller:'0x0000000000000000000000000000000000000001'}};
+ const f=fixture(t,async p=>{assert.equal(p.method,'eth_signTypedData_v4');assert.deepEqual(JSON.parse(p.params[1]),typed);return signature;},async path=>path.endsWith('/metadata')?{trace_id:'trace',content_hash:hash(1)}:path.endsWith('/activate')?{id:'listing',public_path:'/l/listing',content_kind:'trace'}:{id:'listing',typed_data:typed});
  const inputs={'#thot-trace':{value:'trace'},'#thot-title':{value:'Useful research'},'#thot-price':{value:'100'},'#thot-license':{value:'Exact non-exclusive research licence'},'#thot-list-consent':{checked:false},'#thot-treasury-consent':{checked:true}};
  document.querySelector=id=>inputs[id];
  await f.ui.action('thot-list-configure',button());
  await assert.rejects(f.ui.action('thot-list-confirm',button()),/Authorize the content rights/);
  assert.equal(f.calls.length,2);inputs['#thot-list-consent'].checked=true;
  await f.ui.action('thot-list-confirm',button());
+ // Preparing the listing now ends at an exact-commitment review; the wallet
+ // signature itself is only requested by the separate signing step.
+ assert.equal(f.requests.filter(p=>p.method==='eth_signTypedData_v4').length,0,'no signature request before the signing step');
+ assert.equal(f.dialogs.at(-1)[0],'Review the exact commitments');
  assert.equal(f.calls[2].options.body.automatic_sales,true);assert.equal(f.calls[2].options.body.treasury_opt_in,true);assert.equal(f.calls[2].options.body.treasury_sampling_consent,'thot.treasury-sampling/1');assert.equal(f.calls[2].options.body.free_preview,undefined);
+ await f.ui.action('thot-list-sign',button());
  assert.deepEqual(f.calls[3],{path:'/v1/thot/listings/activate',options:{method:'POST',body:{id:'listing',signature}}});
  assert.equal(f.requests.filter(p=>p.method==='eth_signTypedData_v4').length,1);
  assert.equal(f.requests.filter(p=>p.method==='eth_sendTransaction').length,0);
+ // The finished listing surfaces its public share URL (#97).
+ assert.equal(f.dialogs.at(-1)[0],'Your trace is listed');assert.match(f.dialogs.at(-1)[2],/\/l\/listing/);assert.match(f.dialogs.at(-1)[2],/data-action="thot-copy-listing-url"/);
+ const copied=[];const ui=createThotUI({state:f.state,api:async()=>({}),openDialog:()=>{},dialog:{close(){}},refresh:async()=>{},escape:String,json:JSON.stringify,toast:m=>copied.push(m),copyText:async text=>{if(!/^https:\/\//.test(text))throw Error('reject');}});
+ await ui.action('thot-copy-listing-url',{dataset:{id:'https://share.example/l/listing'}});
+ await assert.rejects(ui.action('thot-copy-listing-url',{dataset:{id:'javascript:alert(1)'}}),/unavailable/);
+ assert.deepEqual(copied,['Public listing link copied.']);
+});
+
+test('the signature review names the exact commitments, the gas-free signature and the dispute window',async t=>{
+ const typed={domain:{chainId:31337,verifyingContract:'0x0000000000000000000000000000000000000009'},types:{SaleAuthorization:[]},message:{gross:atoms(100),evidenceHash:'0x'+'aa'.repeat(64),licenseHash:'0x'+'bb'.repeat(64),seller:'0x0000000000000000000000000000000000000001'}};
+ const f=fixture(t,async()=>{throw Error('No wallet request in this review test');},async path=>path.endsWith('/metadata')?{trace_id:'trace',content_hash:hash(1)}:{id:'listing',typed_data:typed,public_path:'/l/listing'});
+ document.querySelector=()=>({value:'100',checked:true});
+ await f.ui.action('thot-list-configure',button());
+ await f.ui.action('thot-list-confirm',button());
+ const review=f.dialogs.at(-1);
+ assert.equal(review[0],'Review the exact commitments');
+ assert.ok(review[2].includes('evidenceHash being signed'));
+ assert.ok(review[2].includes('0x'+'aa'.repeat(64)));
+ assert.ok(review[2].includes('licenseHash being signed'));
+ assert.ok(review[2].includes('0x'+'bb'.repeat(64)));
+ assert.match(review[2],/complete release envelope/);
+ assert.match(review[2],/off-chain signature: no blockchain transaction is sent and no gas is charged/);
+ assert.match(review[2],/1-hour dispute window/);
+ assert.match(review[3],/Open wallet to sign/);
+ // The earlier sale-review dialog itself states both facts before any prepare.
+ await f.ui.action('thot-list-cancel',button());
+ assert.equal(f.dialogs.at(-1)[0],'Review & sell');
+ assert.match(f.dialogs.at(-1)[2],/off-chain wallet signature: it is not a blockchain transaction and costs no gas/);
+ assert.match(f.dialogs.at(-1)[2],/1-hour dispute window/);
+});
+
+test('the wallet prompt is never covered by an application dialog, and a cancelled signature returns to the review',async t=>{
+ const rejectable=()=>{let resolve,reject;const promise=new Promise((res,rej)=>{resolve=res;reject=rej;});return {promise,resolve,reject};};
+ const signing=rejectable(),started=deferred();
+ const closes=[];const dialog={close(){closes.push('close');}};
+ const typed={domain:{chainId:31337,verifyingContract:'0x0000000000000000000000000000000000000009'},types:{SaleAuthorization:[]},message:{gross:atoms(100),evidenceHash:'0x'+'1'.repeat(64),licenseHash:'0x'+'2'.repeat(64)}};
+ const f=fixture(t,async p=>{started.resolve();return signing.promise;},async path=>path.endsWith('/metadata')?{trace_id:'trace',content_hash:hash(1)}:{id:'listing',typed_data:typed},{dialog});
+ document.querySelector=()=>({value:'100',checked:true});
+ await f.ui.action('thot-list-configure',button());
+ await f.ui.action('thot-list-confirm',button());
+ const attempt=f.ui.action('thot-list-sign',button());
+ await started.promise;
+ // #78: the review dialog is closed for the whole wallet request.
+ assert.deepEqual(closes,['close']);
+ signing.reject(Object.assign(Error('User rejected'),{code:4001}));
+ await assert.rejects(attempt,/User rejected/);
+ assert.equal(f.dialogs.at(-1)[0],'Review the exact commitments','the exact-commitment review returns after a cancelled signature');
+ assert.equal(f.calls.some(c=>c.path.endsWith('/activate')),false);
 });
 
 test('listing setup renders only the explicit owner preview and reserve sampling remains optional',async t=>{
@@ -189,7 +242,8 @@ test('a signature returned after account replacement never activates the former 
  const signed=deferred(),started=deferred();
  const f=fixture(t,async p=>{if(p.method==='eth_signTypedData_v4'){started.resolve();return signed.promise;}throw Error('Unexpected wallet transaction');},async path=>path.endsWith('/metadata')?{trace_id:'trace',content_hash:hash(1)}:{id:'listing',typed_data:{}});
  document.querySelector=()=>({value:'test',checked:true});await f.ui.action('thot-list-configure',button());
- const action=f.ui.action('thot-list-confirm',button());await started.promise;f.state.actor={id:'other'};f.state.generation++;signed.resolve('0x'+'ab'.repeat(65));
+ await f.ui.action('thot-list-confirm',button());
+ const action=f.ui.action('thot-list-sign',button());await started.promise;f.state.actor={id:'other'};f.state.generation++;signed.resolve('0x'+'ab'.repeat(65));
  await assert.rejects(action,{name:'StaleWorkspaceError'});assert.equal(f.calls.some(c=>c.path.endsWith('/activate')),false);
 });
 
@@ -338,12 +392,13 @@ test('wallet account changed while signing cannot activate a listing for the ear
  let selected=owner;const f=fixture(t,async()=>{},async path=>path.endsWith('/metadata')?{trace_id:'trace'}:{id:'listing',typed_data:{}});
  window.ethereum.request=async p=>p.method==='eth_chainId'?'0x7a69':p.method==='eth_requestAccounts'?[selected]:(selected=other,'0x'+'ab'.repeat(65));
  document.querySelector=()=>({value:'test',checked:true});await f.ui.action('thot-list-configure',button());
- await assert.rejects(f.ui.action('thot-list-confirm',button()),/wallet linked to this signed-in account/);assert.equal(f.calls.some(c=>c.path.endsWith('/activate')),false);
+ await f.ui.action('thot-list-confirm',button());
+ await assert.rejects(f.ui.action('thot-list-sign',button()),/wallet linked to this signed-in account/);assert.equal(f.calls.some(c=>c.path.endsWith('/activate')),false);
 });
 
 test('listing activation retry reuses its prepared listing and signature instead of authorizing a duplicate sale',async t=>{
  let activations=0;const f=fixture(t,async p=>{assert.equal(p.method,'eth_signTypedData_v4');return '0x'+'ab'.repeat(65);},async path=>{if(path.endsWith('/metadata'))return {trace_id:'trace'};if(path.endsWith('/activate')){if(++activations===1)throw Error('Network interrupted');return {id:'listing'};}return {id:'listing',typed_data:{}};});
- document.querySelector=()=>({value:'test',checked:true});await f.ui.action('thot-list-configure',button());await assert.rejects(f.ui.action('thot-list-confirm',button()),/Network interrupted/);
+ document.querySelector=()=>({value:'test',checked:true});await f.ui.action('thot-list-configure',button());await f.ui.action('thot-list-confirm',button());await assert.rejects(f.ui.action('thot-list-sign',button()),/Network interrupted/);
  // The contributor can reopen after a workspace refresh and finish the exact activation.
  f.state.generation++;await f.ui.action('thot-list-configure',button());assert.equal(f.dialogs.at(-1)[0],'Finish enabling your signed listing');await f.ui.action('thot-list-resume',button());
  assert.equal(f.calls.filter(c=>c.path==='/v1/thot/listings').length,1);assert.equal(f.requests.filter(p=>p.method==='eth_signTypedData_v4').length,1);

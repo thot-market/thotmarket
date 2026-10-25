@@ -13,7 +13,7 @@ const routes=new Set([
   '/inference-ui.js','/operations-ui.js','/contributor-ui.js','/clerk-auth-ui.js',
   '/wallet-auth-ui.js','/privy-auth-state.js','/openrouter-ui.js',
   '/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js','/history-sync-ui.js',
-  '/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started.js',
+  '/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started.js','/device-pairing-ui.js',
   '/connected-journey-ui.js','/qc-ui.js','/fee-policy-ui.js',
 ]);
 const compressBrotli=promisify(brotliCompress),compressGzip=promisify(gzip);
@@ -21,7 +21,7 @@ const maxFileBytes=16*1024*1024,maxSourceBytes=32*1024*1024,compressionOverhead=
 type Encoding='br'|'gzip'|'identity';
 type Representation={body:Buffer;etag:string;encoding:Encoding;contentType:string};
 type Asset={identity:Representation;compressed:Map<Encoding,Promise<Representation>>};
-const generatedFile=/^(?:privy-auth\.bundle\.js|privy-auth-chunks\/[A-Z0-9]{8}\.js)$/;
+const generatedFile=/^(?:app\.bundle\.js|privy-auth\.bundle\.js|privy-auth-chunks\/[A-Z0-9]{8}\.js)$/;
 function canonicalRoute(route:string):string|null {
   if(routes.has(route))return route;
   const match=route.match(/^\/privy-auth\/v1\/(?:0|[1-9][0-9]{0,3})\/(.+)$/);

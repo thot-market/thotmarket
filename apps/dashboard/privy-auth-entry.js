@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import {createPortal} from 'react-dom';
 import {PrivyProvider, usePrivy, useWallets, useLogin, useModalStatus, useCreateWallet} from '@privy-io/react-auth';
 import {eligiblePrivyWallets, selectPrivyWallet, validatePrivyConfig} from './privy-auth-state.js';
+import {installPrivyModalAccessibility} from './privy-modal-a11y.js';
 
 const chains = {
   31337: {id: 31337, name: 'Private Anvil', nativeCurrency: {name: 'Test Ether', symbol: 'ETH', decimals: 18}, testnet: true},
@@ -20,6 +21,8 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
   const initialized = new Promise((resolve, reject) => {readyResolve = resolve; readyReject = reject;});
   const timer = window.setTimeout(() => readyReject(new Error('Privy did not load. Check the connection and try again.')), 30000);
   const host = document.createElement('div'); host.id = 'privy-auth-root'; document.body.appendChild(host);
+  // Keep the SDK's own dialog accessible while it exists in this page.
+  const stopAccessibility = installPrivyModalAccessibility({document, window});
   const fail = error => onError(error instanceof Error ? error : new Error('Privy sign-in could not complete.'));
   function settleLoginOpening(error) {loginOpening?.(error);}
   function waitForLoginModal(epoch) {
@@ -92,7 +95,9 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
   function Bridge() {
     const auth = usePrivy(), walletState = useWallets(), modal = useModalStatus(), [, tick] = useState(0);
     const {createWallet} = useCreateWallet();
-    const {login} = useLogin({onComplete: ({loginAccount}) => {if (!loginAttempt || destroyed) return; loginAddress = loginAccount?.type === 'wallet' && loginAccount.chainType === 'ethereum' ? loginAccount.address : null; openRequested = true; onProgress('Wallet connected. Finishing sign-in…'); tick(n => n + 1);}, onError: () => {openRequested = false; loginAttempt = false; settleLoginOpening(); fail(new Error('Privy login was cancelled or could not complete.'));}});
+    const {login} = useLogin({onComplete: ({loginAccount}) => {if (!loginAttempt || destroyed) return; loginAddress = loginAccount?.type === 'wallet' && loginAccount.chainType === 'ethereum' ? loginAccount.address : null; openRequested = true; onProgress('Wallet connected. Finishing sign-in…'); tick(n => n + 1);}, onError: ({error}) => {openRequested = false; loginAttempt = false; settleLoginOpening(); // A dismissed dialog is a choice, not a failure; keep it distinct from real errors.
+      const cancelled = /cancel|close|dismiss|abort/i.test(String(error?.code ?? '')) || /cancel|closed|dismiss/i.test(String(error?.message ?? ''));
+      fail(new Error(cancelled ? 'Sign-in cancelled.' : 'Sign-in could not complete. Try again.'));}});
     renderTick = () => {if (!destroyed) tick(n => n + 1);};
     useEffect(() => {
       current = {...auth, wallets: walletState.wallets, walletsReady: walletState.ready, login};
@@ -174,6 +179,6 @@ export function createPrivyAuth({document, window, config, walletAuth, onError =
       selectedAddress = wallet.address.toLowerCase(); return [provider];
     },
     async signOut() {generation++; settleLoginOpening(); selectedAddress = null; openRequested = false; loginAttempt = false; loginAddress = null; await walletAuth.signOut(); await current?.logout(); renderTick();},
-    destroy() {destroyed = true; generation++; settleLoginOpening(); notifyWalletWaiters(); window.clearTimeout(timer); root?.unmount(); host.remove(); current = null;}
+    destroy() {destroyed = true; generation++; settleLoginOpening(); notifyWalletWaiters(); window.clearTimeout(timer); stopAccessibility(); root?.unmount(); host.remove(); current = null;}
   };
 }

@@ -12,7 +12,7 @@ folder selection, backfill, Linux/macOS scheduling, limits and revocation.
 No model calls or provider login are needed for this path. Uploading is private;
 listing requires a separate review and authorization.
 
-Requires Node.js 24+ and your existing Claude Code or Codex installation/login. Interactive capture also requires tmux. Python 3 and the reviewed hardware verifier enable independent recorder checks and are required by `--require-reference`. Provider clients are not installed by this package.
+Requires Node.js 24+ and your existing Claude Code or Codex installation/login. Interactive capture also requires tmux. Python 3 and the reviewed hardware verifier enable independent recorder checks and are required by `--require-reference`. The installer and a first `thot-setup` download the pinned `dcap-qvl` release for supported platforms, verify its sha256, install it under `~/.local/share/thot/bin` and record the path; a hash mismatch is rejected, never used, and unsupported platforms get the exact URL, sha256 and destination for a manual install. `TV_DCAP_QVL` still selects your own absolute verifier path. Provider clients are not installed by this package.
 
 ## Connect to the production deployment
 
@@ -138,6 +138,6 @@ login. Stop any active capture separately.
 Implementation: [pairing](../capture/src/connect.ts),
 [child invocation](../capture/src/index.ts),
 [local state](../capture/src/local-state.ts), [sync](../capture/src/sync.ts).
-Regression coverage includes [device revocation](../../tests/capture-devices.test.ts),
+Regression coverage includes
 [sync](../../tests/capture-sync.test.ts) and
 [durability](../../tests/capture-durability.test.ts).

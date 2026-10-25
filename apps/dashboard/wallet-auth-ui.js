@@ -139,13 +139,18 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
       };
       // Anonymous and injected-wallet restores never download the optional SDK.
       selected = await match(availableProviders()); current(expected);
+      // With no extension wallet the email wallet is the only signer: the server session already
+      // proves the account, so show it now and attach the wallet SDK when it finishes loading.
+      const shown = !selected && !availableProviders().length;
+      if (shown) { validateSession(result, result.wallet_address); await sessionReady(sessionValue(result)); current(expected); }
       if (!selected) {
         const extra = await bounded(additionalProviders(result.wallet_address), additionalProvidersTimeoutMs, 'Email wallet restoration took too long. Retry sign-in.'); current(expected);
         selected = await match(extra); current(expected);
       }
       if (!selected) { await revokeRemote(); current(expected); await onSignedOut(); return false; }
       validateSession(result, result.wallet_address); attach(selected); await bounded(context(selected, expected, result.wallet_address), providerTimeoutMs, 'Wallet provider did not respond. Retry sign-in.'); current(expected);
-      await sessionReady(sessionValue(result)); return true;
+      if (!shown) await sessionReady(sessionValue(result));
+      return true;
     } catch (error) { if (!destroyed && expected === epoch) { await onSignedOut(); onError(error); } return false; }
     finally { if (busyEpoch === expected) {busy = false; busyEpoch = null; busyKind = null;} finishRestore(); }
   }

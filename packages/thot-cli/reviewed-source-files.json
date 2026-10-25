@@ -3,6 +3,7 @@
   "files": [
     "packages/capture/src/browser.ts",
     "packages/capture/src/connect.ts",
+    "packages/capture/src/device-pairing.ts",
     "packages/capture/src/export.ts",
     "packages/capture/src/history-connect.ts",
     "packages/capture/src/history-schedule.ts",
@@ -18,6 +19,9 @@
     "packages/capture/src/tee/policy-file.ts",
     "packages/capture/src/terminal.ts",
     "packages/capture/src/timing.ts",
+    "packages/capture/src/user-home.ts",
+    "packages/capture/src/verifier-pin.json",
+    "packages/capture/src/verifier.ts",
     "packages/protocol/src/canonical.ts",
     "packages/protocol/src/crypto.ts",
     "packages/protocol/src/index.ts",

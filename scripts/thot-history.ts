@@ -18,7 +18,7 @@ if(!command||command==='--help'||command==='-h'){
   console.log(`Usage: thot-history connect --client claude|codex --source DIRECTORY [--source DIRECTORY] [--thot-url ORIGIN] [--backfill] [--time HH:MM] [--gate-config FILE]
        thot-history run|status|pause|resume|enable|disable|disconnect --id CONNECTION_ID
 
-Connect reads names and sizes only, then asks your signed-in browser for private-upload consent.
+Connect reads names and sizes only, then asks your signed-in browser for private-upload consent. Pairing uses loopback first and falls back to a short code after 30 seconds; --pairing code (or THOT_PAIRING=code) skips loopback for browsers on another device.
 Only explicitly selected directories are scanned. New-only is the default: every existing JSONL path is excluded permanently. --backfill includes existing files.
 Run uploads stable snapshots now. Changed snapshots create immutable private versions; earlier versions are never overwritten. Uploading never authorizes a sale.
 Enable installs an explicit per-user daily schedule on Linux (systemd user) or macOS (LaunchAgent); default 02:00 UTC. This does not install or run during package installation.
@@ -31,7 +31,7 @@ Private environment operators may explicitly use --gate-config FILE: an existing
 const flags=new Map<string,string>(),sources:string[]=[];let backfill=false,scheduled=false,noOpen=false;
 for(let i=0;i<argv.length;i++){
   const arg=argv[i]!;if(arg==='--backfill'){backfill=true;continue;}if(arg==='--scheduled'){scheduled=true;continue;}if(arg==='--no-open'){noOpen=true;continue;}
-  if(!['--client','--source','--thot-url','--time','--id','--state-root','--gate-config'].includes(arg)||!argv[i+1])throw Error('INVALID_HISTORY_ARGUMENT');const value=argv[++i]!;if(arg==='--source')sources.push(value);else{if(flags.has(arg))throw Error('DUPLICATE_HISTORY_ARGUMENT');flags.set(arg,value);}
+  if(!['--client','--source','--thot-url','--time','--id','--state-root','--gate-config','--pairing'].includes(arg)||!argv[i+1])throw Error('INVALID_HISTORY_ARGUMENT');const value=argv[++i]!;if(arg==='--source')sources.push(value);else{if(flags.has(arg))throw Error('DUPLICATE_HISTORY_ARGUMENT');flags.set(arg,value);}
 }
 const root=resolve(flags.get('--state-root')??join(thotUserHome(),'.local/state/thot/history'));
 const inactiveGrant=new Set(['HISTORY_DEVICE_REVOKED','HISTORY_DEVICE_EXPIRED','INVALID_HISTORY_DEVICE']);
@@ -45,11 +45,12 @@ try{
       if(await exists(join(dir,'pending.enc'))){const old=await loadHistoryState(dir);if(old.schedule)throw Error('HISTORY_DISABLE_PREVIOUS_SCHEDULE_FIRST');if(!old.disconnected){let inactive=false;try{await historyPost(old,'status');}catch(error){if(error instanceof Error&&inactiveGrant.has(error.message))inactive=true;else throw error;}if(!inactive)throw Error('HISTORY_ALREADY_CONNECTED_DISCONNECT_FIRST');}}
       console.log('Selected '+state.sources.length+' '+client+' history folder(s). '+(backfill?'Existing history is included.':'Existing JSONL paths are excluded, including later edits.'));
       for(const source of state.sources)console.log('Local scope: '+source.path);
-      await connectHistory(state,dir,{...(noOpen?{open:async()=>false}:{})});await pauseHistoryLocally(dir,false);
+      const pairing=flags.get('--pairing');if(pairing!==undefined&&!['code','loopback'].includes(pairing))throw Error('INVALID_HISTORY_ARGUMENT');
+      await connectHistory(state,dir,{...(noOpen?{open:async()=>false}:{}),...(pairing?{pairing:pairing as 'code'|'loopback'}:{})});await pauseHistoryLocally(dir,false);
     });
     console.log('Private history connection: '+state.id+'\nUpload once: '+invoke+' run --id '+state.id+'\nCheck status: '+invoke+' status --id '+state.id+'\nEnable daily uploads: '+invoke+' enable --id '+state.id+'\nNo upload or schedule has started yet.');
   }else{
-    if(sources.length||backfill||flags.has('--client')||flags.has('--time')||flags.has('--thot-url')||flags.has('--gate-config'))throw Error('HISTORY_CONNECT_FLAGS_ONLY');
+    if(sources.length||backfill||flags.has('--client')||flags.has('--time')||flags.has('--thot-url')||flags.has('--gate-config')||flags.has('--pairing'))throw Error('HISTORY_CONNECT_FLAGS_ONLY');
     const dir=historyDirectory(root,flags.get('--id')??''),state=await loadHistoryState(dir);
     const schedule={id:state.id,home:thotUserHome(),stateRoot:root,entry:fileURLToPath(import.meta.url),time:state.daily_time_utc};
     if(command==='run')console.log(JSON.stringify(await runHistorySync(dir,{scheduled})));

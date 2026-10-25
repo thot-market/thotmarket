@@ -80,7 +80,7 @@ test('wallet catalogue returns only active public metadata without a chain read 
   }}) as unknown as ThotChain;
   app.privacy.open=async()=>assert.fail('catalogue attempted private-content decryption');
   const before=await app.db.transaction(tx=>tx.list('thot_records'));
-  const expected={id:'catalogue-active',seller,owner_label:'Contributor',title:listing.title,price_atoms:listing.price_atoms,
+  const expected={id:'catalogue-active',public_path:'/l/catalogue-active',seller,owner_label:'Contributor',title:listing.title,price_atoms:listing.price_atoms,
     license:listing.license,license_hash:listing.license_hash,evidence_hash:listing.evidence_hash,provenance:'P0_OPERATOR',
     workflow:'coding',turn_count:2,capture_model:null,created_at:listing.created_at,automatic_sales:true,treasury_opt_in:false};
   const result=await call('/v1/thot/catalog',{cookies:alice.cookies});
@@ -283,4 +283,33 @@ test('expired or absent wallet cookies still receive logout clearing headers fro
     const result = await call('/v1/auth/session/revoke', { body: {}, cookies }); assert.equal(result.status, 401);
     assert.equal(result.headers['set-cookie'].length, 2); assert.ok(result.headers['set-cookie'].every((value: string) => value.includes('Max-Age=0')));
   }
+});
+
+test('public listing share pages show metadata only and unlisted work says no longer available', async t => {
+  const {app,call,login}=await setup(t),account=await login();
+  const seller=account.wallet.address,publicId='018f37a1b2c3d4e5f6a7b8c9';
+  const privateMarker='SYNTHETIC_PRIVATE_SHARE_PAGE_CONTENT';
+  const row={kind:'listing',active:true,wallet:seller,title:'Shareable deployment notes',price_atoms:'1500000000000000000',
+    license:'Non-exclusive evaluation licence for thirty days.',license_hash:'0x'+'3'.repeat(64),evidence_hash:'0x'+'4'.repeat(64),
+    provenance:'P1_ATTESTED',workflow:'research',turn_count:7,capture_model:{evidence:'user_supplied',claimed_model:'glm-5.3'},created_at:'2026-10-24T09:30:00.000Z',signature:'0x'+'5'.repeat(130),
+    release_ref:privateMarker,trace_id:privateMarker,authorization:{private:privateMarker},content:{turns:[privateMarker]}};
+  await app.db.transaction(async tx=>{await tx.insert('thot_records','listing:'+publicId,account.result.body.actor.id,row);});
+  const page=await call('/l/'+publicId,{origin:null});
+  assert.equal(page.status,200);assert.match(page.headers["content-type"]!,/text\/html/);
+  assert.match(page.body,/Shareable deployment notes/);assert.match(page.body,/1\.5 THOT/);assert.match(page.body,new RegExp(seller));
+  assert.match(page.body,/P1_ATTESTED/);assert.match(page.body,/glm-5\.3 \(claimed\)/);assert.match(page.body,/2026-10-24/);
+  assert.match(page.body,/Sign in to buy/);assert.match(page.body,/href="\/app"/);
+  assert.ok(!page.body.includes(privateMarker),'trace content never reaches the public page');
+  const metadata=await call('/l/'+publicId,{origin:null,method:'HEAD'});
+  assert.equal(metadata.status,200);
+  const catalogue=await call('/v1/public/listings',{origin:null}),listed=JSON.stringify(catalogue.body);
+  assert.equal(catalogue.status,200);assert.equal(catalogue.body.listings[0].title,'Shareable deployment notes');assert.equal(catalogue.body.listings[0].public_path,'/l/'+publicId);
+  assert.ok(!listed.includes(privateMarker),'trace content never reaches the public catalogue');
+  await app.db.transaction(async tx=>tx.update('thot_records','listing:'+publicId,{...row,active:false,unlisted_at:'2026-10-25T00:00:00.000Z'}));
+  const withdrawn=await call('/l/'+publicId,{origin:null});
+  assert.equal(withdrawn.status,200);assert.match(withdrawn.body,/No longer available/);assert.ok(!withdrawn.body.includes('Shareable deployment notes'));
+  assert.equal((await call('/v1/public/listings',{origin:null})).body.listings.length,0,'unlisted work leaves the catalogue');
+  const unknown=await call('/l/018f0000000000000000000fff',{origin:null});
+  assert.equal(unknown.status,200);assert.match(unknown.body,/No longer available/);
+  assert.equal((await call('/l/'+publicId+'..',{origin:null})).status,401,'malformed ids never reach a listing page');
 });

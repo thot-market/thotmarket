@@ -80,6 +80,12 @@ if (typeof document !== 'undefined') {
       const p = document.createElement('p'); p.className = 'proof-empty'; p.textContent = text; container.replaceChildren(p);
     });
   }
+  // An environment with no published snapshot leaves the receipts panel neutral:
+  // no badge and no status line that could read as an outage, one plain sentence instead.
+  function neutralProof() {
+    document.querySelectorAll('[data-proof-environment],[data-proof-time]').forEach(node => { node.hidden = true; });
+    emptyProof('Public purchase receipts appear here when this environment publishes a verified snapshot.');
+  }
   async function loadProof() {
     try {
       const response = await fetch('/v1/public/market-proof', { credentials: 'omit', signal: AbortSignal.timeout(5000) });
@@ -120,9 +126,9 @@ if (typeof document !== 'undefined') {
         container.replaceChildren(...rows);
       });
     } catch {
-      set('[data-proof-environment]', 'Unavailable');
-      set('[data-proof-time]', 'Verified public receipts are unavailable for this environment.');
-      emptyProof('Open the workspace to see available market activity. We only show transaction receipts here when they can be verified.');
+      neutralProof();
+      // Nothing published for this environment: hide the empty board rather than explain it.
+      document.querySelector('[data-market-proof]')?.setAttribute('hidden', '');
     }
   }
   void loadProof();

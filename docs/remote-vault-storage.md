@@ -87,7 +87,6 @@ Scheduled snapshots, backup-age alerts, object retention/replication, full metad
 ```sh
 pnpm typecheck
 node --test tests/remote-vault.test.ts tests/s3-store.test.ts tests/vault-quotas.test.ts tests/ciphertext-store.test.ts
-THOT_QUOTA_TEST_DATABASE_URL=<disposable PostgreSQL URL> node --test tests/remote-quota-postgres.test.ts
 ```
 
 The S3 tests exercise actual SDK signing/commands through a synthetic transport, including oversize and stalled streams. PostgreSQL tests use independent pools. JSONL integration exercises private import, restart/read and deletion without a local objects directory. The PostgreSQL test requires a separately supplied disposable database; the declared public suites do not run that test. cloud provider/KMS deployment acceptance remains separate.
