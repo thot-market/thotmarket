@@ -12,7 +12,7 @@ import {installReleaseGitIdentity} from './check-release-git-identity.mjs';
 
 const PUBLIC = 'thot-market/thotmarket';
 const root = fileURLToPath(new URL('../', import.meta.url));
-const run = (cmd, args, opts = {}) => execFileSync(cmd, args, {encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...opts}).trim();
+const run = (cmd, args, opts = {}) => (execFileSync(cmd, args, {encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...opts}) ?? '').trim();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function nextTag(tags) {

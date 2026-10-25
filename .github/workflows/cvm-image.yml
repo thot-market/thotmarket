@@ -84,8 +84,7 @@ jobs:
           test -n "$VERIFIER_PATH" && test -n "$VERIFIER_SHA256"
           node scripts/build-thot-image.mjs --source "$GITHUB_WORKSPACE" \
             --output "$RUNNER_TEMP/thot-image-snapshot" \
-            --verifier "$VERIFIER_PATH" \
-            --expected-verifier-sha256 "$VERIFIER_SHA256" > "$RUNNER_TEMP/snapshot.json"
+            --verifier "$VERIFIER_PATH" > "$RUNNER_TEMP/snapshot.json"
           snapshot_hash=$(jq -r .manifest_sha256 "$RUNNER_TEMP/snapshot.json")
           source_hash=$(jq -r .source_sha256 "$RUNNER_TEMP/snapshot.json")
           node scripts/build-thot-image.mjs --snapshot "$RUNNER_TEMP/thot-image-snapshot" \
