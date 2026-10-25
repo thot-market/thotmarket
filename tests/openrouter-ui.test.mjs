@@ -77,7 +77,7 @@ test('OpenRouter connected state offers revocation without exposing previously i
   assert.match(a.messages.at(-1), /Signed sale policies remain/);
 });
 
-test('OpenRouter successful uppercase relay status is shown as a vault trace and untrusted model text is escaped', async () => {
+test('OpenRouter successful uppercase relay status is shown as a vault item and untrusted model text is escaped', async () => {
   const a = fixture(); a.status.requests = [{ model: '<img src=x onerror=evil()>', status: 'COMPLETED', created_at: '2026-09-15T01:00:00Z', content_deleted: false }];
   await a.ui.handle('openrouter-open'); assert.match(a.dialogs[0].html, /In your vault/); assert.doesNotMatch(a.dialogs[0].html, /<img src=x/); assert.match(a.dialogs[0].html, /&lt;img/);
 });
@@ -148,7 +148,7 @@ test('a supported connection signs one scoped policy before sending the provider
  const provider={async request(input){walletCalls.push(input);if(input.method==='eth_accounts')return [wallet];if(input.method==='eth_chainId')return '0x7a69';if(input.method==='eth_signTypedData_v4')return '0x'+'3'.repeat(130);throw Error('Unexpected wallet method');}};
  const a=fixture({provider,prepare:async()=>({id:'stream:one',typed_data:{domain:{chainId:31337,verifyingContract:market},message:{seller:wallet}}})});
  a.state.thot={wallet,capabilities:{stream_sales:true,chain_id:31337,market}};await a.ui.handle('openrouter-open');
- assert.match(a.dialogs[0].html,/subsequent traces only/);assert.match(a.dialogs[0].html,/including model outputs/);assert.match(a.dialogs[0].html,/asking price, not an assay estimate/);assert.match(a.dialogs[0].html,/one complete approved release from each stable group of 20/);
+ assert.match(a.dialogs[0].html,/subsequent data only/);assert.match(a.dialogs[0].html,/including model outputs/);assert.match(a.dialogs[0].html,/asking price, not an assay estimate/);assert.match(a.dialogs[0].html,/one complete approved release from each stable group of 20/);
  a.fields.get('#openrouter-auto-sales').checked=true;await a.fill().submit();const connect=a.calls.find(call=>call.path.endsWith('/connect'));
  const prepared=a.calls.find(call=>call.path==='/v1/thot/streams/prepare').options.body;assert.equal(prepared.price_thot,'100');assert.equal(prepared.treasury_sampling_opt_in,false);
  assert.equal(walletCalls.filter(c=>c.method==='eth_signTypedData_v4').length,1);assert.equal(connect.options.body.sale_policy_id,'stream:one');assert.equal(connect.options.body.rights_confirmed,true);assert.equal(connect.options.body.model_output_licensed,true);
@@ -245,8 +245,8 @@ test('OpenRouter automatic-sale terms show the configured tariff without changin
  ]){
   const a=fixture();a.state.thot={capabilities:{stream_sales:true},account:{economics},holder_rewards:{mode:'upfront-discount',policy:{}}};
   await a.ui.handle('openrouter-open');const html=a.dialogs.at(-1).html;
-  if(economics.policy==='percentage/1'){assert.match(html,/1% of the listed trace price/);assert.doesNotMatch(html,/0\.0100 THOT per purchase/);}
-  else assert.match(html,/0\.0400 THOT per purchase, including 0\.0100 THOT/);
+  if(economics.policy==='percentage/1'){assert.match(html,/1% of the listed price/);assert.doesNotMatch(html,/0\.01 THOT per purchase/);}
+  else assert.match(html,/0\.04 THOT per purchase, including 0\.01 THOT/);
   assert.match(html,/funding quote fixes the exact buyer payment and seller proceeds/);
   assert.match(html,/Estimates do not guarantee a sale or payout/);
   assert.equal(a.fields.get('#openrouter-auto-sales').checked,false);

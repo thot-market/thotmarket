@@ -50,7 +50,7 @@ test('preview shows term payouts first and identifies annual compounding as hypo
   assert.match(html, /Hypothetical APY/);
   assert.match(html, /no automatic renewal or compounding/);
   assert.match(html, /Enrollment opens after the reward pool is funded/);
-  assert.match(html, /No trace sale required/);
+  assert.match(html, /No item sale required/);
   assert.equal((html.match(/type="radio"/g) ?? []).length, 3);
   assert.doesNotMatch(html, /<button|undefined|NaN|Guaranteed APY/);
 });

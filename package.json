@@ -28,7 +28,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1135.0",
-    "@clerk/backend": "3.17.1",
     "@electric-sql/pglite": "^0.5.8",
     "@privy-io/react-auth": "3.42.0",
     "@types/node": "^26.4.1",
@@ -42,7 +41,6 @@
     "typescript": "^7.0.2"
   },
   "devDependencies": {
-    "@clerk/testing": "^2.2.33",
     "@uniswap/v2-core": "1.0.1",
     "@uniswap/v2-periphery": "1.1.0-beta.0",
     "solc": "0.8.30"

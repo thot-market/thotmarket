@@ -137,7 +137,7 @@ try {
       await seller.page.reload();
       await seller.page.locator('nav [data-view="vault"].active').waitFor();
       await reviewTrace.waitFor();
-      evidence.checks.push('My work preserves the signed-in contributor and imported trace after a browser reload.');
+      evidence.checks.push('My data preserves the signed-in contributor and imported item after a browser reload.');
     }
     const metadataResponse = seller.page.waitForResponse(r => r.url().endsWith('/v1/thot/listings/metadata'));
     await reviewTrace.click();
@@ -152,7 +152,7 @@ try {
         const layout = await seller.page.locator('.thot-sale-form').evaluate(form => {
           const title = form.querySelector('#thot-title').getBoundingClientRect();
           const price = form.querySelector('#thot-price').getBoundingClientRect();
-          const licence = form.querySelector('#thot-license').getBoundingClientRect();
+          const licence = form.querySelector('#thot-license-preset').getBoundingClientRect();
           const body = form.closest('.dialog-body');
           const release = body.querySelector('.journey-release').getBoundingClientRect();
           const terms = form.closest('aside').getBoundingClientRect();
@@ -271,7 +271,7 @@ try {
   await buyer.page.getByText('Delivered · dispute window',{exact:true}).waitFor();
   evidence.checks.push('Pending purchase cards refresh to delivered without a manual page reload or another transaction.');
   await buyer.page.locator(`[data-action="thot-delivery"][data-id="${offer.id}"]`).click();
-  await buyer.page.getByRole('heading', {name: 'Your licensed trace', exact: true}).waitFor();
+  await buyer.page.getByRole('heading', {name: 'Your purchase', exact: true}).waitFor();
   await shot(buyer.page, 'purchase-04-licensed-content');
   const readerViewport = buyer.page.viewportSize();
   await buyer.page.setViewportSize({width:390,height:844});
@@ -338,10 +338,11 @@ try {
   assert.equal(BigInt(sellerAnalytics.own.pooled_paid_atoms),expected.seller);
   evidence.checks.push('Indexed independent seller proceeds and pooled payments match the actual confirmed payout at the current account block.');
   await seller.open('earnings');
-  const indexedSellerDisplay=`${expected.seller/10n**18n}.${String(expected.seller%10n**18n).padStart(18,'0').slice(0,4)} THOT`;
+  const sellerFraction=String(expected.seller%10n**18n).padStart(18,'0').slice(0,4).replace(/0+$/,'');
+  const indexedSellerDisplay=`${(expected.seller/10n**18n).toLocaleString()}${sellerFraction?'.'+sellerFraction:''} THOT`;
   await seller.page.waitForFunction(expected=>{
     const cards=document.querySelectorAll('#thot-referral-analytics .library-metrics article');
-    const sales=[...cards].find(card=>card.querySelector('small')?.textContent==='Independent trace sales');
+    const sales=[...cards].find(card=>card.querySelector('small')?.textContent==='Independent item sales');
     return sales?.querySelector('strong')?.textContent===expected;
   },indexedSellerDisplay);
   await shot(seller.page, 'purchase-06-seller-paid');

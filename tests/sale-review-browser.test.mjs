@@ -116,7 +116,7 @@ test('sale review names exact commitments, keeps the wallet prompt on top, then 
   assert.deepEqual(await assertNamedControls(f.page,'#detail-dialog'),[],'every control in the sale review is named');
   await f.page.locator('#thot-price').fill('100');
   await f.page.locator('#thot-list-consent').check();
-  await f.page.getByRole('button',{name:/Sign & list trace/}).click();
+  await f.page.getByRole('button',{name:/Sign & list/}).click();
   // #79: the exact hashes being signed are shown and explained before signing.
   await f.page.getByRole('heading',{name:'Review the exact commitments'}).waitFor();
   const review=await f.page.locator('#detail-dialog').innerText();
@@ -145,7 +145,7 @@ test('sale review names exact commitments, keeps the wallet prompt on top, then 
   assert.equal(topmost.atCenter,'wallet-prompt','the prompt is the topmost element at its centre');
   assert.equal(topmost.atButton,'wallet-prompt-confirm','the prompt confirm button is the topmost interactive element');
   await f.resolveSignature();
-  await f.page.getByRole('heading',{name:'Your trace is listed'}).waitFor();
+  await f.page.getByRole('heading',{name:'Your item is listed'}).waitFor();
   assert.match(await f.page.locator('#thot-listing-url').inputValue(),/\/l\/018fsyntheticsharepage0000000001$/);
   await f.page.getByRole('button',{name:'Copy link'}).click();
   await f.page.getByText('Public listing link copied.').waitFor();
@@ -156,7 +156,7 @@ test('a cancelled listing signature returns to the exact commitments without act
   await f.page.getByRole('button',{name:'Review & sell',exact:true}).click();
   await f.page.locator('#thot-price').fill('100');
   await f.page.locator('#thot-list-consent').check();
-  await f.page.getByRole('button',{name:/Sign & list trace/}).click();
+  await f.page.getByRole('button',{name:/Sign & list/}).click();
   await f.page.getByRole('heading',{name:'Review the exact commitments'}).waitFor();
   f.armSignature();
   await f.page.getByRole('button',{name:'Open wallet to sign'}).click();
@@ -167,28 +167,28 @@ test('a cancelled listing signature returns to the exact commitments without act
   assert.equal(f.requests.some(r=>r.path==='/v1/thot/listings/activate'),false);
 });
 
-test('signed-out Buy traces keeps a buyer sign-in state across Back and Forward (#83)',async t=>{
+test('signed-out Marketplace keeps a buyer sign-in state across Back and Forward (#83)',async t=>{
   const f=await fixture(t);await f.open('');
   await f.page.locator('[data-action="identity-sign-out"]').waitFor({state:'attached'});
   await f.page.locator('.journey-menu>summary').click();
   await f.page.locator('[data-action="identity-sign-out"]').click();
   await f.page.getByRole('heading',{name:/Sign in with your wallet/}).waitFor();
-  assert.equal(await f.page.title(),'My work · thot market');
-  await f.page.getByRole('button',{name:'Buy traces',exact:true}).click();
-  await f.page.getByText(/Sign in.*browse traces|browse traces/i).first().waitFor();
-  assert.equal(await f.page.title(),'Buy traces · thot market');
+  assert.equal(await f.page.title(),'My data · thot market');
+  await f.page.getByRole('button',{name:'Marketplace',exact:true}).click();
+  await f.page.getByText(/Sign in.*browse data|browse data/i).first().waitFor();
+  assert.equal(await f.page.title(),'Marketplace · thot market');
   assert.match(await f.page.locator('[data-view="market"]').getAttribute('class'),/active/);
   assert.doesNotMatch(await f.page.locator('[data-view="vault"]').getAttribute('class'),/active/);
   await f.page.goBack();
-  await f.page.waitForFunction(()=>document.title==='My work · thot market');
+  await f.page.waitForFunction(()=>document.title==='My data · thot market');
   await f.page.getByRole('heading',{name:/Sign in with your wallet/}).waitFor();
   await f.page.goForward();
-  await f.page.waitForFunction(()=>document.title==='Buy traces · thot market');
-  await f.page.getByText(/browse traces/i).first().waitFor();
+  await f.page.waitForFunction(()=>document.title==='Marketplace · thot market');
+  await f.page.getByText(/browse data/i).first().waitFor();
   // A buyer deep link lands in the buyer state directly.
   await f.page.goto(origin+'/app#thot-available',{waitUntil:'domcontentloaded'});
-  await f.page.getByText(/browse traces/i).first().waitFor();
-  assert.equal(await f.page.title(),'Buy traces · thot market');
+  await f.page.getByText(/browse data/i).first().waitFor();
+  assert.equal(await f.page.title(),'Marketplace · thot market');
   assert.match(await f.page.locator('[data-view="market"]').getAttribute('class'),/active/);
 });
 

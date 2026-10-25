@@ -19,7 +19,7 @@ import { demoUser, demoBuyer, demoOperator, demoSettlement, importDemo, createDe
 import { completeDevelopmentAllocations } from '../../packages/market/src/chain-worker.ts';
 import { OpenAIResponsesProvider, OpenAIChatProvider } from '../../packages/inference/src/index.ts';
 import { DeliveryLinks } from '../../packages/market/src/delivery-links.ts';
-import { AuthAccessStore, ExternalAuth, ClerkAuth, WalletAuth, walletAuthOrigins, loadWalletAuthConfig, loadAuthConfig, type AuthProvider, type ClerkAuthConfig, type VerifiedIdentity } from '../../packages/auth/src/index.ts';
+import { AuthAccessStore, ExternalAuth, WalletAuth, walletAuthOrigins, loadWalletAuthConfig, loadAuthConfig, type AuthProvider, type VerifiedIdentity } from '../../packages/auth/src/index.ts';
 import { OperationalControls } from '../../packages/market/src/operational-controls.ts';
 import { InferenceReconciliation, type BillingReconciliationConfig } from '../../packages/market/src/inference-reconciliation.ts';
 import {ApiAdmission} from './admission.ts';
@@ -133,11 +133,9 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
     };
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');
-    const clerkOrigin=externalAuth?.capabilities.clerk?.frontend_api_url,plaidCdn=app.plaid.capabilities().plaid_linking?' https://cdn.plaid.com':'';
+    const plaidCdn=app.plaid.capabilities().plaid_linking?' https://cdn.plaid.com':'';
     res.setHeader('Content-Security-Policy',privy
       ? `default-src 'self'; script-src 'self' https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:* https://auth.privy.io https://*.rpc.privy.systems https://explorer-api.walletconnect.com wss://relay.walletconnect.com wss://relay.walletconnect.org wss://www.walletlink.org ${walletRpcUrl}; img-src 'self' data: blob: https://explorer-api.walletconnect.com/v3/logo/; font-src 'self'; frame-src 'self' https://auth.privy.io https://verify.walletconnect.com https://verify.walletconnect.org https://challenges.cloudflare.com${plaidCdn}; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
-      : clerkOrigin
-      ? `default-src 'self'; script-src 'self' ${clerkOrigin} https://challenges.cloudflare.com${plaidCdn}; style-src 'self' 'unsafe-inline'; connect-src 'self' ${clerkOrigin} http://127.0.0.1:*; img-src 'self' data: https://img.clerk.com; frame-src ${clerkOrigin} https://challenges.cloudflare.com${plaidCdn}; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`
       : `default-src 'self'; script-src 'self'${plaidCdn}; style-src 'self'; connect-src 'self' http://127.0.0.1:*; img-src 'self' data:; frame-src 'self'${plaidCdn}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
     res.setHeader('X-Request-ID',requestId);
     try {
@@ -147,7 +145,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       const requestOrigin=appOriginByHost.get(host);
       const url=new URL(req.url??'/',`http://${host}`);route=url.pathname;
       releaseRequest=admission.enterRequest();
-      // The public app shell is a safe landing page for external links and Clerk
+      // The public app shell is a safe landing page for external links and sign-in
       // redirects. This exception never applies to APIs, assets, or mutations.
       // A listing share page and the gate's own login page are the same class of
       // public top-level navigation.
@@ -652,7 +650,7 @@ export async function startServer(options:{port?:number;dataDir?:string;database
   const hostConfiguration={thot,bind,publicOrigin,operatorKeyFile,operatorKeyEnvPresent:Object.hasOwn(process.env,'THOT_TESTNET_OPERATOR_KEY'),readOnly,masterKeySource:process.env.THOT_MASTER_KEY_SOURCE,privateAnvil:process.env.THOT_PRIVATE_ANVIL==='true'};
   // Fail before key loading, KMS calls, application creation or binding when the
   // public testnet deployment is missing an authentication boundary.
-  validateThotHost({...hostConfiguration,walletAuthConfigured:process.env.THOT_ENABLE_WALLET_AUTH==='true',authConfigured:process.env.THOT_ENABLE_CLERK_AUTH==='true'||process.env.THOT_ENABLE_EXTERNAL_AUTH==='true'||process.env.THOT_ENABLE_WALLET_AUTH==='true'});
+  validateThotHost({...hostConfiguration,walletAuthConfigured:process.env.THOT_ENABLE_WALLET_AUTH==='true',authConfigured:process.env.THOT_ENABLE_EXTERNAL_AUTH==='true'||process.env.THOT_ENABLE_WALLET_AUTH==='true'});
   let masterKey;
   if(process.env.THOT_MASTER_KEY_SOURCE){ensure(process.env.THOT_MASTER_KEY_SOURCE==='dstack','INVALID_MASTER_KEY_SOURCE');masterKey=await dstackMasterKey(process.env.DSTACK_SOCKET??'/var/run/dstack.sock');}
   let inference;
@@ -662,7 +660,8 @@ export async function startServer(options:{port?:number;dataDir?:string;database
     const raw=await readFile(process.env.THOT_BILLING_CONFIG_FILE,'utf8');ensure(Buffer.byteLength(raw)<=100_000,'INVALID_BILLING_CONFIG');
     billing=JSON.parse(raw);
   }
-  ensure([process.env.THOT_ENABLE_CLERK_AUTH,process.env.THOT_ENABLE_EXTERNAL_AUTH,process.env.THOT_ENABLE_WALLET_AUTH].filter(v=>v==='true').length<=1,'AUTH_PROVIDER_CONFLICT');
+  ensure(process.env.THOT_ENABLE_CLERK_AUTH!=='true','CLERK_AUTH_REMOVED'); // fail loudly rather than start without the requested login
+  ensure([process.env.THOT_ENABLE_EXTERNAL_AUTH,process.env.THOT_ENABLE_WALLET_AUTH].filter(v=>v==='true').length<=1,'AUTH_PROVIDER_CONFLICT');
   let walletAuthConfig;
   if(process.env.THOT_ENABLE_WALLET_AUTH==='true'){
     ensure(process.env.THOT_WALLET_AUTH_CONFIG_FILE,'WALLET_AUTH_CONFIGURATION_REQUIRED');
@@ -675,14 +674,6 @@ export async function startServer(options:{port?:number;dataDir?:string;database
     if(thot)ensure(walletAuthConfig.chain_id===thot.chainId,'AUTH_CHAIN_MISMATCH');
   }
   let externalAuthConfig;
-  let clerkAuthConfig:ClerkAuthConfig|undefined;
-  if(process.env.THOT_ENABLE_CLERK_AUTH==='true'){
-    ensure(process.env.THOT_ENABLE_EXTERNAL_AUTH!=='true','AUTH_PROVIDER_CONFLICT');
-    ensure(process.env.THOT_CLERK_CONFIG_FILE&&process.env.CLERK_SECRET_KEY,'CLERK_CONFIGURATION_REQUIRED');
-    const raw=await loadAuthConfig(process.env.THOT_CLERK_CONFIG_FILE);
-    ensure(!('secret_key' in raw),'CLERK_SECRET_MUST_USE_ENV');
-    clerkAuthConfig={...(raw as unknown as ClerkAuthConfig),secret_key:process.env.CLERK_SECRET_KEY};
-  }
   if(process.env.THOT_ENABLE_EXTERNAL_AUTH==='true'){
     ensure(process.env.THOT_AUTH_CONFIG_FILE,'AUTH_CONFIGURATION_REQUIRED');
     externalAuthConfig=await loadAuthConfig(process.env.THOT_AUTH_CONFIG_FILE);
@@ -718,7 +709,7 @@ export async function startServer(options:{port?:number;dataDir?:string;database
     if(formGateConfig)ensure(publicOrigin,'FORM_GATE_REQUIRES_PUBLIC_ORIGIN');
     app=await createApplication({storage:remoteStorage,thot,thotOperatorSigner:operatorRuntime.signer,readOnly,dataDir:options.dataDir,databaseUrl:options.databaseUrl,config:{tokenEnabled:options.tokenEnabled??false,traceExplorerViewers:JSON.parse(viewers)},masterKey,inference,robinhood,plaid,openrouter:{enabled:process.env.THOT_ENABLE_OPENROUTER_RELAY==='true'}});
     let externalAuth;
-    if(externalAuthConfig)externalAuth=await ExternalAuth.create(app.db,externalAuthConfig);else if(clerkAuthConfig)externalAuth=await ClerkAuth.create(app.db,clerkAuthConfig);else if(walletAuthConfig)externalAuth=await WalletAuth.create(app.db,walletAuthConfig);
+    if(externalAuthConfig)externalAuth=await ExternalAuth.create(app.db,externalAuthConfig);else if(walletAuthConfig)externalAuth=await WalletAuth.create(app.db,walletAuthConfig);
     validateThotHost({...hostConfiguration,walletAuthConfigured:externalAuth instanceof WalletAuth,authConfigured:!!externalAuth});
     if(initialMemberships)await seedHostedAuthMemberships(app.db,externalAuth,initialMemberships);
     operatorActivity=await OperatorActivity.create({dataDir:app.dataDir,db:app.db});

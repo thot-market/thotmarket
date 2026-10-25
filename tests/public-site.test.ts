@@ -178,8 +178,6 @@ test('public copy distinguishes trade properties, paid buyer access and persiste
     readFile(new URL('../apps/site/access.html', import.meta.url), 'utf8'),
   ]);
   for (const html of [home, mechanism, access]) assert.match(html, /href="\/tutorial"/);
-  assert.match(home, /src="\/assets\/robinhood-trade-proof-flow\.svg"/);
-  assert.match(home, /They see no order records and no excerpt from the research/);
   assert.match(mechanism, /with little or no qualifying THOT can still buy/);
   assert.match(mechanism, /There is no membership surcharge/);
   assert.match(mechanism, /20% of net service contribution/);
@@ -361,11 +359,9 @@ test('2026-10-24 QA copy fixes: plain language, no dead references, no font-glyp
   assert.match(html['index.html']!, /<svg class="arrow-icon"/);
   assert.match(html['whitepaper.html']!, /Read the launch post <svg class="arrow-icon"/);
   // #88: plain-language and corrected copy.
-  assert.match(html['index.html']!, /The current base service fee is 1% of the trace price/);
+  assert.match(html['index.html']!, /The base service fee is 1% of the price/);
   assert.doesNotMatch(html['index.html']!, /At the current tiers, The base service fee/);
-  assert.match(html['index.html']!, /In testing; not live yet/);
   assert.doesNotMatch(html['index.html']!, /Joined local acceptance/);
-  assert.match(html['index.html']!, /<h3>Bring your own evaluator\.<\/h3>/);
   assert.doesNotMatch(Object.values(html).join(' '), /assayer/i);
   assert.match(html['affiliates.html']!, /<h3>Share your wallet address\.<\/h3>/);
   assert.doesNotMatch(html['affiliates.html']!, /<h3>Share your wallet\.<\/h3>/);

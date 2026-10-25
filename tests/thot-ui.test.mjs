@@ -95,7 +95,7 @@ function viewFixture(){
  return {state,ui};
 }
 
-test('listing choices use the private library title without changing their trace identifier',()=>{
+test('listing choices use the private library title without changing their item identifier',()=>{
  const {state,ui}=viewFixture();state.traces=[{trace_id:'private-1'}];
  state.traceLibrary={items:[{trace_id:'private-1',title:'My <coding> session'}]};
  assert.match(ui.offersHTML(),/<option value="private-1">My &lt;coding&gt; session<\/option>/);
@@ -103,7 +103,7 @@ test('listing choices use the private library title without changing their trace
 
 test('Offers, Earnings and THOT have distinct content and keep actions in their intended view',()=>{
  const {ui}=viewFixture(),offers=ui.offersHTML(),earnings=ui.earningsHTML(),token=ui.tokenHTML();
- assert.match(offers,/<h1>Buy a trace\. Put it to work\.<\/h1>/);
+ assert.match(offers,/<h1>Buy an item\. Put it to work\.<\/h1>/);
  assert.match(offers,/data-action="thot-list-configure"/);assert.match(offers,/data-action="thot-buy"/);
  assert.doesNotMatch(offers,/id="thot-lock"|id="thot-referrer"|data-action="thot-claim"/);
  assert.match(earnings,/<h1>What your work has earned\.<\/h1>/);assert.match(earnings,/data-action="thot-claim"/);
@@ -125,13 +125,13 @@ test('earnings separates unaccepted offers, pending proceeds, finalized allocati
  state.thot.orders=[0,1,2,3,4,5,6].map(status=>({id:'sale-'+status,title:'Sale '+status,seller:owner,buyer:other,gross:atoms(1000),receipt:{status,seller_amount:atoms(10*(status+1)),seller_bps:3000,referral_amount:'0',treasury:status===2}}));
  state.thot.orders.push({id:'my-purchase',title:'My purchase',seller:other,buyer:owner,gross:atoms(99999),receipt:{status:5,seller_amount:atoms(99999)}});
  const html=ui.earningsHTML();
- assert.match(html,/PENDING SALE PROCEEDS<\/small><strong>120\.0000 THOT/);
- assert.match(html,/FINALIZED SALES · RECENT RECORDS<\/small><strong>60\.0000 THOT/);
- assert.match(html,/AVAILABLE TO CLAIM<\/small><strong>17\.0000 THOT/);
- assert.match(html,/20\.0000 THOT offered as your share/);
+ assert.match(html,/PENDING SALE PROCEEDS<\/small><strong>120 THOT/);
+ assert.match(html,/FINALIZED SALES · RECENT RECORDS<\/small><strong>60 THOT/);
+ assert.match(html,/AVAILABLE TO CLAIM<\/small><strong>17 THOT/);
+ assert.match(html,/20 THOT offered as your share/);
  assert.match(html,/Refunded · no sale proceeds/);assert.match(html,/buyer refunds/);
  assert.match(html,/Treasury-sponsored purchase/);assert.match(html,/External buyer purchase/);
- assert.doesNotMatch(html,/My purchase|Sale 0|99,999|70\.0000 THOT/);
+ assert.doesNotMatch(html,/My purchase|Sale 0|99,999|70 THOT/);
  assert.match(html,/Not a lifetime total/);
 });
 
@@ -140,7 +140,7 @@ test('all three pages remain distinct before linking a wallet and provide a link
  const pages=[ui.offersHTML(),ui.earningsHTML(),ui.tokenHTML()];
  assert.equal(new Set(pages).size,3);
  for(const html of pages){assert.match(html,/data-action="thot-link"/);assert.doesNotMatch(html,/NaN|undefined/);}
- assert.match(pages[0],/Available traces/);assert.doesNotMatch(pages[1],/Available traces/);assert.match(pages[2],/A price you can check/);
+ assert.match(pages[0],/For sale/);assert.doesNotMatch(pages[1],/For sale/);assert.match(pages[2],/A price you can check/);
 });
 
 test('earnings preserves freshness, truncated-history disclosure and escaped receipt content',()=>{
@@ -156,7 +156,7 @@ test('buyer roles can claim refunded purchase funds in Offers without accessing 
  for(const role of ['buyer_admin','buyer_member']){
   state.role=role;
   const html=ui.offersHTML();
-  assert.match(html,/Available to claim/);assert.match(html,/17\.0000 THOT/);assert.match(html,/data-action="thot-claim"/);
+  assert.match(html,/Available to claim/);assert.match(html,/17 THOT/);assert.match(html,/data-action="thot-claim"/);
   assert.doesNotMatch(html,/data-view="earnings"|data-action="thot-list-configure"/);
   assert.doesNotMatch(ui.tokenHTML(),/data-view="earnings"/);
  }
@@ -181,7 +181,7 @@ test('enrollment requires explicit consent then one signature and activation, wi
  assert.equal(f.requests.filter(p=>p.method==='eth_signTypedData_v4').length,1);
  assert.equal(f.requests.filter(p=>p.method==='eth_sendTransaction').length,0);
  // The finished listing surfaces its public share URL (#97).
- assert.equal(f.dialogs.at(-1)[0],'Your trace is listed');assert.match(f.dialogs.at(-1)[2],/\/l\/listing/);assert.match(f.dialogs.at(-1)[2],/data-action="thot-copy-listing-url"/);
+ assert.equal(f.dialogs.at(-1)[0],'Your item is listed');assert.match(f.dialogs.at(-1)[2],/\/l\/listing/);assert.match(f.dialogs.at(-1)[2],/data-action="thot-copy-listing-url"/);
  const copied=[];const ui=createThotUI({state:f.state,api:async()=>({}),openDialog:()=>{},dialog:{close(){}},refresh:async()=>{},escape:String,json:JSON.stringify,toast:m=>copied.push(m),copyText:async text=>{if(!/^https:\/\//.test(text))throw Error('reject');}});
  await ui.action('thot-copy-listing-url',{dataset:{id:'https://share.example/l/listing'}});
  await assert.rejects(ui.action('thot-copy-listing-url',{dataset:{id:'javascript:alert(1)'}}),/unavailable/);
@@ -234,7 +234,7 @@ test('listing setup renders only the explicit owner preview and reserve sampling
  const secret='TRACE_TEXT_MUST_STAY_PRIVATE_IN_LISTING_SETUP';
  const f=fixture(t,async()=>{},async path=>path.endsWith('/metadata')?{trace_id:'trace',content_hash:hash(1),content:{turns:[{role:'user',content:secret}]}}:{id:'listing',typed_data:{}});
  const inputs={'#thot-trace':{value:'trace'},'#thot-title':{value:'Useful research'},'#thot-price':{value:'100'},'#thot-license':{value:'Exact non-exclusive research licence'},'#thot-list-consent':{checked:true},'#thot-treasury-consent':{checked:false}};document.querySelector=id=>inputs[id];
- await f.ui.action('thot-list-configure',button());assert.doesNotMatch(f.dialogs.at(-1)[2],new RegExp(secret));assert.match(f.dialogs.at(-1)[2],/Synthetic reviewed release/);assert.match(f.dialogs.at(-1)[2],/no ordinary pre-purchase trace preview/i);
+ await f.ui.action('thot-list-configure',button());assert.doesNotMatch(f.dialogs.at(-1)[2],new RegExp(secret));assert.match(f.dialogs.at(-1)[2],/Synthetic reviewed release/);assert.match(f.dialogs.at(-1)[2],/no ordinary pre-purchase item preview/i);
  await f.ui.action('thot-list-confirm',button());const body=f.calls.find(call=>call.path==='/v1/thot/listings').options.body;assert.equal(body.treasury_opt_in,false);assert.equal(body.treasury_sampling_consent,undefined);assert.equal(body.free_preview,undefined);
 });
 
@@ -256,8 +256,8 @@ test('unlisting prepares onchain revocation instead of pretending a hidden listi
 test('comparable estimates stay separate from earnings and show missing market data without invented value',()=>{
  const {state,ui}=viewFixture();
  state.thot.valuations=[{trace_id:'private-1',estimate:{status:'insufficient_data',independent:{status:'insufficient_data'},sponsored:{status:'estimated',median_gross_atoms:atoms(100),p25_gross_atoms:atoms(80),p75_gross_atoms:atoms(120),sample_count:3,distinct_contributors:3},basis:'gross_licence_price_conditional_on_sale'}}];
- const html=ui.valuationsHTML();assert.match(html,/Independent buyers: not enough comparable sales/);assert.match(html,/Treasury-sponsored samples: 100\.0000 THOT/);assert.match(html,/ESTIMATED · NOT A BALANCE/);assert.doesNotMatch(html,/\$|expected earnings|per day/i);
- assert.match(ui.earningsHTML(),/AVAILABLE TO CLAIM<\/small><strong>17\.0000 THOT/);
+ const html=ui.valuationsHTML();assert.match(html,/Independent buyers: not enough comparable sales/);assert.match(html,/Treasury-sponsored samples: 100 THOT/);assert.match(html,/ESTIMATED · NOT A BALANCE/);assert.doesNotMatch(html,/\$|expected earnings|per day/i);
+ assert.match(ui.earningsHTML(),/AVAILABLE TO CLAIM<\/small><strong>17 THOT/);
  state.role='buyer_admin';assert.equal(ui.valuationsHTML(),'');
 });
 
@@ -377,7 +377,7 @@ test('licensed delivery renders escaped conversation turns and licence before te
 
 test('price preview deducts quoted service costs and labels fixed proceeds without invented earnings',t=>{
  const f=fixture(t,async()=>{});f.state.thot.account={seller_bps:null,economics:{policy:'quoted-cost/1',service_fee:'40000000000000000',direct_cost:'10000000000000000'}};const target={textContent:''};document.querySelector=()=>target;
- f.ui.onInput({id:'thot-price',value:'1000'});assert.match(target.textContent,/999\.9600 THOT/);assert.match(target.textContent,/0\.0400 THOT/);assert.match(target.textContent,/funding quote includes any applicable discounts and fixes the exact proceeds/);assert.doesNotMatch(target.textContent,/separate fee cashback|30%|70%|qualified lock/);
+ f.ui.onInput({id:'thot-price',value:'1000'});assert.match(target.textContent,/999\.96 THOT/);assert.match(target.textContent,/0\.04 THOT/);assert.match(target.textContent,/funding quote includes any applicable discounts and fixes the exact proceeds/);assert.doesNotMatch(target.textContent,/separate fee cashback|30%|70%|qualified lock/);
  f.ui.onInput({id:'thot-price',value:'0.01'});assert.match(target.textContent,/too low/);
  f.ui.onInput({id:'thot-price',value:'-100'});assert.match(target.textContent,/Enter a gross price/);assert.doesNotMatch(target.textContent,/-70/);
 });
@@ -525,7 +525,7 @@ test('a failed case-evidence check cannot open a governance vote form',async t=>
  assert.equal(f.dialogs.length,0);assert.equal(f.requests.length,0);
 });
 
-test('legacy disputes remain reviewable without requesting newly unauthorized trace contents',async t=>{
+test('legacy disputes remain reviewable without requesting newly unauthorized item contents',async t=>{
  const f=fixture(t,async()=>{},async()=>{throw Error('No evidence request is authorized for this legacy release.');});
  f.state.role='operator_security';f.state.thotDisputes={items:[{offer_id:hash(99),inspection_authorized:false,can_vote:true,receipt:{status:4,gross:atoms(100),block:{timestamp:2000},dispute:{vote_starts_at:1000,vote_ends_at:3000,reviewer_vote:0,buyer_votes:0,uphold_votes:0}},explanations:[],responses:[],decisions:[]}]};
  await f.ui.action('thot-dispute-vote',{dataset:{id:hash(99)}});
@@ -569,7 +569,7 @@ test('buyer navigation counts records while listing layout preserves escaping an
  state.thot.listings[0].title='<script>private listing</script>';
  state.thot.market_paused=true;
  const html=ui.offersHTML();
- assert.match(html,/href="#thot-available">Browse traces <span>1<\/span>/);
+ assert.match(html,/href="#thot-available">Browse data <span>1<\/span>/);
  assert.match(html,/href="#thot-purchases">Your purchases <span>0<\/span>/);
  assert.match(html,/&lt;script&gt;private listing&lt;\/script&gt;/);
  assert.match(html,/data-action="thot-assay"/);assert.doesNotMatch(html,/data-action="thot-buy"|<script>|href="#thot-history"/);
@@ -617,7 +617,7 @@ test('seller response waiver is separate, explicit and unavailable before an onc
 test('every supported chain blocks new purchases while paused or unknown but retains delivery and exits',async t=>{
  for(const mode of ['thot-anvil','thot-testnet','thot-production']){
   const {state,ui}=viewFixture();state.thot.capabilities.mode=mode;
-  state.thot.orders=[{id:hash(8),title:'Funded trace',buyer:owner,seller:other,receipt:{status:3,delivered_at:1,block:{timestamp:2}}}];
+  state.thot.orders=[{id:hash(8),title:'Funded item',buyer:owner,seller:other,receipt:{status:3,delivered_at:1,block:{timestamp:2}}}];
   for(const paused of [true,null,undefined]){
    state.thot.market_paused=paused;const html=ui.offersHTML();
    assert.doesNotMatch(html,/data-action="thot-buy"|data-action="thot-reserve-buy"/);
@@ -730,10 +730,10 @@ test('refunded purchase cards show frozen discounted buyer payment and never adv
  const {state,ui}=viewFixture();state.role='buyer_member';state.thot.account.claimable='0';
  const order={id:hash(81),title:'Discounted purchase',seller:other,buyer:owner,gross:atoms(100),buyer_total:'99800000000000000000',receipt:{status:6,buyer_total:'99700000000000000000',seller_amount:'99200000000000000000',referral_amount:atoms(1),economics:{service_fee:atoms(1)}}};
  state.thot.orders=[order];
- let html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 99\.7000 THOT/);assert.match(html,/Payout is not yet confirmed here/);assert.doesNotMatch(html,/Seller receives|99\.2000|99\.8000|full seller price|Refund paid to buyer wallet/);
- order.refund_transaction=hash(82);html=ui.offersHTML();assert.match(html,/Refund paid to buyer wallet/);assert.match(html,/Refund paid to the buyer wallet: 99\.7000 THOT/);assert.doesNotMatch(html,/claimable|Payout is not yet confirmed|Seller receives|99\.2000/);
- order.receipt.dispute={outcome:2};html=ui.offersHTML();assert.match(html,/Refund paid to the buyer wallet: 49\.8500 THOT/);assert.match(html,/remaining 49\.8500 THOT was sent to the canonical dead sink/);assert.doesNotMatch(html,/Seller receives|claimable/);
- delete order.refund_transaction;html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 49\.8500 THOT/);assert.match(html,/Payout is not yet confirmed here/);
+ let html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 99\.7 THOT/);assert.match(html,/Payout is not yet confirmed here/);assert.doesNotMatch(html,/Seller receives|99\.2000|99\.8000|full seller price|Refund paid to buyer wallet/);
+ order.refund_transaction=hash(82);html=ui.offersHTML();assert.match(html,/Refund paid to buyer wallet/);assert.match(html,/Refund paid to the buyer wallet: 99\.7 THOT/);assert.doesNotMatch(html,/claimable|Payout is not yet confirmed|Seller receives|99\.2000/);
+ order.receipt.dispute={outcome:2};html=ui.offersHTML();assert.match(html,/Refund paid to the buyer wallet: 49\.85 THOT/);assert.match(html,/remaining 49\.85 THOT was sent to the canonical dead sink/);assert.doesNotMatch(html,/Seller receives|claimable/);
+ delete order.refund_transaction;html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 49\.85 THOT/);assert.match(html,/Payout is not yet confirmed here/);
 });
 
 test('replacement adoption persists across reload and never submits during verification',async t=>{
@@ -757,7 +757,7 @@ test('replacement adoption persists across reload and never submits during verif
 
 test('header balance is available without visiting THOT and hides when identity is absent',t=>{
  const f=fixture(t,async()=>null);f.state.thot.capabilities.mode='thot-anvil';f.state.thot.account={balance:'10000000000000000000000'};
- assert.match(f.ui.walletSummaryHTML(),/10,000.0000 THOT/);assert.match(f.ui.walletSummaryHTML(),/test tokens/);
+ assert.match(f.ui.walletSummaryHTML(),/10,000 THOT/);assert.match(f.ui.walletSummaryHTML(),/test tokens/);
  f.state.actor=null;assert.equal(f.ui.walletSummaryHTML(),'');
 });
 
@@ -901,14 +901,14 @@ test('confirmation sends explicit empty params through a strict hosted-style wal
 
 test('wallet contributors see other sellers in the buying catalogue and their own listings separately',()=>{
  const {state,ui}=viewFixture();state.thot.listings.push({...state.thot.listings[0],id:'my-listing',seller:owner,title:'My listing'});
- const html=ui.offersHTML(),catalogue=html.slice(html.indexOf('aria-label="Available traces"'),html.indexOf('id="thot-contribute"'));
- assert.match(html,/Browse traces <span>1<\/span>/);assert.match(html,/Your purchases <span>0<\/span>/);assert.match(catalogue,/Listed research/);assert.doesNotMatch(catalogue,/My listing/);
- assert(html.indexOf('aria-label="Available traces"')<html.indexOf('data-action="thot-list-configure"'));assert.match(html,/My listing/);assert.match(html,/thot-unlist/);
+ const html=ui.offersHTML(),catalogue=html.slice(html.indexOf('aria-label="For sale"'),html.indexOf('id="thot-contribute"'));
+ assert.match(html,/Browse data <span>1<\/span>/);assert.match(html,/Your purchases <span>0<\/span>/);assert.match(catalogue,/Listed research/);assert.doesNotMatch(catalogue,/My listing/);
+ assert(html.indexOf('aria-label="For sale"')<html.indexOf('data-action="thot-list-configure"'));assert.match(html,/My listing/);assert.match(html,/thot-unlist/);
 });
 test('purchased reader offers a fresh authorized JSON download including licence and receipt',async t=>{
- const downloads=[],release={content:{turns:[{role:'user',content:'Synthetic purchased trace'}]},license:'Evaluation licence'},result={release,receipt:{status:3},delivery_hash:hash(5)};
+ const downloads=[],release={content:{turns:[{role:'user',content:'Synthetic purchased item'}]},license:'Evaluation licence'},result={release,receipt:{status:3},delivery_hash:hash(5)};
  const f=fixture(t,()=>{throw Error('Reading must not access wallet');},async()=>result,{download:(value,name)=>downloads.push({value,name})});
- await f.ui.action('thot-delivery',{dataset:{id:hash(1)}});assert.match(f.dialogs.at(-1)[3],/Download licensed trace/);assert.equal(downloads.length,0);
+ await f.ui.action('thot-delivery',{dataset:{id:hash(1)}});assert.match(f.dialogs.at(-1)[3],/Download/);assert.equal(downloads.length,0);
  await f.ui.action('thot-download-delivery',{dataset:{id:hash(1)}});assert.equal(f.calls.length,2);assert.deepEqual(downloads,[{value:result,name:`thot-licensed-trace-${hash(1)}.json`}]);assert.equal(f.requests.length,0);
 });
 test('download discards a delivery returned after identity change and never exports unconfirmed content',async t=>{
@@ -947,7 +947,7 @@ test('listings and buyer purchase cards expose the seller wallet instead of the 
  const {state,ui}=viewFixture();
  const seller='0x1234567890abcdef1234567890abcdef12345678';
  state.thot.listings[0].seller=seller;
- state.thot.orders=[{id:'my-purchase',title:'Purchased trace',seller,buyer:owner,gross:atoms(1),receipt:{status:3,seller,seller_amount:atoms(1),referral_amount:'0'}}];
+ state.thot.orders=[{id:'my-purchase',title:'Purchased item',seller,buyer:owner,gross:atoms(1),receipt:{status:3,seller,seller_amount:atoms(1),referral_amount:'0'}}];
  const listing=ui.offersHTML().match(/<article class="thot-listing"[^>]*>[\s\S]*?<\/article>/)?.[0];
  assert(listing);
  for(const html of [listing,ui.purchasesHTML()]){
@@ -1020,15 +1020,15 @@ test('partial catalogue exposes listing metadata and seller copy without buying 
  assert.match(html,/Listed research/);assert.match(html,new RegExp(other));assert.match(html,/data-action="thot-copy-seller-wallet"/);assert.match(html,/Evaluation only/);
  assert.match(html,/Loading balances and purchase history/);assert.match(html,/Loading your purchase history/);
  assert.doesNotMatch(html,/data-action="thot-(?:buy|reserve-buy|unlist|assay|buyer-sample|send|resume-payment)"/);
- assert.doesNotMatch(html,/No open purchases|Save a trace in your private library first|(?<![0-9])0\.0000 THOT|Local demo/);
+ assert.doesNotMatch(html,/No open purchases|Save an item in your private library first|(?<![0-9])0 THOT|Local demo/);
  const failed=ui.catalogueHTML(catalogue,{failed:true});assert.match(failed,/Balances and purchase history could not load/);assert.match(failed,/Purchase history is unavailable/);assert.match(failed,/Retry account details/);
 });
 
 test('catalogue loading and failure are distinct from a verified empty listing response',()=>{
  const {ui}=viewFixture();
- assert.match(ui.catalogueHTML(null),/Loading listings/);assert.doesNotMatch(ui.catalogueHTML(null),/No traces listed yet/);
- assert.match(ui.catalogueHTML(null,{catalogueError:true}),/Listings could not load/);assert.doesNotMatch(ui.catalogueHTML(null,{catalogueError:true}),/No traces listed yet/);
- assert.match(ui.catalogueHTML({listings:[]}),/No traces listed yet/);
+ assert.match(ui.catalogueHTML(null),/Loading listings/);assert.doesNotMatch(ui.catalogueHTML(null),/No data listed yet/);
+ assert.match(ui.catalogueHTML(null,{catalogueError:true}),/Listings could not load/);assert.doesNotMatch(ui.catalogueHTML(null,{catalogueError:true}),/No data listed yet/);
+ assert.match(ui.catalogueHTML({listings:[]}),/No data listed yet/);
 });
 
 
@@ -1068,10 +1068,10 @@ test('percentage listing estimate uses the listed price and labels its basis wit
  const f=fixture(t,async()=>{}),target={textContent:''};document.querySelector=()=>target;
  f.state.thot.account={economics:{policy:'percentage/1',fee_bps:100,service_fee:'10000000000000000',direct_cost:'0'}};
  f.ui.onInput({id:'thot-price',value:'100'});
- assert.match(target.textContent,/Base service fee \(1% of trace price\): 1\.0000 THOT/);
- assert.match(target.textContent,/Estimated seller proceeds: 99\.0000 THOT/);
+ assert.match(target.textContent,/Base service fee \(1% of the price\): 1 THOT/);
+ assert.match(target.textContent,/Estimated seller proceeds: 99 THOT/);
  assert.match(target.textContent,/any applicable discounts/);assert.match(target.textContent,/not guaranteed/);
- assert.doesNotMatch(target.textContent,/0\.0100 THOT/);assert.equal(f.calls.length,0);assert.equal(f.requests.length,0);
+ assert.doesNotMatch(target.textContent,/0\.01 THOT/);assert.equal(f.calls.length,0);assert.equal(f.requests.length,0);
  f.state.thot.account.economics={policy:'future-policy/1',fee_bps:100,service_fee:'10000000000000000',direct_cost:'0'};
  f.ui.onInput({id:'thot-price',value:'100'});assert.match(target.textContent,/Refresh your account/);assert.doesNotMatch(target.textContent,/THOT|%/);
 });
@@ -1086,9 +1086,9 @@ test('listing review and THOT page distinguish configured tariff profiles and un
   await f.ui.action('thot-list-configure',{dataset:{id:'trace'}});const review=f.dialogs.at(-1)[2];
   const view=viewFixture();view.state.thot.account.economics=economics;const token=view.ui.tokenHTML();
   for(const html of [review,token]){
-   if(economics.policy==='percentage/1'){assert.match(html,/1% of the listed trace price/);assert.doesNotMatch(html,/0\.0100 THOT per purchase/);}
-   else if(economics.policy==='quoted-cost/1'){assert.match(html,/0\.0400 THOT per purchase/);assert.doesNotMatch(html,/Eligible holders and stakers receive.*at funding/);}
-   else{assert.match(html,/current service fee is unavailable/);assert.doesNotMatch(html,/1% of|0\.0100 THOT per purchase/);}
+   if(economics.policy==='percentage/1'){assert.match(html,/1% of the listed price/);assert.doesNotMatch(html,/0\.01 THOT per purchase/);}
+   else if(economics.policy==='quoted-cost/1'){assert.match(html,/0\.04 THOT per purchase/);assert.doesNotMatch(html,/Eligible holders and stakers receive.*at funding/);}
+   else{assert.match(html,/current service fee is unavailable/);assert.doesNotMatch(html,/1% of|0\.01 THOT per purchase/);}
    assert.match(html,/Estimates do not guarantee a sale or payout/);
   }
   if(economics.policy==='future-policy/1')assert.match(token,/<small>SERVICE FEE PER PURCHASE<\/small><strong>Refresh quote<\/strong>/);

@@ -107,7 +107,7 @@ export function createWalletAuth({ window, fetch, chainId = 46630, rpcUrl = 'htt
       await bounded(context(next, expected, wallet), providerTimeoutMs, 'Your wallet is not responding. Please try sign-in again.');
       onProgress('Verifying your signature…');
       const verified = await api('/v1/auth/wallet/verify', { id: challenge.result.id, message: challenge.result.message, signature }); current(expected);
-      if (!verified.response.ok) throw new Error(verified.result.error === 'WALLET_ALREADY_BOUND' ? 'This wallet belongs to an existing thot market account. Use that account to sign in; wallet sign-in will not copy its private traces.' : 'Wallet verification failed. Please try signing in again.');
+      if (!verified.response.ok) throw new Error(verified.result.error === 'WALLET_ALREADY_BOUND' ? 'This wallet belongs to an existing thot market account. Use that account to sign in; wallet sign-in will not copy its private data.' : 'Wallet verification failed. Please try signing in again.');
       validateSession(verified.result, wallet); await bounded(context(next, expected, wallet), providerTimeoutMs, 'Your wallet is not responding. Please try sign-in again.');
       await sessionReady(sessionValue(verified.result)); return true;
     } catch (error) {

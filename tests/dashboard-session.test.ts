@@ -12,9 +12,9 @@ const applicationSource = await readFile(new URL('../apps/dashboard/app.js', imp
 // Execute the repository's actual dashboard logic, not a copied API implementation. UI module factories are
 // replaced by inert collaborators and only the automatic initial network bootstrap is disabled.
 const source = applicationSource.replace(/^import .*;\r?\n/gm, '').replace('import(bundlePath)', 'globalThis.importPrivyModule(bundlePath)').replace(/^void safely\((?:async\(\)=>\{const capability=.*|startAuthentication)\);?\r?$/m, '') + `
-globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, navigateView, acceptViewRoute, routeView, refreshPurchases, pendingPurchases, refresh, acceptClerkSession, loadCatalogue, renderCatalogue, acceptMarketFragment, invalidatePrivateState,loadContributorRecords,
+globalThis.testDriver = { api, safely, session, showIdentityLogin, runAction, state, pendingKeys, earningsRecords, earnings, market, thot, render, refreshEarnings, startAuthentication, loadPrivyAuth, openPrivyLogin, rememberView, restoredView, forgetView, navigateView, acceptViewRoute, routeView, refreshPurchases, pendingPurchases, refresh, acceptSession, loadCatalogue, renderCatalogue, acceptMarketFragment, invalidatePrivateState,loadContributorRecords,
   makeDeferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; },
-  setAuthMode(value) { authMode = value; }, setClerkAuth(value) { clerkAuth = value; } };
+  setAuthMode(value) { authMode = value; } };
 `;
 function deferred<T = any>() {
   let resolve!: (value: T) => void, reject!: (reason: unknown) => void;
@@ -233,18 +233,6 @@ test('an already-pending reconnect cannot overwrite a superseding same-account t
   await started.promise; a.identity('user-old', 'user', 'newer-same-account-token');
   recovering.resolve(response({ token: 'stale-recovered-token', actor: { id: 'user-old', role: 'user' } })); await rejected;
   assert.equal(a.driver.state.token, 'newer-same-account-token'); assert.equal(a.calls.length, 2);
-});
-
-test('Clerk obtains a fresh SDK token for each request and never replays an expired mutation', async t => {
-  const a = dashboard(t, async () => response({ error: 'UNAUTHENTICATED' }, 401));
-  let issued = 0;
-  a.driver.setAuthMode('clerk');
-  a.driver.setClerkAuth({ getToken: async () => `fresh-sdk-token-${++issued}`, mountSignIn() {} });
-  await assert.rejects(a.driver.api('/v1/sale-authorizations', { method: 'POST', body: { candidate_id: 'candidate-1' } }), stale);
-  assert.equal(a.calls.length, 1, 'an authorization mutation is not replayed after an expired Clerk session');
-  assert.equal(a.calls[0].init.headers.Authorization, 'Bearer fresh-sdk-token-1');
-  assert.equal(a.driver.state.actor, null);
-  assert.equal(a.driver.pendingKeys.size, 1, 'the original idempotency key remains available for an explicit retry after sign-in');
 });
 
 test('direct external login response cannot reconnect an identity after its form has been replaced', async t => {
@@ -753,7 +741,7 @@ test('account changes discard deferred records started by the retained seller li
 
 test('an accepted wallet session survives account data failure and leaves catalogue readable',async t=>{
  const workspace=deferred(),a=dashboard(t,async url=>url==='/v1/thot/catalog'?response(catalogueFixture()):response([]),{hash:'#thot-available',thotTransport:()=>workspace.promise});
- startMarket(a);const accepted=a.driver.acceptClerkSession({actor:{id:'accepted',role:'user'}});await flush();
+ startMarket(a);const accepted=a.driver.acceptSession({actor:{id:'accepted',role:'user'}});await flush();
  const before=a.document.querySelector('#main').innerHTML;workspace.reject(Error('RPC unavailable'));await accepted;
  assert.equal(a.driver.state.actor.id,'accepted');assert.equal(a.driver.state.workspaceError,true);assert.equal(a.driver.state.loaded,false);
  assert.equal(a.document.querySelector('#main').innerHTML,before,'failure updates status without replacing browse controls');
@@ -813,7 +801,7 @@ test('vault reads begin before the financial snapshot and render a private libra
 test('chain failure does not erase a current authenticated library or turn balances into zero',async t=>{
  const chain=deferred(),a=dashboard(t,async url=>url.startsWith('/v1/contributor/library')?response({items:[{title:'Readable without trading'}]}):response([]),{thotTransport:()=>chain.promise});
  a.driver.setAuthMode('wallet_siwe');a.driver.state.loaded=false;a.driver.state.view='vault';
- const accepted=a.driver.acceptClerkSession({actor:{id:'current-owner',role:'user'}});await flush();
+ const accepted=a.driver.acceptSession({actor:{id:'current-owner',role:'user'}});await flush();
  chain.reject(Error('Snapshot unavailable'));await accepted;
  assert.equal(a.driver.state.actor.id,'current-owner');assert.equal(a.driver.state.loaded,false);assert.equal(a.driver.state.libraryLoaded,true);
  assert.match(a.document.querySelector('#main').innerHTML,/Readable without trading/);

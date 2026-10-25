@@ -12,9 +12,9 @@ function campaign(id,overrides={}){
 }
 function fixture(t,{concurrent=true,role='buyer_admin',isOwner=true,reserveBuyer=true,respond}={}){
  const capabilities={mode:'thot-anvil',chain_id:31337,market:seller,reserve:owner,manual_reserve:true,reserve_campaigns:concurrent};
- const state={actor:{id:'actor'},generation:1,role,thot:{market_paused:false,wallet:owner,reserve_buyer:reserveBuyer,capabilities},thotSampling:{capabilities,campaign_mode:concurrent?'concurrent':'legacy',wallet:owner,reserve_buyer:reserveBuyer,market_bound:true,paused:false,inventory_atoms:atoms(500000000),unallocated_atoms:atoms(400000000),total_allocated_atoms:atoms(100000000),total_gross_committed_atoms:atoms(100),campaigns:[campaign(1),campaign(2,{status:'paused',paused:true}),campaign(3,{status:'scheduled',start_at:9999999999}),campaign(4,{status:'ended',available_atoms:'0'}),campaign(5,{status:'cancelled',closed:true})],reserve:{balance:atoms(500000000),allowance:atoms(1000),committed:atoms(100),start_at:0,block:{timestamp:100}},governance:{owner:isOwner,address:owner,owners:[owner,seller,'0x0000000000000000000000000000000000000003'],threshold:1,delay_seconds:0,market_delay_seconds:0,block:{timestamp:100},operations:[],campaign_start_at:0},samples:[{id:'listed-trace',seller,title:'Useful debugging trace',price_atoms:atoms(10),workflow:'coding',turn_count:20}],jobs:[]}};
+ const state={actor:{id:'actor'},generation:1,role,thot:{market_paused:false,wallet:owner,reserve_buyer:reserveBuyer,capabilities},thotSampling:{capabilities,campaign_mode:concurrent?'concurrent':'legacy',wallet:owner,reserve_buyer:reserveBuyer,market_bound:true,paused:false,inventory_atoms:atoms(500000000),unallocated_atoms:atoms(400000000),total_allocated_atoms:atoms(100000000),total_gross_committed_atoms:atoms(100),campaigns:[campaign(1),campaign(2,{status:'paused',paused:true}),campaign(3,{status:'scheduled',start_at:9999999999}),campaign(4,{status:'ended',available_atoms:'0'}),campaign(5,{status:'cancelled',closed:true})],reserve:{balance:atoms(500000000),allowance:atoms(1000),committed:atoms(100),start_at:0,block:{timestamp:100}},governance:{owner:isOwner,address:owner,owners:[owner,seller,'0x0000000000000000000000000000000000000003'],threshold:1,delay_seconds:0,market_delay_seconds:0,block:{timestamp:100},operations:[],campaign_start_at:0},samples:[{id:'listed-trace',seller,title:'Useful debugging item',price_atoms:atoms(10),workflow:'coding',turn_count:20}],jobs:[]}};
  const inputs={
-  '#thot-campaign-budget':{value:'50000000'},'#thot-campaign-days':{value:'90'},'#thot-campaign-upfront':{value:'555555.555555555555555555'},'#thot-campaign-purpose':{value:'Useful debugging traces'},'#thot-new-campaign-start':{value:''},'#thot-buy-campaign':{value:''},
+  '#thot-campaign-budget':{value:'50000000'},'#thot-campaign-days':{value:'90'},'#thot-campaign-upfront':{value:'555555.555555555555555555'},'#thot-campaign-purpose':{value:'Useful debugging data'},'#thot-new-campaign-start':{value:''},'#thot-buy-campaign':{value:''},
  };
  const previous=globalThis.document;globalThis.document={querySelector:id=>inputs[id]};t.after(()=>{globalThis.document=previous;});
  const calls=[],dialogs=[];
@@ -25,7 +25,7 @@ function fixture(t,{concurrent=true,role='buyer_admin',isOwner=true,reserveBuyer
 test('concurrent Treasury exposes separate budgets and lifecycle controls without legacy campaign controls',t=>{
  const f=fixture(t),html=f.ui.samplingHTML();
  assert.match(html,/Create an acquisition campaign/);assert.match(html,/value="50000000"/);assert.match(html,/value="90"/);
- assert.match(html,/Several campaigns can run at once/);assert.match(html,/Unspent allowance carries forward/);assert.match(html,/You choose which traces to buy/);
+ assert.match(html,/Several campaigns can run at once/);assert.match(html,/Unspent allowance carries forward/);assert.match(html,/You choose which data to buy/);
  assert.match(html,/thot-gov-pause_campaign" data-id="1"/);assert.match(html,/thot-gov-resume_campaign" data-id="2"/);
  assert.match(html,/thot-gov-expire_campaign" data-id="4"/);assert.doesNotMatch(html,/thot-gov-(?:pause|resume|cancel)_campaign" data-id="5"/);
  assert.doesNotMatch(html,/thot-gov-start_campaign|thot-gov-queue_campaign|Successor reserve|5000.*Total budget/);
@@ -48,7 +48,7 @@ test('reserve buyers can inspect and purchase but cannot manage campaign budgets
 
 test('a new campaign reviews exact budget, start and purpose without asking the wallet to send early',async t=>{
  const f=fixture(t);await f.ui.action('thot-gov-create_campaign',button());
- assert.deepEqual(f.calls,[{path:'/v1/thot/governance/prepare',options:{method:'POST',body:{action:'create_campaign',target:'reserve',params:{budget_thot:'50000000',duration_days:90,start_at:0,upfront_thot:'555555.555555555555555555',purpose:'Useful debugging traces'}}}}]);
+ assert.deepEqual(f.calls,[{path:'/v1/thot/governance/prepare',options:{method:'POST',body:{action:'create_campaign',target:'reserve',params:{budget_thot:'50000000',duration_days:90,start_at:0,upfront_thot:'555555.555555555555555555',purpose:'Useful debugging data'}}}}]);
  assert.equal(f.dialogs.at(-1)[0],'Reserve governance');assert.match(f.dialogs.at(-1)[3],/thot-send/);
 });
 
@@ -77,7 +77,7 @@ test('reserve purchase requires an explicit active campaign and sends no buyer p
  await assert.rejects(f.ui.action('thot-reserve-buy-confirm',button()),/Choose an active campaign/);
  f.inputs['#thot-buy-campaign'].value='1';await f.ui.action('thot-reserve-buy-confirm',button());
  assert.deepEqual(f.calls.at(-1),{path:'/v1/thot/offers/prepare',options:{method:'POST',body:{listing_id:'listed-trace',funding_source:'reserve',campaign_id:'1'}}});
- assert.match(f.dialogs.at(-1)[2],/Total escrow: 10.0000 THOT/);assert.match(f.dialogs.at(-1)[2],/contributor’s asking price/);
+ assert.match(f.dialogs.at(-1)[2],/Total escrow: 10 THOT/);assert.match(f.dialogs.at(-1)[2],/contributor’s asking price/);
 });
 
 test('paused campaign and changed identity cannot submit a selected reserve purchase',async t=>{
@@ -87,12 +87,12 @@ test('paused campaign and changed identity cannot submit a selected reserve purc
  await assert.rejects(f.ui.action('thot-reserve-buy-confirm',button()),{name:'StaleWorkspaceError'});assert.equal(f.calls.length,0);
 });
 
-test('changing the selected trace during preparation cannot open the old purchase for signing',async t=>{
+test('changing the selected item during preparation cannot open the old purchase for signing',async t=>{
  let finish;const pending=new Promise(resolve=>{finish=resolve;});
  const f=fixture(t,{respond:()=>pending});await f.ui.action('thot-reserve-buy',button('first-trace'));
  f.inputs['#thot-buy-campaign'].value='1';const preparing=f.ui.action('thot-reserve-buy-confirm',button());
  await f.ui.action('thot-reserve-buy',button('second-trace'));finish({transactions:[],buyer_total:atoms(10)});
- await assert.rejects(preparing,/selected trace changed/);assert.equal(f.dialogs.at(-1)[0],'Choose the paying campaign');
+ await assert.rejects(preparing,/selected item changed/);assert.equal(f.dialogs.at(-1)[0],'Choose the paying campaign');
  assert.doesNotMatch(f.dialogs.at(-1)[3],/thot-send/);
 });
 
@@ -104,7 +104,7 @@ test('legacy reserve and ordinary buyer purchase payloads remain unchanged',asyn
 
 test('Treasury resumes the exact owned unfunded purchase after reloading',async t=>{
  const f=fixture(t,{respond:()=>({id:'reserved-offer',resumed:true,transactions:[],buyer_total:atoms(10)})});
- f.state.thotSampling.jobs=[{id:'reserved-offer',listing_id:'listed-trace',campaign_id:'1',title:'Useful trace',gross:atoms(10),receipt:{status:0},resume_available:true}];
+ f.state.thotSampling.jobs=[{id:'reserved-offer',listing_id:'listed-trace',campaign_id:'1',title:'Useful item',gross:atoms(10),receipt:{status:0},resume_available:true}];
  assert.match(f.ui.samplingHTML(),/data-action="thot-reserve-resume" data-id="reserved-offer"/);
  await f.ui.action('thot-reserve-resume',button('reserved-offer'));
  assert.deepEqual(f.calls.at(-1).options.body,{listing_id:'listed-trace',funding_source:'reserve',campaign_id:'1'});
@@ -119,7 +119,7 @@ test('a resume response cannot substitute a new purchase reference',async t=>{
  await assert.rejects(f.ui.action('thot-reserve-resume',button('reserved-offer')),/purchase reference changed/);assert.equal(f.dialogs.length,0);
 });
 
-test('campaign pagination retains the selected trace and makes newly loaded active campaigns selectable',async t=>{
+test('campaign pagination retains the selected item and makes newly loaded active campaigns selectable',async t=>{
  const f=fixture(t,{respond:()=>({campaigns:[campaign(6)],next_campaign_cursor:null,market_bound:true,paused:false})});
  f.state.thotSampling.next_campaign_cursor='6';await f.ui.action('thot-reserve-buy',button('listed-trace'));
  await f.ui.action('thot-reserve-campaigns-more',button('6'));

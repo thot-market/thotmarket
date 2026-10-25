@@ -585,3 +585,5 @@ body{background:var(--paper)}
 @media(max-width:600px){.connected-app .journey-nav{padding-top:8px}.connected-app .journey-nav .nav-item{min-height:36px;padding:6px 10px}.connected-app .journey-welcome{margin:0 0 20px}.connected-app .journey-welcome h1{font-size:36px;margin:8px 0}}
 .connected-app h1,.connected-app h2,.connected-app h3{letter-spacing:-.035em}
 .connected-app .brand{font-size:24px;letter-spacing:-.04em}
+/* Signed-out buyers on phones see the listings right after "Sign in", not after the explainer card. */
+@media(max-width:600px){.connected-app #main:has(#public-catalogue) .journey-example{display:none}}

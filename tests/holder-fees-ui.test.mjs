@@ -7,11 +7,11 @@ function fixture(){
  const ui=createThotUI({state,api:async(path,options)=>{calls.push({path,options});return {wallet,transactions:[{to:wallet,data:'0xab',value:'0x0',chainId:'0xb626'}],quote:{amount_atoms:'10000000000000000'},notice:'Claim displayed cashback'};},openDialog:(...a)=>dialogs.push(a),dialog:{},refresh:async()=>{},escape:String,json:JSON.stringify,toast:()=>{},getProvider:()=>undefined});
  return {state,ui,calls,dialogs};
 }
-test('holder screen separates fee cashback from staking, trace price and escrow',()=>{
- const f=fixture(),html=f.ui.tokenHTML();for(const text of ['10% fee cashback','25% fee cashback','No stake required','unclaimed staking principal','service fee, not the trace price','Available pool:','Claim fee cashback','Governance: change future'])assert.ok(html.includes(text),text);
+test('holder screen separates fee cashback from staking, price and escrow',()=>{
+ const f=fixture(),html=f.ui.tokenHTML();for(const text of ['10% fee cashback','25% fee cashback','No stake required','unclaimed staking principal','service fee, not the price','Available pool:','Claim fee cashback','Governance: change future'])assert.ok(html.includes(text),text);
  f.state.thot.holder_rewards.is_owner=false;assert.doesNotMatch(f.ui.tokenHTML(),/id="holder-first"/);
  f.state.thot.holder_rewards.orders[0].claimable=false;assert.doesNotMatch(f.ui.tokenHTML(),/data-action="thot-holder-rebate"/);
 });
 test('claim button prepares exactly the chosen offer and requires wallet review',async()=>{
- const f=fixture();await f.ui.action('thot-holder-rebate',{dataset:{id:offer}});assert.deepEqual(f.calls[0],{path:'/v1/thot/transaction',options:{method:'POST',body:{action:'holder-rebate',offer_id:offer}}});assert.equal(f.dialogs[0][0],'Claim your fee cashback');assert.match(f.dialogs[0][2],/0\.0100 THOT/);
+ const f=fixture();await f.ui.action('thot-holder-rebate',{dataset:{id:offer}});assert.deepEqual(f.calls[0],{path:'/v1/thot/transaction',options:{method:'POST',body:{action:'holder-rebate',offer_id:offer}}});assert.equal(f.dialogs[0][0],'Claim your fee cashback');assert.match(f.dialogs[0][2],/0\.01 THOT/);
 });

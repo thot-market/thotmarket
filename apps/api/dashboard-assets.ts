@@ -10,7 +10,7 @@ import {DomainError} from '../../packages/storage/src/index.ts';
 const routes=new Set([
   '/operator-app.js','/operator.css','/style.css','/app.js','/money-ui.js','/thot-ui.js',
   '/staking-ui.js','/staking.css','/thot-analytics-ui.js','/mandate-editor.js',
-  '/inference-ui.js','/operations-ui.js','/contributor-ui.js','/clerk-auth-ui.js',
+  '/inference-ui.js','/operations-ui.js','/contributor-ui.js',
   '/wallet-auth-ui.js','/privy-auth-state.js','/openrouter-ui.js',
   '/openrouter-usage.js','/agent-capture-ui.js','/capture-export-ui.js','/library-ui.js','/history-sync-ui.js',
   '/setup-ui.js','/robinhood-setup-ui.js','/environment-ui.js','/getting-started.js','/device-pairing-ui.js',

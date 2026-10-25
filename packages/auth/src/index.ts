@@ -11,10 +11,9 @@ export { AuthAccessStore } from './access.ts';
 export { strictJson } from './json.ts';
 export type { VerifiedIdentity, JwtPolicy } from './jwt.ts';
 export type { MembershipInput, AuthRateLimits } from './access.ts';
-export { ClerkAuth } from './clerk.ts';
-export type { ClerkAuthConfig, ClerkProviderApi, ClerkTokenClaims, ClerkSessionRecord, ClerkUserRecord } from './clerk.ts';
 export { WalletAuth, walletAuthOrigins, loadWalletAuthConfig, WALLET_CHAIN_ID, WALLET_MAINNET_CHAIN_ID, WALLET_CHAIN_IDS, WALLET_CHALLENGE_SECONDS, WALLET_SESSION_COOKIE, WALLET_CHALLENGE_COOKIE } from './wallet.ts';
 export type { WalletAuthConfig, WalletChainId } from './wallet.ts';
+// shortcut: 'clerk' stays for hosted membership seeding; drop it with that path.
 export type AuthCapabilities = { mode: 'external_jwt'|'clerk'|'wallet_siwe'; development_session_available: false; external_login_available: boolean; algorithm?: string; token_type?: string; maximum_token_age_seconds?: number; clerk?: { publishable_key: string; frontend_api_url: string }; wallet?: { origin: string; chain_id: number; rpc_url: string; session_ttl_seconds: number; signature_type: 'eip191'; wallet_type: 'evm-eoa' } };
 export type AuthenticatedSession = { actor: Actor; identity: VerifiedIdentity; expires_at: string };
 export interface AuthProvider { readonly access: AuthAccessStore; readonly capabilities: AuthCapabilities; authenticate(token: string): Promise<AuthenticatedSession>; revoke?(identity: VerifiedIdentity, actor: Actor, key: string): Promise<{ revoked: true }> }

@@ -82,7 +82,7 @@ test('direct catalogue overrides remembered vault, renders before chain readines
  assert.match(await card(f.page).innerText(),new RegExp(seller));
  assert.equal(await ready(f.page).count(),0);
  assert.equal(await f.page.locator('[data-action="thot-send"],[data-action="thot-unlist"]').count(),0);
- assert.doesNotMatch(await f.page.locator('main').innerText(),/No purchases|Save a trace in your private library first/);
+ assert.doesNotMatch(await f.page.locator('main').innerText(),/No purchases|Save an item in your private library first/);
  await card(f.page).locator('summary').filter({hasText:'License'}).click();
  await f.snapshot('catalogue-before-account');
  const beforeTop=await card(f.page).evaluate(e=>e.getBoundingClientRect().top);
@@ -122,7 +122,7 @@ test('same-page fragment selects marketplace and late account response cannot re
  await f.page.locator('.journey-menu>summary').click();await f.page.locator('[data-action="identity-sign-out"]').click();
  // Signed out on the market route, the buyer sign-in state answers (#83).
  await f.page.getByRole('heading',{name:/Sign in with your wallet/}).waitFor();
- assert.equal(await f.page.title(),'Buy traces · thot market');
+ assert.equal(await f.page.title(),'Marketplace · thot market');
  f.release();await f.page.waitForTimeout(100);
  assert.equal(await card(f.page).count(),0);assert.equal(await ready(f.page).count(),0);
 });
@@ -137,7 +137,7 @@ test('wallet change discards late catalogue and account responses',async t=>{
  assert.equal(await f.page.locator('#wallet-summary').isVisible(),false);
 });
 
-test('My work is readable while chain data waits and never presents pending sale state as private or zero',async t=>{
+test('My data is readable while chain data waits and never presents pending sale state as private or zero',async t=>{
  const f=await fixture(t);await f.open('');
  await f.page.getByRole('button',{name:libraryItem.title,exact:true}).waitFor();
  assert.match(await f.page.locator('#wallet-summary').innerText(),/Loading balance/);
@@ -163,10 +163,10 @@ test('My work is readable while chain data waits and never presents pending sale
  assert.equal(f.requests.filter(r=>r.method!=='GET').length,0);
 });
 
-test('My work navigation loads contributor records without repeating the market wallet snapshot',async t=>{
+test('My data navigation loads contributor records without repeating the market wallet snapshot',async t=>{
  const f=await fixture(t);await f.open();f.release();await ready(f.page).waitFor();
  assert.equal(f.requests.some(r=>r.path.startsWith('/v1/contributor/')),false);
- await f.page.getByRole('button',{name:'My work',exact:true}).click();
+ await f.page.getByRole('button',{name:'My data',exact:true}).click();
  await f.page.getByRole('button',{name:libraryItem.title,exact:true}).waitFor();
  assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace').length,1);
  assert.equal(f.requests.filter(r=>r.path==='/v1/contributor/library').length,1);

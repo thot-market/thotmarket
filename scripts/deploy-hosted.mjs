@@ -7,15 +7,16 @@ import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-const APP_SERVICE = 'private-anvil-app';
 const [target, image] = process.argv.slice(2);
 if (!['dev', 'staging'].includes(target) || !/^[\w./-]+@sha256:[a-f0-9]{64}$/.test(image ?? '')) {
   throw new Error('Usage: deploy-hosted.mjs dev|staging IMAGE@sha256:DIGEST');
 }
 const cvm = (...args) => execFileSync('cvm', args, {encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit']});
 const compose = JSON.parse(cvm('hosted-compose', target));
-const app = compose.services?.[APP_SERVICE];
-if (!app) throw new Error(`No ${APP_SERVICE} service in the ${target} compose`);
+// The app service is the one named *-app (private-anvil-app on dev, private-anvil-epoch-app on staging).
+const names = Object.keys(compose.services ?? {}).filter(name => /(^|-)app$/.test(name));
+if (names.length !== 1) throw new Error(`Expected one *-app service in the ${target} compose, found: ${names.join(', ') || 'none'}`);
+const app = compose.services[names[0]];
 if (app.image === image) { console.log(`${target} already runs ${image}`); process.exit(0); }
 console.log(`${target}: ${app.image} -> ${image}`);
 app.image = image;

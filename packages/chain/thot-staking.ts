@@ -18,10 +18,9 @@ export async function stakingWorkspace(chain:ThotChain,owner?:string,sharedBlock
  const config=chain.config,block=sharedBlock??await chain.snapshot(),at={blockTag:block.number};
  ensure(/^0x[\da-f]{64}$/i.test(config.codeHashes.staking??''),'INVALID_STAKING_CODE_PIN');
  const pool=new Contract(getAddress(config.staking!),STAKING_ABI,chain.provider);
- const code=await chain.provider.getCode(config.staking!,block.number);
- ensure(code!=='0x'&&keccak256(code).toLowerCase()===config.codeHashes.staking!.toLowerCase(),'STAKING_CODE_PIN_MISMATCH',503);
- const [token,governor,count,ids,protectedBalance,balance]=await Promise.all([
+ const [code,token,governor,count,ids,protectedBalance,balance]=await Promise.all([chain.provider.getCode(config.staking!,block.number),
   pool.token(at),pool.governor(at),pool.campaignCount(at),owner?pool.activePositionIds(owner,at):[],pool.protectedBalance(at),chain.token.balanceOf(config.staking,at)]);
+ ensure(code!=='0x'&&keccak256(code).toLowerCase()===config.codeHashes.staking!.toLowerCase(),'STAKING_CODE_PIN_MISMATCH',503);
  ensure(getAddress(token)===config.token&&getAddress(governor)===getAddress(config.sharedTreasury?config.reserve:config.governor!),'STAKING_BINDING_MISMATCH',503);
  if(config.sharedTreasury){
   const treasury=new Contract(config.reserve,['function stakingPool() view returns(address)'],chain.provider);
@@ -29,14 +28,13 @@ export async function stakingWorkspace(chain:ThotChain,owner?:string,sharedBlock
  }
  ensure(balance>=protectedBalance,'STAKING_INSOLVENT',503);
  ensure(ids.length<=64,'STAKING_POSITION_LIMIT',503);
- const campaigns=[];
- // Bounded recent campaigns; older positions remain individually claimable.
- for(let id=Math.max(1,Number(count)-19);id<=Number(count);id++){
-  const c=await pool.campaigns(id,at),terms=await pool.terms(id,at);
-  campaigns.push({id:String(id),starts_at:Number(c.startsAt),enrollment_ends_at:Number(c.enrollmentEndsAt),principal_cap:String(c.principalCap),total_deposited:String(c.totalDeposited),reward_budget:String(c.rewardBudget),unallocated_reward:String(c.unallocatedReward),outstanding_reward:String(c.outstandingReward),paused:c.admissionsPaused,closed:c.closed,terms:terms.map((t:any,index:number)=>({index,duration:Number(t.duration),reward_bps:Number(t.rewardBps)}))});
- }
- const positions=[];
- for(const id of ids){const p=await pool.positions(id,at);ensure(getAddress(p.owner)===getAddress(owner!),'STAKING_OWNER_MISMATCH');positions.push({id:String(id),campaign_id:String(p.campaignId),principal:String(p.principal),reward:String(p.reward),deposited_at:Number(p.depositedAt),unlock_at:Number(p.unlockAt),claimed:p.claimed});}
+ // Bounded recent campaigns, read together; older positions remain individually claimable.
+ const recent=Array.from({length:Math.min(20,Number(count))},(_,i)=>Number(count)-Math.min(20,Number(count))+1+i);
+ const campaigns=await Promise.all(recent.map(async id=>{
+  const [c,terms]=await Promise.all([pool.campaigns(id,at),pool.terms(id,at)]);
+  return ({id:String(id),starts_at:Number(c.startsAt),enrollment_ends_at:Number(c.enrollmentEndsAt),principal_cap:String(c.principalCap),total_deposited:String(c.totalDeposited),reward_budget:String(c.rewardBudget),unallocated_reward:String(c.unallocatedReward),outstanding_reward:String(c.outstandingReward),paused:c.admissionsPaused,closed:c.closed,terms:terms.map((t:any,index:number)=>({index,duration:Number(t.duration),reward_bps:Number(t.rewardBps)}))});
+ }));
+ const positions=await Promise.all(ids.map(async(id:bigint)=>{const p=await pool.positions(id,at);ensure(getAddress(p.owner)===getAddress(owner!),'STAKING_OWNER_MISMATCH');return ({id:String(id),campaign_id:String(p.campaignId),principal:String(p.principal),reward:String(p.reward),deposited_at:Number(p.depositedAt),unlock_at:Number(p.unlockAt),claimed:p.claimed});}));
  if(!sharedBlock)await chain.assertSnapshot(block);
  return {address:config.staking!,block,campaigns,positions,protected_balance:String(protectedBalance),pool_balance:String(balance)};
 }

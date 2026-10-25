@@ -64,7 +64,7 @@ async function main(commit = 'origin/main') {
     run('gh', ['run', 'download', String(imageRun), '-R', PUBLIC, '-D', join(work, 'image')]);
     const [artifact] = await readdir(join(work, 'image'));
     const record = JSON.parse(await readFile(join(work, 'image', artifact, 'image-release.json'), 'utf8'));
-    const image = `${record.image}@${record.digest}`;
+    const image = record.image.pinned_reference;
     run('gh', ['release', 'create', tag, '-R', PUBLIC, '--prerelease', '--verify-tag', '--title', tag,
       '--notes', `Source: ${published}\nImage: ${image}`]);
     console.log(JSON.stringify({tag, source, published, image}, null, 2));

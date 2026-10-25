@@ -13,7 +13,7 @@ export function traceQcStatus(check){
 export function createTraceQcUI({state,api,escape}){
   let generation=0,current=null,timer=null;
   const scopeLabel=scope=>scope==='release'?'Sale version':'Private copy';
-  const sources=item=>(item.capture_segments??[]).length?item.capture_segments.map((s,i)=>({id:s.trace_id,label:`Recording ${i+1}`})):[{id:item.trace_id,label:'Saved trace'}];
+  const sources=item=>(item.capture_segments??[]).length?item.capture_segments.map((s,i)=>({id:s.trace_id,label:`Recording ${i+1}`})):[{id:item.trace_id,label:'Saved item'}];
   function live(context){
     if(!context||context!==current||context.generation!==generation||context.accountGeneration!==state.generation||typeof document==='undefined')return null;
     const panel=document.querySelector('#trace-quality-check');
@@ -44,7 +44,7 @@ export function createTraceQcUI({state,api,escape}){
     if(result.status==='complete'&&report){check.state='complete';check.outcome=report.status;if(result.selected_source?.coverage?.status==='incomplete'&&report.status==='pass')check.outcome='flag';}
     const status=traceQcStatus(check);
     const important=(report?.findings??[]).filter(f=>['flag','reject'].includes(f.severity)).length;
-    status.note=check.state==='complete'?(important?`${important} ${important===1?'finding':'findings'} · ${scopeLabel(context.scope)}`:`${scopeLabel(context.scope)} · Local checks`):{queued:'Runs automatically in the background',running:'You can keep reading',preparing:'Waiting for the saved content',failed:'Your trace is still saved',not_scheduled:'Runs automatically in the background'}[check.state]??'Automatic · private';
+    status.note=check.state==='complete'?(important?`${important} ${important===1?'finding':'findings'} · ${scopeLabel(context.scope)}`:`${scopeLabel(context.scope)} · Local checks`):{queued:'Runs automatically in the background',running:'You can keep reading',preparing:'Waiting for the saved content',failed:'Your item is still saved',not_scheduled:'Runs automatically in the background'}[check.state]??'Automatic · private';
     return status;
   }
   function resultHTML(context){
@@ -75,11 +75,11 @@ export function createTraceQcUI({state,api,escape}){
   function errorMessage(error){
     const code=error?.message??'';
     if(/QC_STORAGE_LIMIT/.test(code))return 'Saved-check limit reached. Existing results are still available.';
-    if(/QC_SOURCE_LIMIT/.test(code))return 'This version is too large for these checks. Your trace is still saved.';
+    if(/QC_SOURCE_LIMIT/.test(code))return 'This version is too large for these checks. Your item is still saved.';
     if(/RELEASE_EVIDENCE_UNAVAILABLE|RELEASE_NOT_READY|QC_RELEASE_UNAVAILABLE/.test(code))return 'Prepare a sale version first. Your private copy is checked separately.';
     if(/CHANGED|STALE|SUPERSEDED/.test(code))return 'This version changed. Checking its latest status…';
-    if(/UNAVAILABLE|NOT_FOUND|FORBIDDEN/.test(code))return 'This version is unavailable. Reopen the trace to continue.';
-    return 'Could not refresh check status. Your trace is still saved.';
+    if(/UNAVAILABLE|NOT_FOUND|FORBIDDEN/.test(code))return 'This version is unavailable. Reopen the item to continue.';
+    return 'Could not refresh check status. Your item is still saved.';
   }
   function schedule(context){
     clearTimeout(timer);timer=null;
