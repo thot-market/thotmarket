@@ -15,6 +15,7 @@ import { createTestnetOperatorRuntime, loadHostedAuthMemberships, seedHostedAuth
 import { startWorkerLoop } from '../worker/main.ts';
 import type { PlaidConfig } from '../../packages/market/src/plaid-link.ts';
 import type { Actor } from '../../packages/market/src/service.ts';
+import { workspaceTimings } from '../../packages/market/src/thot-market.ts';
 import { demoUser, demoBuyer, demoOperator, demoSettlement, importDemo, createDemoMandate, policyInput } from '../../packages/market/src/fixtures.ts';
 import { completeDevelopmentAllocations } from '../../packages/market/src/chain-worker.ts';
 import { OpenAIResponsesProvider, OpenAIChatProvider } from '../../packages/inference/src/index.ts';
@@ -411,6 +412,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         const scope=url.searchParams.get('scope')??'full';
         ensure(url.searchParams.size<=(url.searchParams.has('scope')?1:0)&&(scope==='buyer'||scope==='full'),'INVALID_WORKSPACE_QUERY');
         result=await app.thot.workspace(actor,{scope});
+        const timing=workspaceTimings.get(result as object);if(timing)res.setHeader('Server-Timing',Object.entries(timing).map(([name,ms])=>`${name};dur=${ms.toFixed(0)}`).join(', '));
       }
       else if(route==='/v1/thot/analytics'&&req.method==='GET')result=await app.thotAnalytics.workspace(actor,Object.fromEntries(url.searchParams));
       else if(route==='/v1/thot/analytics/leaderboard'&&req.method==='GET')result=await app.thotAnalytics.leaderboard(actor,Object.fromEntries(url.searchParams));

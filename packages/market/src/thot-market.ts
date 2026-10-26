@@ -17,6 +17,8 @@ import {ThotChain,THOT_AUTHORIZATION_TYPES,type ThotOperatorJournalEntry} from '
 import {type Actor, type ThotService} from './service.ts';
 import {assertOperationEnabled} from './operational-controls.ts';
 import {estimateThotValuation,type ThotSaleObservation} from './thot-valuations.ts';
+/** Per-phase milliseconds of the last workspace read, exposed as a Server-Timing header. */
+export const workspaceTimings=new WeakMap<object,Record<string,number>>();
 import {THOT_TREASURY_SAMPLING_GROUP_SIZE,THOT_TREASURY_SAMPLING_POLICY,THOT_TREASURY_SAMPLING_TERMS} from './thot-sampling.ts';
 
 const atom=(value:unknown)=>{ensure(typeof value==='string'&&/^(0|[1-9]\d{0,14})(\.\d{1,18})?$/.test(value),'INVALID_THOT_AMOUNT');const n=parseUnits(value,18);ensure(n>0n&&n<=parseUnits('1000000000',18),'INVALID_THOT_AMOUNT');return n;};
@@ -105,15 +107,16 @@ export class ThotMarketplace {
  }
  async workspace(actor:Actor,options:{scope?:'buyer'|'full'}={}){
   allowed(actor);
+  let at=performance.now();const timing:Record<string,number>={},lap=(name:string)=>{const now=performance.now();timing[name]=now-at;at=now;};
   const scope=options.scope??'full';ensure(scope==='buyer'||scope==='full','INVALID_WORKSPACE_SCOPE');
-  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
+  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));lap('db');
   const wallet=records.find(r=>r.id==='wallet:'+actor.id)?.address;
   const listings=records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r));
   const own=records.filter(r=>r.kind==='listing'&&r.owner_id===actor.id).map(r=>({...this.publicListing(r),trace_id:r.trace_id,active:r.active}));
   const intents=records.filter(r=>r.kind==='intent'&&(r.owner_id===actor.id||r.seller_id===actor.id));
   // All chain-backed fields share one guarded, confirmed request snapshot.
-  const chain=this.chain,block=chain?await chain.snapshot():null;
-  const visible=intents.slice(-50),view=chain?await chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id)),block!):null;
+  const chain=this.chain,block=chain?await chain.snapshot():null;lap('snapshot');
+  const visible=intents.slice(-50),view=chain?await chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id)),block!):null;lap('account');
   const orders=[];
   if(view)for(let n=0;n<visible.length;n++){const i=visible[n]!,receipt=view.offers[n]!;if(receipt.status!==0||i.owner_id===actor.id)orders.push({...this.publicIntent(i),receipt});}
   // Browsing and purchasing require fresh wallet, receipt and pause checks, not
@@ -125,11 +128,12 @@ export class ThotMarketplace {
    scope==='full'&&chain?holderRewardsWorkspace(chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id),block!):null,
    scope==='full'&&chain?stakingWorkspace(chain,wallet,block!):null,
    wallet&&chain?chain.isReserveBuyer(wallet,block!):false,
-  ]);
+  ]);lap('extras');
   // Anvil can change code at the same height without changing the block hash.
   if(chain&&!chain.publicChain())await chain.guard();
-  if(chain&&block)await chain.assertSnapshot(block);
-  return {workspace_scope:scope,holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
+  if(chain&&block)await chain.assertSnapshot(block);lap('assert');
+  const result={workspace_scope:scope,holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
+  workspaceTimings.set(result,timing);return result;
  }
  private publicListing(r:Document){return {...(r.brokerage_claim?{brokerage_claim:r.brokerage_claim}:{}),...(r.content_kind==='research'?{content_kind:'research',file_count:r.file_count,file_types:r.file_types??null,total_bytes:r.total_bytes??null}:{}),id:r.id,public_path:this.listingPath(r.id),seller:r.wallet,owner_label:'Contributor',title:r.title,price_atoms:r.price_atoms,license:r.license,license_hash:r.license_hash,evidence_hash:r.evidence_hash,provenance:r.provenance,workflow:r.workflow,turn_count:r.turn_count,capture_model:r.capture_model??null,created_at:r.created_at,automatic_sales:!!r.signature,treasury_opt_in:r.treasury_sampling_consent===THOT_TREASURY_SAMPLING_POLICY};}
  // Stable public URL path for a listing. The record id prefix is an internal
