@@ -89,8 +89,8 @@ test('direct catalogue overrides remembered vault, renders before chain readines
  assert.equal(f.requests.filter(r=>r.path==='/v1/thot/catalog').length,1);
  assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace').length,1);
  f.release();await ready(f.page).waitFor();assert.equal(await ready(f.page).isEnabled(),true);
- assert.equal(await card(f.page).locator('details').getAttribute('open'),'');
- assert.equal(await card(f.page).locator('summary').evaluate(e=>e===document.activeElement),true);
+ assert.equal(await card(f.page).locator('details').filter({has:f.page.locator('summary',{hasText:'License'})}).getAttribute('open'),'');
+ assert.equal(await card(f.page).locator('summary').filter({hasText:'License'}).evaluate(e=>e===document.activeElement),true);
  assert(Math.abs(await card(f.page).evaluate(e=>e.getBoundingClientRect().top)-beforeTop)<=2,'listing remains at the same viewport position');
  await f.snapshot('catalogue-ready');
  await f.page.reload({waitUntil:'domcontentloaded'});await ready(f.page).waitFor();
@@ -145,12 +145,12 @@ test('My data is readable while chain data waits and never presents pending sale
  assert.equal(await f.page.locator('[data-action="thot-list-configure"]').count(),0);
  assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace'&&r.search==='?scope=buyer').length,1);
  await f.page.getByRole('button',{name:'Add work'}).click();
- await f.page.locator('[data-action="journey-local"][data-client="codex"]').click();
+ await f.page.locator('#detail-dialog [data-action="journey-local"][data-client="codex"]').click();
  await f.page.getByRole('button',{name:/Daily history uploads/}).click();
  await f.page.getByRole('heading',{name:'Upload Codex history daily'}).waitFor();
  await f.page.locator('#detail-dialog [data-action="close-dialog"]').click();
  await f.page.getByRole('button',{name:'Add work'}).click();
- await f.page.locator('[data-action="journey-local"][data-client="claude"]').click();
+ await f.page.locator('#detail-dialog [data-action="journey-local"][data-client="claude"]').click();
  await f.page.getByRole('button',{name:/Import a conversation/}).click();
  await f.page.locator('#research-file').waitFor();
  await f.page.locator('#detail-dialog [data-action="close-dialog"]').first().click();
@@ -170,6 +170,7 @@ test('My data navigation loads contributor records without repeating the market 
  await f.page.getByRole('button',{name:libraryItem.title,exact:true}).waitFor();
  assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace').length,1);
  assert.equal(f.requests.filter(r=>r.path==='/v1/contributor/library').length,1);
+ assert.equal(f.requests.some(r=>r.path==='/v1/traces'||r.path==='/v1/contributor/portfolio'),false,'My data does not load the separate listing and legacy portfolio payloads');
  await f.page.locator('.journey-menu>summary').click();await f.page.getByRole('button',{name:'Manage THOT',exact:true}).click();
  await f.page.waitForFunction(()=>document.title==='THOT · thot market');
  assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace'&&r.search==='').length,1,'full token view upgrades the reduced response');

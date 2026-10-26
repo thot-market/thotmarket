@@ -70,6 +70,71 @@ export class TraceQc {
     if(preparing){const source={trace:preparing,scope,ref:{},version:qcVersion(preparing,scope),id:''};return {trace_id:traceId,scope,selected_source:this.selected(source,null),automation:qcAutomation(preparing,scope,this.service.now()),status:'not_run',cached:false,report:null,report_digest:null,summary:'The saved source is still being prepared.',review:null,notice};}
     return this.readCurrent(actor,traceId,scope);
   }
+  /** Export one immutable source for local review. Operator metadata access is
+   * deliberately not permission to decrypt another contributor's private work. */
+  async exportSource(actor:Actor,traceId:string,query:Document={}){
+    owned(actor);ensure(Object.keys(query).every(k=>k==='scope'),'INVALID_QC_QUERY');
+    const scope=scopeOf(query.scope??'private');
+    const before=await this.service.db.transaction(tx=>this.snapshot(tx,actor,traceId,scope));
+    const content=await this.service.privacy.open(actor.id,before.ref),hash=contentDigest(content);
+    if(scope==='release')ensure(hash===before.trace.normalized_hash,'QC_SOURCE_CHANGED',409);
+    await this.service.db.transaction(async tx=>{
+      await this.current(tx,actor,before);
+      await tx.audit(actor.id,'TraceQcSourceExported',{trace_id:traceId,scope,source_version:before.version,content_hash:hash});
+    });
+    return {schema_version:'trace-qc-export/v1',selected_source:this.selected(before,hash),content,notice};
+  }
+  private reviewer(actor:Actor){ensure(actor.role==='operator_security'||actor.role==='user'&&this.service.config.traceExplorerViewers?.includes(actor.id),'FORBIDDEN',403);}
+  async consent(actor:Actor,traceId:string,input:Document){
+    owned(actor);ensure(Object.keys(input).length===1&&typeof input.enabled==='boolean','INVALID_QC_CONSENT');
+    return this.service.db.transaction(async tx=>{
+      const source=await this.snapshot(tx,actor,traceId,'release');
+      source.trace.local_qc_consent=input.enabled?{source_version:source.version,granted_at:this.service.now()}:null;
+      await tx.update('traces',traceId,source.trace);
+      await tx.audit(actor.id,'LocalQcConsentChanged',{trace_id:traceId,enabled:input.enabled,source_version:source.version});
+      return {enabled:input.enabled,source_version:source.version};
+    });
+  }
+  private async sharedSource(tx:Transaction,actor:Actor,traceId:string){
+    this.reviewer(actor);const trace=await tx.get('traces',traceId);
+    const owner:Actor={id:trace.owner_id,role:'user'},source=await this.snapshot(tx,owner,traceId,'release');
+    ensure(source.trace.local_qc_consent?.source_version===source.version,'QC_REVIEW_CONSENT_REQUIRED',403);
+    return {source,owner};
+  }
+  async exportForReview(actor:Actor,traceId:string){
+    this.reviewer(actor);
+    const {source,owner}=await this.service.db.transaction(tx=>this.sharedSource(tx,actor,traceId));
+    const content=await this.service.privacy.open(owner.id,source.ref),hash=contentDigest(content);
+    ensure(hash===source.trace.normalized_hash,'QC_SOURCE_CHANGED',409);
+    await this.service.db.transaction(async tx=>{
+      const current=await this.sharedSource(tx,actor,traceId);ensure(current.source.version===source.version&&current.owner.id===owner.id,'QC_SOURCE_CHANGED',409);
+      await tx.audit(owner.id,'LocalQcSourceRead',{trace_id:traceId,reviewer:actor.id,source_version:source.version,content_hash:hash});
+    });
+    return {schema_version:'trace-qc-export/v1',selected_source:this.selected(source,hash),content,notice};
+  }
+  async submitLocalReview(actor:Actor,key:string,traceId:string,input:Document){
+    this.reviewer(actor);
+    ensure(Object.keys(input).every(k=>['source_version','verdict','usefulness','completeness','evaluator'].includes(k))&&
+      typeof input.source_version==='string'&&/^[a-f0-9]{64}$/.test(input.source_version)&&
+      ['pass','flag','reject'].includes(input.verdict)&&[input.usefulness,input.completeness].every(n=>Number.isInteger(n)&&n>=0&&n<=4)&&
+      typeof input.evaluator==='string'&&/^[a-zA-Z0-9._-]{1,64}$/.test(input.evaluator),'INVALID_LOCAL_QC_REVIEW');
+    const {source,owner}=await this.service.db.transaction(tx=>this.sharedSource(tx,actor,traceId));
+    ensure(input.source_version===source.version,'QC_SOURCE_CHANGED',409);
+    return this.service.staged.run(owner.id,key,{action:'localQcReview',reviewer:actor.id,trace_id:traceId,...input},'projection',async stage=>{
+      const review={...input,reviewer:actor.id,created_at:this.service.now(),unverified:true},ref=await stage.seal(review);
+      return async tx=>{
+        const current=await this.sharedSource(tx,actor,traceId);ensure(current.source.version===source.version&&current.owner.id===owner.id,'QC_SOURCE_CHANGED',409);
+        // Keep only the latest local opinion; it never changes sale permission or sends payment.
+        ensure((current.source.trace.local_qc_review_count??0)<128,'QC_STORAGE_LIMIT',429);
+        current.source.trace.local_qc_review={source_version:source.version,verdict:input.verdict,object_ref:ref};
+        current.source.trace.local_qc_review_count=(current.source.trace.local_qc_review_count??0)+1;
+        current.source.trace.local_qc_review_refs=[...(current.source.trace.local_qc_review_refs??[]),ref];
+        await tx.update('traces',traceId,current.source.trace);
+        await tx.audit(owner.id,'LocalQcReviewed',{trace_id:traceId,reviewer:actor.id,source_version:source.version});
+        return {source_version:source.version,verdict:input.verdict,unverified:true};
+      };
+    });
+  }
   private async execute(actor:Actor,key:string,traceId:string,input:Document,control?:{version:string;authorize:(tx:Transaction)=>Promise<void>}){
     owned(actor);ensure(input&&Object.keys(input).length===1&&'scope' in input,'INVALID_QC_REQUEST');
     const scope=scopeOf(input.scope),before=await this.service.db.transaction(tx=>this.snapshot(tx,actor,traceId,scope));

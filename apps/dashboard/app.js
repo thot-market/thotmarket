@@ -76,7 +76,7 @@ function navigateView(view,{fromHistory=false}={}){
   if(!fromHistory)writeViewRoute(view);
   rememberView();
   if(state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){state.loaded=false;loading();if(!fullRefreshCount)void safely(refresh);return true;}
-  if(state.role==='user'&&!state.contributorLoaded&&(view==='vault'||(view==='market'&&marketFragment()==='#thot-contribute'))){
+  if(state.role==='user'&&(!state.contributorLoaded||view==='market'&&!state.contributorDetailsLoaded)&&(view==='vault'||(view==='market'&&marketFragment()==='#thot-contribute'))){
     if(view==='vault')renderContributorLoading();else loading();
     void safely(loadContributorRecords);return true;
   }
@@ -393,11 +393,12 @@ async function session(role) {
   await refresh();
 }
 function resetCatalogue(){state.catalogue=null;state.catalogueError=false;state.workspaceError=false;catalogueRequest=null;renderedCatalogue=null;scrolledMarketFragment=null;}
-function resetContributorRecords(){contributorRequest=null;state.libraryLoaded=false;state.contributorLoaded=false;state.contributorError=false;}
+function resetContributorRecords(){contributorRequest=null;state.libraryLoaded=false;state.contributorLoaded=false;state.contributorDetailsLoaded=false;state.contributorError=false;}
 // A confirmed wallet snapshot is needed to trade, not to read an authenticated
 // contributor's own library. Keep these independent and discard late accounts.
 async function loadContributorRecords(){
-  if(state.role!=='user'||!state.actor||signingOut||state.contributorLoaded)return;
+  const details=authMode!=='wallet_siwe'||state.view!=='vault';
+  if(state.role!=='user'||!state.actor||signingOut||state.contributorLoaded&&(!details||state.contributorDetailsLoaded))return;
   const generation=state.generation;if(contributorRequest?.generation===generation)return contributorRequest.promise;
   const current=captureScope(),request={generation,promise:null};contributorRequest=request;state.contributorError=false;
   request.promise=(async()=>{
@@ -405,10 +406,13 @@ async function loadContributorRecords(){
       const library=api('/v1/contributor/library'+libraryUI.queryString()).then(traceLibrary=>{
         current();state.traceLibrary=traceLibrary;state.libraryLoaded=true;if(state.view==='vault')render();libraryUI.ready();
       });
-      const [traces,contributorPortfolio]=await Promise.all([api('/v1/traces'),api('/v1/contributor/portfolio'),library]);current();
-      Object.assign(state,{traces,contributorPortfolio,contributorLoaded:true});render();libraryUI.ready();
+      if(details){
+        const [traces,contributorPortfolio]=await Promise.all([api('/v1/traces'),api('/v1/contributor/portfolio'),library]);current();
+        Object.assign(state,{traces,contributorPortfolio,contributorDetailsLoaded:true});
+      }else{await library;current();}
+      state.contributorLoaded=true;render();libraryUI.ready();
     }catch(error){if(error.name==='StaleWorkspaceError')return;current();state.contributorError=true;if(state.view==='vault')render();throw error;}
-    finally{if(contributorRequest===request)contributorRequest=null;}
+    finally{if(contributorRequest===request){contributorRequest=null;if(!details&&state.view==='market'&&marketFragment()==='#thot-contribute')void safely(loadContributorRecords);}}
   })();
   return request.promise;
 }
@@ -465,7 +469,7 @@ async function refreshWorkspace({full=false}={}) {
   if (!state.token && !(authMode==='wallet_siwe'&&state.actor)) return authMode==='development'?session(state.role):showIdentityLogin();
   const generation = ++state.generation, role = state.role;
   state.workspaceError=false;
-  if(role==='user'&&(state.view==='vault'||marketFragment()==='#thot-contribute')){state.contributorLoaded=false;void safely(loadContributorRecords);if(state.view==='vault')renderContributorLoading();}
+  if(role==='user'&&(state.view==='vault'||marketFragment()==='#thot-contribute')){state.contributorLoaded=false;state.contributorDetailsLoaded=false;void safely(loadContributorRecords);if(state.view==='vault')renderContributorLoading();}
   if(!state.loaded&&state.view==='market'){void loadCatalogue();renderCatalogue();}
   try {
   const workspacePath='/v1/thot/workspace'+(!full&&!needsFullWorkspace()&&role!=='operator_security'?'?scope=buyer':'');
@@ -741,7 +745,7 @@ function download(value, filename) {
 async function runAction(action, button) {
   const privateLibraryAction=state.role==='user'&&state.libraryLoaded&&[
     'qc-review','qc-retry',
-    'journey-add','journey-local','journey-connections','library-open','library-earlier','library-later','library-bookmark','library-next','library-previous','library-filter-bookmarks','library-connections','import-research','import-research-package','library-package-download','confirm-research',
+    'library-qc-consent','journey-add','journey-local','journey-connections','library-open','library-earlier','library-later','library-bookmark','library-next','library-previous','library-filter-bookmarks','library-connections','import-research','import-research-package','library-package-download','confirm-research',
     'history-sync-open','history-sync-manage','history-sync-cancel','copy-setup-command','start-agent-capture','setup-codex','setup-claude','setup-zai','capture-start-codex','capture-start-claude','capture-start-zai','cancel-agent-capture','openrouter-open','openrouter-usage'
   ].includes(action);
   if(state.actor&&!state.loaded&&!privateLibraryAction&&!['retry-library','refresh','thot-refresh','thot-copy-seller-wallet','identity-sign-out','dismiss-notice','close-dialog','device-pairing-submit'].includes(action))throw Error('Account details are still loading. Wait for them or use Refresh to retry.');
@@ -1044,7 +1048,7 @@ function showIdentityLogin(message='Use a short-lived access token from your con
     if(privyConfig){
       const feedback=['Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.','Connect your EVM wallet to continue.','Connect your wallet to continue.'].includes(message)?'':message;
       const status=privyLoginPhase||feedback;
-      main.innerHTML=welcomeHTML(`<section aria-label="${variant==='buyer'?'Sign in to browse data':variant==='referrals'?'Sign in to view your referral dashboard':'Sign in'}"><button class="button" data-privy-login${privyLoginBusy?' disabled aria-busy="true"':''}>${privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in'}</button><p class="journey-fine" id="privy-signin-stages">Verify your email, then sign a free message to unlock your workspace.</p><p id="privy-login-status" role="status" aria-live="polite"${status?'':' hidden'}>${escape(status)}</p><div id="privy-wallet-choices"></div></section>`,{variant});
+      main.innerHTML=welcomeHTML(`<section aria-label="${variant==='buyer'?'Sign in to browse data':variant==='referrals'?'Sign in to view your referral dashboard':'Sign in'}"><button class="button" data-privy-login${privyLoginBusy?' disabled aria-busy="true"':''}>${privyLoginBusy?'Opening sign-in…':privyLoginRetry?'Try again':'Sign in'}</button><p class="journey-fine" id="privy-signin-stages">Sign in with email or a wallet, then sign a free message to open your workspace.</p><p id="privy-login-status" role="status" aria-live="polite"${status?'':' hidden'}>${escape(status)}</p><div id="privy-wallet-choices"></div></section>`,{variant});
     }else{
       main.innerHTML=welcomeHTML(heading(variant==='buyer'?'MARKETPLACE':variant==='referrals'?'REFERRALS':'YOUR PRIVATE WORKSPACE',variant==='buyer'?'Sign in with your wallet to browse data.':variant==='referrals'?'Sign in to view your referral dashboard.':'Sign in with your wallet.',message==='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'?'Connect an EVM wallet and sign a one-time login message.':message)+`<section class="panel audit-card"><h2>Your wallet is your account.</h2><p>Sign-in does not approve a token transfer or authorize an item sale.</p><div class="actions"><button class="button secondary" data-wallet-login="metamask">MetaMask</button><button class="button secondary" data-wallet-login="phantom">Phantom · EVM</button><button class="button secondary" data-wallet-login="injected">Other EVM wallet</button></div></section>`,{variant});
     }

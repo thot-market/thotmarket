@@ -5,7 +5,7 @@ export function createOpenRouterUI({state,api,openDialog,dialog,escape,toast,ref
   let generation=0;
   const revocations=new Map();
   const scope=()=>{const g=generation,actor=state.actor?.id,workspace=state.generation,provider=getProvider();return()=>{if(g!==generation||actor!==state.actor?.id||workspace!==state.generation||provider!==getProvider())throw Error('Your account changed. Open Connections again.');};};
-  const intro=()=>`<section class="panel connection-card"><div><p class="eyebrow">KEEP YOUR TOOLS</p><h2>Make your next session count.</h2><p>Connect your tools to keep useful work in one place. Your model provider still handles billing.</p></div><div class="connection-actions"><button class="button secondary" data-action="journey-add">Connect a tool</button><button class="text-button" data-action="openrouter-usage">Usage & cost</button></div></section>`;
+  const intro=()=>state.traceLibrary?.summary?.saved===0?'':`<section class="panel connection-card"><div><p class="eyebrow">KEEP YOUR TOOLS</p><h2>Make your next session count.</h2><p>Connect your tools to keep useful work in one place. Your model provider still handles billing.</p></div><div class="connection-actions"><button class="button secondary" data-action="journey-add">Connect a tool</button><button class="text-button" data-action="openrouter-usage">Usage & cost</button></div></section>`;
   async function usage(){
     reset();
     const current=scope(),status=await api('/v1/contributor/openrouter');current();

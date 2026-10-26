@@ -468,7 +468,13 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       else if(segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&req.method==='POST')result=await app.qc.run(actor,key,segments[3]!,body);
       else if(segments.length===6&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&segments[5]==='retry'&&req.method==='POST')result=await app.qc.retry(actor,key,segments[3]!,body);
       else if(segments.length===6&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&segments[5]==='review'&&req.method==='POST')result=await app.qc.review(actor,key,segments[3]!,body);
+      else if(segments.length===6&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&segments[5]==='source'&&req.method==='GET'){
+        ensure([...url.searchParams.keys()].length===new Set(url.searchParams.keys()).size,'INVALID_QC_QUERY');result=await app.qc.exportSource(actor,segments[3]!,Object.fromEntries(url.searchParams));
+      }
       else if(req.method==='GET'&&route==='/v1/operator/trace-explorer')result=await app.library.operator(actor,Object.fromEntries(url.searchParams));
+      else if(segments.length===6&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='qc'&&segments[5]==='local-consent'&&req.method==='POST')result=await app.qc.consent(actor,segments[3]!,body);
+      else if(segments.length===5&&segments.slice(0,3).join('/')==='v1/operator/local-qc'&&segments[4]==='source'&&req.method==='GET')result=await app.qc.exportForReview(actor,segments[3]!);
+      else if(segments.length===5&&segments.slice(0,3).join('/')==='v1/operator/local-qc'&&segments[4]==='review'&&req.method==='POST')result=await app.qc.submitLocalReview(actor,key,segments[3]!,body);
       else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='refresh')result=await app.library.reprocess(actor,key,segments[3]!);
       else if(req.method==='POST'&&segments.length===5&&segments.slice(0,3).join('/')==='v1/contributor/library'&&segments[4]==='prepare-sale')result=await app.portfolio.prepareSale(actor,key,segments[3]!,body);
       else if(req.method==='POST'&&route==='/v1/contributor/capture-devices'){

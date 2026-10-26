@@ -108,7 +108,7 @@ test('recorded browser journey: create and fund a buy order, approve uploaded hi
     {type:'user',sessionId:'anvil-browser-demo',cwd:'/synthetic/demo',message:{role:'user',content:'Compare public filings and explain valuation assumptions for a fictional company. This is synthetic example data.'}},
     {type:'assistant',sessionId:'anvil-browser-demo',message:{role:'assistant',content:[{type:'text',text:'Separate reported revenue from assumptions. Compare base, low-growth and high-growth cases; these examples are not forecasts.'}]}},
   ].map(v=>JSON.stringify(v)).join('\n'));
-  await dwell(2500);await u.locator('[data-action="journey-add"]').first().click();await u.locator('[data-action="journey-local"][data-client="claude"]').click();await u.locator('#detail-dialog [data-action="import-research"]').click();
+  await dwell(2500);await u.locator('[data-action="journey-add"]').first().click();await u.locator('#detail-dialog [data-action="journey-local"][data-client="claude"]').click();await u.locator('#detail-dialog [data-action="import-research"]').click();
   await u.locator('#research-file').setInputFiles({name:'claude-code-synthetic-example.jsonl',mimeType:'application/x-ndjson',buffer:history});await dwell(2000);
   await u.locator('#research-preview-form button[type="submit"]').click();await u.getByRole('heading',{name:'Review conversation'}).waitFor();
   await u.locator('details:has(#research-rights) > summary').click();

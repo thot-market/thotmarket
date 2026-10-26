@@ -33,7 +33,7 @@ export function sourceCoverage(trace:Document):SourceCoverage{
 export function qcVersion(trace:Document,scope:QcScope){
   const ref=scope==='private'?trace.raw_ref:trace.scrub_ref;
   return canonicalHash({scope,ref:ref??null,projection:trace.projection??null,capture_state:trace.capture_state??null,source_coverage:sourceCoverage(trace),
-    ...(scope==='release'?{normalized_hash:trace.normalized_hash,rights_id:trace.rights_id??null,provenance_id:trace.provenance_id??null,release_revision:trace.release_revision??0,release_preparation:trace.release_preparation??null}:{})});
+    ...(scope==='release'?{normalized_hash:trace.normalized_hash??null,rights_id:trace.rights_id??null,provenance_id:trace.provenance_id??null,release_revision:trace.release_revision??0,release_preparation:trace.release_preparation??null}:{})});
 }
 export const qcRunId=(owner:string,traceId:string,scope:QcScope,version:string)=>'qc:'+canonicalHash({owner,trace_id:traceId,scope,version,policy:QC_POLICY_VERSION});
 export const qcJobId=(owner:string,traceId:string,scope:QcScope,version:string)=>'auto'+qcRunId(owner,traceId,scope,version);

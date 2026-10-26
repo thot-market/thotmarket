@@ -60,7 +60,7 @@ export const redirects = `# Exact same-origin proxy routes; no catch-all or priv
 `;
 
 export const headers = `/*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   X-Frame-Options: DENY
@@ -134,6 +134,7 @@ export async function buildCloudflarePages(options: { outputParent?: string; rev
   }
   files.set('_redirects', Buffer.from(redirects));
   // The live stats page and home numbers read the app's public stats endpoint; allow exactly that origin.
+  // Cloudflare's cookieless Web Analytics beacon is injected at the edge and allowed in the policy above.
   const appOrigin = 'appUrl' in accessConfig && accessConfig.appUrl && /^https:\/\//.test(accessConfig.appUrl) ? new URL(accessConfig.appUrl).origin : null;
   files.set('_headers', Buffer.from(appOrigin ? headers.replace("connect-src 'self'", `connect-src 'self' ${appOrigin}`) : headers));
   files.set('404.html', Buffer.from(notFound));

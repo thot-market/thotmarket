@@ -117,7 +117,7 @@ try {
   async function enroll(label) {
     phase = 'synthetic-import'; await seller.open('vault');
     await seller.page.locator('[data-action="journey-add"]').first().click();
-    await seller.page.locator('[data-action="journey-local"][data-client="claude"]').click();
+    await seller.page.locator('#detail-dialog [data-action="journey-local"][data-client="claude"]').click();
     await seller.page.locator('#detail-dialog [data-action="import-research"]').click();
     const text = [
       {type: 'user', sessionId: randomUUID(), timestamp: '2026-09-22T10:00:00Z', cwd: '/workspace/synthetic-demo', message: {role: 'user', content: `Synthetic ${label}: how should a cache key include a project ID?`}},

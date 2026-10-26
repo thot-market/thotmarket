@@ -24,7 +24,8 @@
     "test:thot:browser:percentage": "node scripts/record-thot-purchase.mjs --economics percentage",
     "rc:dry-run": "node scripts/rc-dry-run.mjs",
     "qc": "node scripts/trace-qc.ts",
-    "test:qc": "node --test tests/trace-qc-engine.test.ts tests/trace-qc-judge.test.ts tests/trace-qc-api.test.ts tests/trace-auto-qc.test.ts tests/trace-qc-cli.test.ts"
+    "test:qc": "node --test tests/trace-qc-engine.test.ts tests/trace-qc-judge.test.ts tests/trace-qc-api.test.ts tests/trace-auto-qc.test.ts tests/trace-qc-cli.test.ts tests/qc-workspace-cli.test.ts",
+    "qc:workspace": "node scripts/qc-workspace.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1135.0",

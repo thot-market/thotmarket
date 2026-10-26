@@ -589,3 +589,10 @@ body{background:var(--paper)}
 @media(max-width:600px){.connected-app #main:has(#public-catalogue) .journey-example{display:none}}
 .connected-app .data-file-preview{display:block;max-width:100%;max-height:320px;margin:8px 0;border-radius:8px}
 .connected-app .share-x{margin-left:8px}
+
+@media(max-width:600px){.connected-app .journey-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.connected-app .journey-nav .nav-item{white-space:normal;text-align:center}}
+
+.connected-app .library-toolbar[hidden],.connected-app .library-footer[hidden]{display:none}
+.connected-app .library-list .library-onboarding{padding:24px}
+
+.library-header-actions{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}

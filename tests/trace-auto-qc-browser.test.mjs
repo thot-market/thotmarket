@@ -68,7 +68,7 @@ async function fixture(t){
   async function screenshot(name){await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:join(evidence,name+'.png'),fullPage:!await page.locator('#detail-dialog').evaluate(el=>el.open)});screenshots.push(name+'.png');}
   async function upload(id,answer){
     await page.locator('#conversation-library .section-head [data-action="journey-add"]').click();
-    await page.locator('[data-action="journey-local"][data-client="claude"]').click();
+    await page.locator('#detail-dialog [data-action="journey-local"][data-client="claude"]').click();
     await page.locator('#detail-dialog [data-action="import-research"]').click();
     await page.locator('#research-file').setInputFiles({name:'synthetic-'+id+'.jsonl',mimeType:'application/x-ndjson',buffer:Buffer.from(history(id,answer))});
     await page.locator('#research-preview-form button[type="submit"]').click();

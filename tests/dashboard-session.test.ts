@@ -781,21 +781,22 @@ test('same-page marketplace fragment selects Offers and scrolls the mounted sect
 });
 
 test('vault reads begin before the financial snapshot and render a private library independently',async t=>{
- const chain=deferred(),portfolio=deferred();
- const a=dashboard(t,async url=>url.startsWith('/v1/contributor/library')?response({items:[{title:'Current account work'}]}):url==='/v1/contributor/portfolio'?portfolio.promise:response([]),{thotTransport:()=>chain.promise});
+ const chain=deferred();
+ const a=dashboard(t,async url=>url.startsWith('/v1/contributor/library')?response({items:[{title:'Current account work'}]}):response([]),{thotTransport:()=>chain.promise});
  a.driver.setAuthMode('wallet_siwe');a.driver.state.loaded=false;a.driver.state.view='vault';
  const refreshing=a.driver.refresh();await flush();
- assert.equal(a.driver.state.loaded,false);assert.equal(a.driver.state.libraryLoaded,true);assert.equal(a.driver.state.contributorLoaded,false);
+ assert.equal(a.driver.state.loaded,false);assert.equal(a.driver.state.libraryLoaded,true);assert.equal(a.driver.state.contributorLoaded,true);assert.notEqual(a.driver.state.contributorDetailsLoaded,true);
  assert.match(a.document.querySelector('#main').innerHTML,/Current account work/);
  assert.match(a.document.querySelector('#wallet-summary').innerHTML,/Loading balance/);
  assert.equal(a.calls.filter(c=>c.url.startsWith('/v1/thot/workspace')).length,1);
  assert.ok(a.calls.some(c=>c.url==='/v1/thot/workspace?scope=buyer'));
  const repeated=a.driver.loadContributorRecords();await flush();
- for(const path of ['/v1/traces','/v1/contributor/portfolio','/v1/contributor/library'])assert.equal(a.calls.filter(c=>c.url===path).length,1);
+ assert.equal(a.calls.filter(c=>c.url==='/v1/contributor/library').length,1);
+ for(const path of ['/v1/traces','/v1/contributor/portfolio'])assert.equal(a.calls.filter(c=>c.url===path).length,0);
  for(const action of ['thot-buy','thot-send','thot-list-configure'])await assert.rejects(a.driver.runAction(action,{dataset:{id:'x'}}),/Account details are still loading/);
  chain.resolve(response({capabilities:{mode:'thot-production'},workspace_scope:'buyer'}));await refreshing;
  assert.equal(a.driver.state.loaded,true,'connection metadata must not block the wallet snapshot either');
- portfolio.resolve(response({items:[]}));await repeated;assert.equal(a.driver.state.contributorLoaded,true);
+ await repeated;assert.equal(a.driver.state.contributorLoaded,true);
 });
 
 test('chain failure does not erase a current authenticated library or turn balances into zero',async t=>{

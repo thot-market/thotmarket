@@ -199,5 +199,5 @@ test('email sign-in discloses both stages up front (#88)',async t=>{
   await f.page.locator('.journey-menu>summary').click();
   await f.page.locator('[data-action="identity-sign-out"]').click();
   await f.page.getByRole('button',{name:'Sign in',exact:true}).waitFor();
-  assert.match(await f.page.locator('#privy-signin-stages').innerText(),/Verify your email, then sign a free message to unlock your workspace\./);
+  assert.match(await f.page.locator('#privy-signin-stages').innerText(),/Sign in with email or a wallet, then sign a free message to open your workspace\./);
 });

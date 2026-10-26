@@ -434,7 +434,8 @@ export class ThotService {
       for(const row of rows)await this.privacy.remove(t.owner_id,row.document.object_ref);
       await tx.sql.query('DELETE FROM '+table+" WHERE owner_id=$1 AND document->>'trace_id'=$2",[t.owner_id,id]);
     }
-    for(const ref of [t.raw_ref,t.scrub_ref,t.private_metadata_ref,t.context_ref,t.personal_ref,...(t.projection_refs??[])].filter(Boolean))await this.privacy.remove(t.owner_id,ref);
+    for(const ref of [t.raw_ref,t.scrub_ref,t.private_metadata_ref,t.context_ref,t.personal_ref,...(t.projection_refs??[]),...(t.local_qc_review_refs??[])].filter(Boolean))await this.privacy.remove(t.owner_id,ref);
+    delete t.local_qc_consent;delete t.local_qc_review;delete t.local_qc_review_refs;
     for(const bundle of await tx.list('trace_bundles',t.owner_id))if(bundle.trace_id===id)await this.privacy.remove(t.owner_id,bundle.object_ref);
     for(const c of await tx.list('mandate_candidates',t.owner_id))if(c.trace_id===id&&c.status!=='LICENSED') {
       await this.privacy.remove(t.owner_id,c.release_ref);c.status='DELETED';await tx.update('mandate_candidates',c.candidate_id,c);

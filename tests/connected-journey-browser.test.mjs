@@ -126,7 +126,7 @@ test('connected contributor journey: private upload, exact release edits, signed
   await page.goForward();await page.getByRole('heading',{name:'Referrals',exact:true}).waitFor();
   await page.locator('.journey-nav [data-view="vault"]').click();await page.locator('#conversation-library').waitFor();
 
-  const connections=()=>page.locator('#library-search [data-action="journey-connections"]');
+  const connections=()=>page.locator('#conversation-library [data-action="journey-connections"]');
   const expectDialog=async title=>{
     await page.getByRole('heading',{name:title,exact:true}).waitFor();
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Dialog must not introduce horizontal page overflow');
@@ -138,8 +138,8 @@ test('connected contributor journey: private upload, exact release edits, signed
     await page.locator('#conversation-library').waitFor();assert.equal(new URL(page.url()).hash,'#my-work');
     // The dialog close event is queued after .open becomes false. Give that
     // event its browser turn before asserting the actual restored focus.
-    await page.waitForFunction(()=>document.activeElement===document.querySelector('#library-search [data-action="journey-connections"]'),null,{timeout:5000}).catch(async error=>{
-      const focus=await page.evaluate(()=>({active:document.activeElement?.outerHTML,trigger:document.querySelector('#library-search [data-action="journey-connections"]')?.outerHTML,dialog_open:document.querySelector('#detail-dialog').open,scroll_y:scrollY}));
+    await page.waitForFunction(()=>document.activeElement===document.querySelector('#conversation-library [data-action="journey-connections"]'),null,{timeout:5000}).catch(async error=>{
+      const focus=await page.evaluate(()=>({active:document.activeElement?.outerHTML,trigger:document.querySelector('#conversation-library [data-action="journey-connections"]')?.outerHTML,dialog_open:document.querySelector('#detail-dialog').open,scroll_y:scrollY}));
       await writeFile(join(evidence,'dialog-focus-failure.json'),JSON.stringify(focus,null,2)+'\n');
       throw new Error('Closing the dialog did not restore the Connections trigger: '+JSON.stringify(focus),{cause:error});
     });

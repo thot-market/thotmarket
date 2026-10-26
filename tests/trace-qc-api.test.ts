@@ -259,3 +259,55 @@ test('interruption metadata changes invalidate source-bound reviews and are rech
   assert.equal(unknown.selected_source.coverage.status,'not_established');assert.equal(unknown.selected_source.coverage.capture_state,'UNKNOWN');assert.equal(unknown.selected_source.coverage.projection_status,'UNKNOWN');
   assert.doesNotMatch(JSON.stringify(unknown),/PRIVATE_UNKNOWN/);
 });
+
+test('local QC export is exact, audited, owner-only and fenced against replacement',async t=>{
+  const app=await fixture(t),trace=await saved(app,{private:true});
+  const output=await app.qc.exportSource(owner,trace.trace_id);
+  assert.equal(output.selected_source.content_hash,contentDigest(output.content));
+  assert.equal(output.schema_version,'trace-qc-export/v1');
+  const audits=await rows(app,'audit_events');
+  assert(audits.some(row=>row.event_type==='TraceQcSourceExported'));
+  assert.doesNotMatch(JSON.stringify(audits),/PRIVATE_SOURCE_SENTINEL/);
+  await assert.rejects(app.qc.exportSource(operator,trace.trace_id),/FORBIDDEN/);
+  await assert.rejects(app.qc.exportSource(other,trace.trace_id),/NOT_FOUND/);
+  await assert.rejects(app.qc.exportSource(owner,trace.trace_id,{scope:'release'}),/QC_SOURCE_UNAVAILABLE|QC_RELEASE_UNAVAILABLE/);
+  const original=app.privacy.open.bind(app.privacy);let changed=false;
+  app.privacy.open=async(...args)=>{const content=await original(...args);if(!changed){changed=true;await replaceSource(app,trace.trace_id,{turns:[{role:'user',content:'Changed synthetic source'}]});}return content;};
+  await assert.rejects(app.qc.exportSource(owner,trace.trace_id),/QC_SOURCE_CHANGED/);
+});
+
+test('operator local QC requires version-specific opt-in, audits downloads and stores only an opinion',async t=>{
+  const app=await fixture(t),trace=await saved(app);
+  await assert.rejects(app.qc.exportForReview(operator,trace.trace_id),/QC_REVIEW_CONSENT_REQUIRED/);
+  await assert.rejects(app.qc.consent(other,trace.trace_id,{enabled:true}),/NOT_FOUND/);
+  const consent=await app.qc.consent(owner,trace.trace_id,{enabled:true});
+  const exported=await app.qc.exportForReview(operator,trace.trace_id);
+  assert.equal(exported.selected_source.source_version,consent.source_version);
+  assert.equal(contentDigest(exported.content),exported.selected_source.content_hash);
+  const open=app.privacy.open.bind(app.privacy);let revoke=true;
+  app.privacy.open=async(...args)=>{const content=await open(...args);if(revoke){revoke=false;await app.qc.consent(owner,trace.trace_id,{enabled:false});}return content;};
+  await assert.rejects(app.qc.exportForReview(operator,trace.trace_id),/QC_REVIEW_CONSENT_REQUIRED/);
+  app.privacy.open=open;await app.qc.consent(owner,trace.trace_id,{enabled:true});
+
+  const inventory=await app.library.operator(operator);assert(inventory.items.some(row=>row.qc_sources.some((s:any)=>s.trace_id===trace.trace_id&&s.review_allowed)));
+  const money=await rows(app,'ledger_transactions');
+  const review={source_version:consent.source_version,verdict:'flag',usefulness:2,completeness:3,evaluator:'local-v1'},key=randomUUID();
+  assert.equal((await app.qc.submitLocalReview(operator,key,trace.trace_id,review)).verdict,'flag');
+  await app.qc.submitLocalReview(operator,key,trace.trace_id,review);
+  assert.deepEqual(await rows(app,'ledger_transactions'),money);
+  assert.equal((await app.library.item(owner,trace.trace_id)).local_qc.verdict,'flag');
+  await assert.rejects(app.qc.submitLocalReview(operator,randomUUID(),trace.trace_id,{...review,source_version:'0'.repeat(64)}),/QC_SOURCE_CHANGED/);
+  await app.qc.consent(owner,trace.trace_id,{enabled:false});
+  await assert.rejects(app.qc.exportForReview(operator,trace.trace_id),/QC_REVIEW_CONSENT_REQUIRED/);
+  await assert.rejects(app.qc.submitLocalReview(operator,randomUUID(),trace.trace_id,review),/QC_REVIEW_CONSENT_REQUIRED/);
+  await app.qc.consent(owner,trace.trace_id,{enabled:true});
+  await replaceSource(app,trace.trace_id,{turns:[{role:'user',content:'New private source'}]});
+  // Release consent binds to the release, independent of the private source.
+  await app.db.transaction(async tx=>{const row=await tx.get('traces',trace.trace_id,owner.id);row.release_revision=(row.release_revision??0)+1;await tx.update('traces',trace.trace_id,row);});
+  await assert.rejects(app.qc.exportForReview(operator,trace.trace_id),/QC_REVIEW_CONSENT_REQUIRED/);
+  const stored=await app.db.transaction(tx=>tx.get('traces',trace.trace_id,owner.id)),refs=stored.local_qc_review_refs;
+  assert.equal(refs.length,1,'idempotent submission retains one review');
+  await app.service.deleteTrace(owner,randomUUID(),trace.trace_id);
+  assert.equal((await app.service.runWorker()).failed,0);
+  for(const ref of refs)await assert.rejects(app.privacy.open(owner.id,ref));
+});

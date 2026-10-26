@@ -1,4 +1,4 @@
-import {qcCardSummary} from './trace-qc-state.ts';
+import {qcVersion,qcCardSummary} from './trace-qc-state.ts';
 import {canonicalHash} from '../../protocol/src/index.ts';
 import {ensure,type Document,type Transaction} from '../../storage/src/index.ts';
 import type {Actor,ThotService} from './service.ts';
@@ -59,7 +59,7 @@ export class TraceLibrary {
   }
   private async card(trace:Document,capture?:Document){
     const meta=await this.meta(trace),preview=trace.capture_preview??trace.import_preview??{};
-    return {trace_id:trace.trace_id,content_kind:trace.content_kind??'trace',file_count:preview.file_count??null,...meta,source:sourceName(trace),origin:trace.agent_capture_id?'capture':trace.openrouter_request_id?'relay':'upload',capture_id:trace.agent_capture_id??null,
+    return {trace_id:trace.trace_id,content_kind:trace.content_kind??'trace',file_count:preview.file_count??null,local_qc:{enabled:trace.local_qc_consent?.source_version===qcVersion(trace,'release'),verdict:trace.local_qc_review?.source_version===qcVersion(trace,'release')?trace.local_qc_review.verdict:null},...meta,source:sourceName(trace),origin:trace.agent_capture_id?'capture':trace.openrouter_request_id?'relay':'upload',capture_id:trace.agent_capture_id??null,
       state:this.captureState(trace,capture),projection:trace.projection?.status??'READY',display_issues:trace.projection?.issues?.length??0,
       turn_count:preview.turn_count??0,exchanges:trace.capture_summary?.exchanges??0,
       created_at:trace.created_at,updated_at:trace.updated_at??trace.created_at,session_at:preview.source_date??(trace.agent_capture_id?trace.observed_at:null),
@@ -187,7 +187,7 @@ export class TraceLibrary {
       const groups=conversationGroups(traces);
       const inventoryRows=groups.map(group=>{
         const rows=group.map(t=>rawById.get(t.trace_id)!),first=rows[0];
-        return {...first,segments:group.length,state:groupState(rows.map(r=>r.state)),projection:groupProjection(rows.map(r=>r.projection??'READY')),
+        return {...first,qc_sources:group.map(t=>({trace_id:t.trace_id,source_version:qcVersion(t,'release'),review_allowed:t.local_qc_consent?.source_version===qcVersion(t,'release'),verdict:t.local_qc_review?.source_version===qcVersion(t,'release')?t.local_qc_review.verdict:null})),segments:group.length,state:groupState(rows.map(r=>r.state)),projection:groupProjection(rows.map(r=>r.projection??'READY')),
           parts:rows.reduce((n,r)=>n+r.parts,0),verified_exchanges:rows.reduce((n,r)=>n+r.verified_exchanges,0),received_bytes:rows.reduce((n,r)=>n+r.received_bytes,0),
           last_checkpoint_at:rows.map(r=>r.last_checkpoint_at).filter(Boolean).sort().at(-1)??null,last_activity_at:rows.map(r=>r.last_activity_at).sort().at(-1),
           error_code:rows.find(r=>r.error_code)?.error_code??null};
