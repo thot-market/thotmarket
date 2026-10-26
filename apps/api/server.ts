@@ -39,6 +39,9 @@ const readDiagnosticCodes=new Set(['BAD_DATA','UNKNOWN_ERROR','SERVER_ERROR','TI
 const readDiagnosticTransportCodes=new Set(['ECONNRESET','EAI_AGAIN']);
 const readDiagnosticDomainCodes=new Set(['THOT_NOT_CONFIGURED','THOT_BLOCK_UNAVAILABLE','THOT_CODE_PIN_MISMATCH','THOT_DEPLOYMENT_ANCHOR_MISMATCH','THOT_OPERATOR_JOURNAL_REQUIRED','THOT_PRODUCTION_ACTIVATION_PENDING','ANVIL_RESET_RECONCILIATION_REQUIRED','SETTLEMENT_RECONCILIATION_REQUIRED']);
 const readDiagnosticMethods=new Set(['eth_call','eth_chainId','eth_blockNumber','eth_getBlockNumber','eth_getCode','eth_getBlockByNumber','eth_getBlockByHash','eth_getBalance','eth_getLogs','eth_getTransactionCount','eth_getTransactionByHash','eth_getTransactionReceipt','eth_estimateGas','eth_gasPrice','eth_maxPriorityFeePerGas']);
+// The public site may read the market stats from the app origin; nothing else is shared cross-origin.
+const siteOrigins=new Set((process.env.THOT_PUBLIC_SITE_ORIGINS??'https://thot.market').split(',').map(origin=>origin.trim()).filter(Boolean));
+const siteOrigin=(req:IncomingMessage,route:string)=>req.method==='GET'&&route==='/v1/public/stats'&&typeof req.headers.origin==='string'&&siteOrigins.has(req.headers.origin)?req.headers.origin:null;
 // The workspace shell points at its build's bundle and styles by content version, so browsers cache them until a release.
 let appShellHtml:Promise<Buffer>|null=null;
 function appShell():Promise<Buffer>{
@@ -159,12 +162,12 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
         &&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document';
       if(options.publicOrigin){
         ensure(requestOrigin,'INVALID_HOST',403);
-        ensure(documentNavigation||gateRoute||!req.headers.origin||req.headers.origin===requestOrigin,'CROSS_ORIGIN_DENIED',403);
+        ensure(documentNavigation||gateRoute||!req.headers.origin||req.headers.origin===requestOrigin||siteOrigin(req,route),'CROSS_ORIGIN_DENIED',403);
       } else {
         ensure(/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(host),'INVALID_HOST',403);
-        ensure(documentNavigation||gateRoute||!req.headers.origin||req.headers.origin===`http://${host}`,'CROSS_ORIGIN_DENIED',403);
+        ensure(documentNavigation||gateRoute||!req.headers.origin||req.headers.origin===`http://${host}`||siteOrigin(req,route),'CROSS_ORIGIN_DENIED',403);
       }
-      ensure(documentNavigation||gateRoute||req.headers['sec-fetch-site']!=='cross-site','CROSS_ORIGIN_DENIED',403);
+      ensure(documentNavigation||gateRoute||req.headers['sec-fetch-site']!=='cross-site'||siteOrigin(req,route),'CROSS_ORIGIN_DENIED',403);
 
       // The form/cookie gate fronts the whole private site: its own login page
       // answers first, then every remaining request needs a tester session.
@@ -190,7 +193,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       // The retained old candidate serves only authentication and already-delivered
       // licensed content. Deny every other API route before parsing a request body.
       if(options.readOnly&&route.startsWith('/v1/')){
-        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/site-config','/v1/public/market-proof','/v1/public/listings','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/catalog','/v1/thot/workspace'].includes(route);
+        const safeGet=req.method==='GET'&&['/v1/public/launch-config','/v1/public/site-config','/v1/public/market-proof','/v1/public/listings','/v1/public/stats','/v1/public/keys','/v1/auth/capabilities','/v1/auth/session','/v1/thot/capabilities','/v1/thot/catalog','/v1/thot/workspace'].includes(route);
         const safePost=req.method==='POST'&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify','/v1/auth/session/revoke','/v1/thot/offers/delivery'].includes(route);
         ensure(safeGet||safePost,'THOT_READ_ONLY',403);
       }
@@ -218,6 +221,7 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       // test snapshot from request data or infer receipts from private account data.
       if(req.method==='GET'&&route==='/v1/public/market-proof'){chargeRate('public');reply(200,unavailableMarketProof());return;}
       if(req.method==='GET'&&route==='/v1/public/listings'){chargeRate('public');reply(200,await app.thot.publicCatalog());return;}
+      if(req.method==='GET'&&route==='/v1/public/stats'){chargeRate('public');const allowed=siteOrigin(req,route);if(allowed)res.setHeader('Access-Control-Allow-Origin',allowed);res.setHeader('Vary','Origin');reply(200,await app.thotAnalytics.publicStats());return;}
       if((req.method==='GET'||req.method==='HEAD')&&isDashboardAssetRoute(route)){
         chargeRate('public');
         res.setHeader('Vary','Accept-Encoding');

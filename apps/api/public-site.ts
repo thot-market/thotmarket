@@ -8,6 +8,8 @@ const assets: Record<string, [string, string]> = {
   '/tutorial': ['tutorial.html', 'text/html; charset=utf-8'],
   '/whitepaper': ['whitepaper.html', 'text/html; charset=utf-8'],
   '/mechanism': ['mechanism.html', 'text/html; charset=utf-8'],
+  '/stats': ['stats.html', 'text/html; charset=utf-8'],
+  '/stats.js': ['stats.js', 'text/javascript; charset=utf-8'],
   '/affiliates': ['affiliates.html', 'text/html; charset=utf-8'],
   '/affiliates.html': ['affiliates.html', 'text/html; charset=utf-8'],
   '/referrals.css': ['referrals.css', 'text/css; charset=utf-8'],
@@ -31,7 +33,7 @@ const assets: Record<string, [string, string]> = {
   '/assets/fonts/dm-sans-latin.woff2': ['assets/fonts/dm-sans-latin.woff2', 'font/woff2'],
 };
 
-export const publicDocumentRoutes = new Set(['/', '/index.html', '/read', '/tutorial', '/whitepaper', '/mechanism', '/affiliates', '/affiliates.html', '/app', '/app/', '/getting-started']);
+export const publicDocumentRoutes = new Set(['/', '/index.html', '/read', '/tutorial', '/whitepaper', '/mechanism', '/stats', '/affiliates', '/affiliates.html', '/app', '/app/', '/getting-started']);
 
 export const canonicalApplicationUrl = 'https://app.thot.market/app';
 

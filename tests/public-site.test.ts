@@ -290,6 +290,7 @@ function referralsSandbox(proof: unknown) {
   append(...nodes: any[]) { this.children.push(...nodes); },
   replaceChildren(...nodes: any[]) { this.children = [...nodes]; },
   addEventListener() {},
+  getAttribute() { return ''; },
   setAttribute(name: string, value: string) { (this as any)['attr_' + name] = value; },
  });
  const registry = new Map<string, any[]>();
@@ -309,7 +310,7 @@ function referralsSandbox(proof: unknown) {
  return { sandbox, nodes, rendered, text };
 }
 
-test('production build renders no Unavailable receipts panel while verified testnet receipts render as before',async()=>{
+test('production build renders no Unavailable receipts panel while live sales render with their transactions',async()=>{
  const {buildCloudflarePages}=await import('../scripts/build-cloudflare-pages.ts');
  const dir=await mkdtemp(join(tmpdir(),'public-entry-proof-'));
  try{
@@ -325,26 +326,17 @@ test('production build renders no Unavailable receipts panel while verified test
   assert.equal(unavailable.nodes('[data-proof-environment]')[0].hidden,true);
   assert.equal(unavailable.nodes('[data-proof-time]')[0].hidden,true);
   assert.match(unavailable.nodes('[data-proof-rows]')[0].children[0].textContent,/receipts appear here when this environment publishes a verified snapshot/i);
-  // A verified testnet snapshot still renders the badge, timestamp and receipt rows.
+  // Live stats from the app render the chain badge, totals and linked recent sales.
   const hash='0x'+'1'.repeat(64);
-  const available=sanitizePublicMarketProof({
-   schema_version:'thot.public-market-proof/1',environment:'dev',network:'Robinhood testnet',chain_id:46630,
-   test_assets:true,scope:'testnet-verification',as_of:'2026-01-01T00:00:00.000Z',block_number:10,block_hash:hash,
-   confirmations:1,amount_basis:'finalized seller proceeds',purchase_amount_basis:'gross purchase price',
-   scan:{from_block:1,through_block:10,complete_since_deployment:true},
-   tariff:{service_fee_thot:'0.04',direct_cost_thot:'0.01',allocated_overhead_thot:'0',net_contribution_thot:'0.03',referral_bps:2000,dispute_seconds:43200,activation_seconds:0,term_seconds:0},
-   receipts:[],purchases:[{tx_hash:hash,block_number:10,amount_thot:'1',source:'reserve',explorer_url:'https://explorer.testnet.chain.robinhood.com/tx/'+hash,status:'finalized'}],
-  },'dev');
-  assert.equal(available.status,'available');
-  const verified=referralsSandbox(available);
-  runInNewContext(script,verified.sandbox);
+  const live=referralsSandbox({as_of:'2026-01-01T00:00:00.000Z',chain:{name:'Robinhood Chain',explorer_url:'https://explorer.example/'},listings_active:3,
+   independent:{purchases:2,finalized:1,gross_atoms:'2000000000000000000',paid_to_sellers_atoms:'990000000000000000',sellers:1,buyers:2},treasury:{purchases:0},
+   recent:[{title:'Synthetic dataset',gross_atoms:'1000000000000000000',status:'paid',block:10,treasury:false,transaction_hash:hash,transaction_url:'https://explorer.example/tx/'+hash}],basis:'Independent purchases only.'});
+  runInNewContext(script,{...live.sandbox,location:{origin:'https://thot.market'}});
   await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(verified.nodes('[data-proof-environment]')[0].hidden,false);
-  assert.equal(verified.nodes('[data-proof-environment]')[0].textContent,'Robinhood testnet');
-  assert.match(verified.nodes('[data-proof-time]')[0].textContent,/Snapshot .*UTC · block 10/);
-  assert.match(verified.nodes('[data-proof-heading]')[0].textContent,/Recent test purchases/);
-  const row=verified.nodes('[data-proof-rows]')[0].children[0];
-  assert.match(verified.text(row),/Finalized · proceeds allocated.*Reserve-funded test purchase.*1 test THOT.*View transaction/s);
+  assert.equal(live.nodes('[data-proof-environment]')[0].textContent,'Robinhood Chain');
+  assert.match(live.nodes('[data-proof-time]')[0].textContent,/2 purchases · 0\.99 THOT paid to sellers/);
+  assert.match(live.nodes('[data-proof-heading]')[0].textContent,/Recent sales/);
+  assert.match(live.text(live.nodes('[data-proof-rows]')[0].children[0]),/Synthetic dataset.*Purchase · paid.*1 THOT.*View transaction/s);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 

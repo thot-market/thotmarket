@@ -86,48 +86,35 @@ if (typeof document !== 'undefined') {
     document.querySelectorAll('[data-proof-environment],[data-proof-time]').forEach(node => { node.hidden = true; });
     emptyProof('Public purchase receipts appear here when this environment publishes a verified snapshot.');
   }
+  // Live, verifiable sales from the app's public stats; the board stays hidden until there is one.
   async function loadProof() {
     try {
-      const response = await fetch('/v1/public/market-proof', { credentials: 'omit', signal: AbortSignal.timeout(5000) });
+      const link = document.querySelector('[data-workspace-link]');
+      const api = link && /^https?:/.test(link.getAttribute('href')) ? new URL(link.href).origin : location.origin;
+      const response = await fetch(api + '/v1/public/stats', { credentials: 'omit', signal: AbortSignal.timeout(5000) });
       if (!response.ok) throw Error('UNAVAILABLE');
-      const proof = await response.json();
-      if (proof.status !== 'available' || proof.chain_id !== 46630 || proof.test_assets !== true || proof.scope !== 'testnet-verification') throw Error('UNAVAILABLE');
-      const date = new Date(proof.as_of);
-      if (!Number.isFinite(date.getTime()) || !Number.isSafeInteger(proof.block_number)) throw Error('UNAVAILABLE');
-      const timestamp = date.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' }) + ' UTC';
-      set('[data-proof-time]', `Snapshot ${timestamp} · block ${proof.block_number.toLocaleString('en-US')}`);
-      set('[data-proof-environment]', 'Robinhood testnet');
-      set('[data-proof-heading]', 'Recent test purchases');
-      set('[data-proof-caption]', 'Testnet verification purchases, not customer adoption or real-money earnings. Amounts are gross purchase prices. Delivery and finalized proceeds are different stages.');
-      // Never silently display changed economics under fixed 20% public copy.
-      earningsExample('10', 1, proof.tariff);
-      tariff = proof.tariff; recalculate();
-      set('[data-tariff-note]', `Illustration using the verified ${proof.environment} testnet tariff at block ${proof.block_number.toLocaleString('en-US')} (${timestamp}). Test tokens have no monetary value. This is not your balance or a production price quote.`);
-      if (!Array.isArray(proof.purchases) || proof.purchases.length > 5) throw Error('UNAVAILABLE');
-      if (!proof.purchases.length) { emptyProof('No confirmed purchases appear in this environment’s published snapshot yet. Try the workspace and follow the next receipt.'); return; }
-      const purchases = proof.purchases.map(item => {
-        if (!/^0x[0-9a-fA-F]{64}$/.test(item.tx_hash) || !Number.isSafeInteger(item.block_number) || item.block_number > proof.block_number || !['funded', 'delivered', 'finalized'].includes(item.status)) throw Error('INVALID_RECEIPT');
-        const explorer = `https://explorer.testnet.chain.robinhood.com/tx/${item.tx_hash}`;
-        if (item.explorer_url !== explorer) throw Error('INVALID_RECEIPT');
-        return { ...item, amount: formatThot(parseThot(item.amount_thot)), explorer };
-      });
+      const stats = await response.json(), sales = Array.isArray(stats.recent) ? stats.recent.slice(0, 5) : [];
+      if (!stats.independent?.purchases || !sales.length) throw Error('NO_SALES');
+      const thot = atoms => { const n = BigInt(atoms ?? 0), base = 10n ** 18n, frac = String(n % base).padStart(18, '0').slice(0, 2).replace(/0+$/, ''); return (n / base).toLocaleString('en-US') + (frac ? '.' + frac : ''); };
+      set('[data-proof-environment]', stats.chain?.name ?? 'On chain');
+      set('[data-proof-time]', `${stats.independent.purchases.toLocaleString('en-US')} purchases · ${thot(stats.independent.paid_to_sellers_atoms)} THOT paid to sellers`);
+      set('[data-proof-heading]', 'Recent sales');
+      set('[data-proof-caption]', stats.basis);
       document.querySelectorAll('[data-proof-rows]').forEach(container => {
-        const rows = purchases.map(item => {
+        container.replaceChildren(...sales.map(item => {
           const row = document.createElement('div'); row.className = 'proof-row';
           const detail = document.createElement('div'), title = document.createElement('strong'), label = document.createElement('small');
-          title.textContent = { funded: 'Funded · awaiting delivery', delivered: 'Delivered · awaiting settlement', finalized: 'Finalized · proceeds allocated' }[item.status];
-          label.textContent = item.source === 'reserve' ? 'Reserve-funded test purchase' : item.source === 'independent' ? 'Non-reserve test purchase' : 'Test purchase';
+          title.textContent = item.title; label.textContent = item.treasury ? `Treasury purchase · ${item.status}` : `Purchase · ${item.status}`;
           detail.append(title, label);
           const amount = document.createElement('div'); amount.className = 'proof-amount';
-          const gross = document.createElement('strong'), basis = document.createElement('small'); gross.textContent = item.amount + ' test THOT'; basis.textContent = 'Gross purchase price'; amount.append(gross, basis);
-          const link = document.createElement('a'); link.href = item.explorer; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = 'View transaction'; link.setAttribute('aria-label', 'View transaction ' + item.tx_hash.slice(0, 10));
-          row.append(detail, amount, link); return row;
-        });
-        container.replaceChildren(...rows);
+          const gross = document.createElement('strong'); gross.textContent = thot(item.gross_atoms) + ' THOT'; amount.append(gross);
+          row.append(detail, amount);
+          if (item.transaction_url) { const a = document.createElement('a'); a.href = item.transaction_url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'View transaction'; row.append(a); }
+          return row;
+        }));
       });
     } catch {
       neutralProof();
-      // Nothing published for this environment: hide the empty board rather than explain it.
       document.querySelector('[data-market-proof]')?.setAttribute('hidden', '');
     }
   }

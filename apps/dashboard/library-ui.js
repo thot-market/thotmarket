@@ -1,3 +1,5 @@
+// One-click share: opens X's own compose window with the text filled in; nothing is posted for the user.
+export function shareOnXHTML(text,url,escape){return `<a class="button secondary small share-x" href="${escape('https://x.com/intent/post?'+new URLSearchParams({text,url}))}" target="_blank" rel="noopener noreferrer">Share on X</a>`;}
 // Non-text files are kept byte for byte: images preview inline, everything downloads as the original file.
 function binaryFileHTML(f,escape){
   const href=`data:${escape(f.media_type)};base64,${escape(f.base64)}`,name=escape(f.path.split('/').at(-1));
@@ -46,7 +48,7 @@ export function createLibraryUI({state,api,openDialog,dialog,escape,toast}){
   function listingLinkHTML(listed){
     if(typeof listed?.public_path!=='string'||!/^\/l\/[A-Za-z0-9_-]+$/.test(listed.public_path))return '';
     let url=listed.public_path;try{url=new URL(listed.public_path,globalThis.location?.origin).href;}catch{}
-    return `<span class="legal-note listing-share"><code class="listing-share-url">${escape(url)}</code><button type="button" class="text-button" data-action="thot-copy-listing-url" data-id="${escape(url)}">Copy public link</button></span>`;
+    return `<span class="legal-note listing-share"><code class="listing-share-url">${escape(url)}</code><button type="button" class="text-button" data-action="thot-copy-listing-url" data-id="${escape(url)}">Copy public link</button>${shareOnXHTML(`"${listed.title??'My data'}" is for sale on thot market.`,url,escape)}</span>`;
   }
   function comparable(item){
     if(state.thot?.workspace_scope==='buyer')return '<p class="journey-comparable">Price comparisons load when you review a sale.</p>';

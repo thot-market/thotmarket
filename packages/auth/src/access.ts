@@ -10,6 +10,13 @@ const allowedRoles = ['user', 'buyer_admin', 'buyer_member', 'operator_support',
 const identifier = (value: unknown): value is string => typeof value === 'string' && value.length >= 1 && value.length <= 256 && !/[\u0000-\u001f\u007f]/.test(value);
 const membershipId = (issuer: string, subject: string) => 'membership:' + canonicalHash({ issuer, subject });
 const revokedId = (identity: VerifiedIdentity) => 'revoked:' + canonicalHash({ issuer: identity.issuer, jti: identity.jti });
+// Every request authenticates and counts against its rate limit. Doing both as database transactions
+// serialized all traffic behind them on the single embedded connection, so successful checks are reused
+// for a few seconds (cleared on any revocation or membership change) and rate windows are counted in
+// memory, shared by every store on the same database in this process.
+// shortcut: rate windows reset on restart; move them back to storage if several API processes ever share one database.
+const AUTH_CACHE_MS = 10_000;
+const rateWindows = new WeakMap<Database, Map<string, { window_start_ms: number; requests: number; mutations: number }>>();
 export function validateActor(actor: Actor): void {
   canonicalJson(actor);
   ensure(actor && typeof actor === 'object' && !Array.isArray(actor) && Object.keys(actor).every(key => ['id', 'role', 'buyer_id'].includes(key)), 'INVALID_AUTH_ACTOR');
@@ -26,6 +33,7 @@ export class AuthAccessStore {
     ensure(Object.keys(limits).length === 2 && Number.isSafeInteger(limits.requests_per_minute) && limits.requests_per_minute >= 1 && limits.requests_per_minute <= 600 && Number.isSafeInteger(limits.mutations_per_minute) && limits.mutations_per_minute >= 1 && limits.mutations_per_minute <= limits.requests_per_minute, 'INVALID_AUTH_RATE_LIMITS');
     this.db = db; this.issuer = issuer; this.clock = clock; this.limits = { ...limits };
   }
+  private authenticated = new Map<string, { actor: Actor; until: number }>();
   private now() { const now = this.clock(); ensure(Number.isSafeInteger(now) && now >= 0, 'INVALID_AUTH_CLOCK'); return now; }
   private async knownActor(tx: Transaction, actor: Actor) {
     validateActor(actor);
@@ -44,6 +52,7 @@ export class AuthAccessStore {
     ensure(input.expected_version === undefined || Number.isSafeInteger(input.expected_version) && input.expected_version >= 0, 'INVALID_AUTH_REVISION');
   }
   private async save(tx: Transaction, input: MembershipInput, initial: boolean) {
+    this.authenticated.clear();
     this.validateMembership(input);
     const id = membershipId(this.issuer, input.subject), prior = await tx.maybe('auth_access', id);
     if (initial && prior) return prior; // Restart never undoes a persisted revocation or membership change.
@@ -68,16 +77,22 @@ export class AuthAccessStore {
   }
   async authenticate(identity: VerifiedIdentity): Promise<Actor> {
     ensure(identity.issuer === this.issuer, 'UNAUTHENTICATED', 401);
-    return this.db.transaction(async tx => {
+    const key = revokedId(identity) + membershipId(identity.issuer, identity.subject), cached = this.authenticated.get(key), nowMs = this.now();
+    if (cached && cached.until > nowMs) return structuredClone(cached.actor);
+    const actor = await this.db.transaction(async tx => {
       const now = Math.floor(this.now() / 1000), membership = await tx.maybe('auth_access', membershipId(identity.issuer, identity.subject));
       ensure(membership?.kind === 'membership' && membership.issuer === this.issuer && membership.enabled === true && Number.isSafeInteger(membership.version) && membership.version >= 1 && Number.isSafeInteger(membership.valid_after) && membership.valid_after >= 0 && identity.issuedAt > membership.valid_after && identity.expiresAt > now, 'UNAUTHENTICATED', 401);
       const revoked = await tx.maybe('auth_access', revokedId(identity));
       ensure(!revoked || revoked.expires_at <= now, 'UNAUTHENTICATED', 401);
       await this.knownActor(tx, membership.actor); return structuredClone(membership.actor);
     });
+    if (this.authenticated.size > 10_000) this.authenticated.clear();
+    this.authenticated.set(key, { actor: structuredClone(actor), until: Math.min(nowMs + AUTH_CACHE_MS, identity.expiresAt * 1000) });
+    return actor;
   }
   async revoke(identity: VerifiedIdentity, actor: Actor, key: string) {
     ensure(identity.issuer === this.issuer, 'UNAUTHENTICATED', 401);
+    this.authenticated.clear();
     return this.db.command(actor.id, key, { action: 'authRevoke', token_id: revokedId(identity) }, async tx => {
       const membership = await tx.maybe('auth_access', membershipId(identity.issuer, identity.subject));
       ensure(membership?.actor?.id === actor.id, 'FORBIDDEN', 403);
@@ -93,13 +108,13 @@ export class AuthAccessStore {
     });
   }
   async consume(actor: Actor, mutation: boolean) {
-    const id = 'rate:' + canonicalHash(actor.id);
-    return this.db.transaction(async tx => {
-      const now = this.now(), prior = await tx.maybe('auth_access', id);
-      const record = prior && now >= prior.window_start_ms && now - prior.window_start_ms < 60000 ? { kind: 'rate_window', window_start_ms: prior.window_start_ms, requests: prior.requests, mutations: prior.mutations } : { kind: 'rate_window', window_start_ms: now, requests: 0, mutations: 0 };
-      ensure(record.requests < this.limits.requests_per_minute && (!mutation || record.mutations < this.limits.mutations_per_minute), 'ACTOR_RATE_LIMIT', 429);
-      record.requests++; if (mutation) record.mutations++;
-      if (prior) await tx.update('auth_access', id, record); else await tx.insert('auth_access', id, 'network', record);
-    });
+    let windows = rateWindows.get(this.db); if (!windows) rateWindows.set(this.db, windows = new Map());
+    const id = 'rate:' + canonicalHash(actor.id), now = this.now(), prior = windows.get(id);
+    const record = prior && now >= prior.window_start_ms && now - prior.window_start_ms < 60000 ? prior : { window_start_ms: now, requests: 0, mutations: 0 };
+    ensure(record.requests < this.limits.requests_per_minute && (!mutation || record.mutations < this.limits.mutations_per_minute), 'ACTOR_RATE_LIMIT', 429);
+    record.requests++; if (mutation) record.mutations++;
+    if (windows.size > 50_000) for (const [key, value] of windows) if (now - value.window_start_ms >= 60000) windows.delete(key);
+    windows.set(id, record);
   }
+
 }

@@ -298,7 +298,7 @@ test('public listing share pages show metadata only and unlisted work says no lo
   assert.equal(page.status,200);assert.match(page.headers["content-type"]!,/text\/html/);
   assert.match(page.body,/Shareable deployment notes/);assert.match(page.body,/1\.5 THOT/);assert.match(page.body,new RegExp(seller));
   assert.match(page.body,/P1_ATTESTED/);assert.match(page.body,/glm-5\.3 \(claimed\)/);assert.match(page.body,/2026-10-24/);
-  assert.match(page.body,/Sign in to buy/);assert.match(page.body,/href="\/app"/);
+  assert.match(page.body,/Sign in to buy/);assert.match(page.body,/<meta property="og:title" content="Shareable deployment notes — 1\.5 THOT">/);assert.match(page.body,/twitter:card" content="summary_large_image/);assert.match(page.body,/href="\/app"/);
   assert.ok(!page.body.includes(privateMarker),'trace content never reaches the public page');
   const metadata=await call('/l/'+publicId,{origin:null,method:'HEAD'});
   assert.equal(metadata.status,200);

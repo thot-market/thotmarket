@@ -60,3 +60,10 @@
 /* Source screenshots retain their native pixels; open to inspect every line. */
 .source-capture { display:block; margin:1.5rem 0; border:1px solid var(--line, #d9decb); background:#fff; border-radius:12px; overflow:hidden; }
 .source-capture img { display:block; width:100%; height:auto; margin:0; }
+.stats-page h1{margin:12px 0 10px}.stats-lede{max-width:640px;color:var(--muted,#5f6b5a);margin:0 0 28px}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin:0 0 40px}
+.stats-grid div{border:1px solid rgba(26,58,41,.15);border-radius:14px;padding:20px;background:#fffdf7}
+.stats-grid strong{display:block;font-size:clamp(30px,4vw,44px);line-height:1;margin-bottom:8px}.stats-grid span{font-size:14px;color:var(--muted,#5f6b5a)}
+.stats-recent{list-style:none;padding:0;margin:12px 0 24px;display:grid;gap:10px}
+.stats-recent li{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;border-bottom:1px solid rgba(26,58,41,.12);padding:10px 0}
+.stats-recent li span{color:var(--muted,#5f6b5a);font-size:14px}.stats-recent li a{margin-left:auto;font-size:14px}.stats-note{font-size:13px;color:var(--muted,#5f6b5a);max-width:720px}

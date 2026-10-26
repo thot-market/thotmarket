@@ -17,9 +17,13 @@ const isoDate = (value: unknown) => {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : 'Unknown date';
 };
 
-const shell = (title: string, body: string) => `<!doctype html>
+// Link previews (X, chat apps) show the item, its price and what is inside; `title`/`summary` arrive escaped.
+const shell = (title: string, body: string, summary = '') => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title><link rel="icon" href="/favicon.png" type="image/png"><link rel="stylesheet" href="/listing.css">
+<meta property="og:type" content="website"><meta property="og:site_name" content="thot market"><meta property="og:title" content="${title}">
+${summary ? `<meta name="description" content="${summary}"><meta property="og:description" content="${summary}">` : ''}<meta property="og:image" content="https://thot.market/assets/thot-feast.jpg">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}">${summary ? `<meta name="twitter:description" content="${summary}">` : ''}
 </head><body><main>${body}</main></body></html>`;
 
 export type PublicListingRecord = {
@@ -35,7 +39,8 @@ export function renderListingPage(listing: PublicListingRecord, appUrl: string) 
   const types = Array.isArray(listing.file_types) && listing.file_types.length ? ` · ${listing.file_types.map(String).join(', ')}` : '';
   const size = listing.content_kind === 'research' ? `${escapeHtml(listing.file_count ?? '—')} files${escapeHtml(megabytes + types)}` : `${escapeHtml(listing.turn_count ?? '—')} turns`;
   const row = (label: string, value: string) => `<div class="listing-row"><span>${label}</span><strong>${value}</strong></div>`;
-  return shell(`${escapeHtml(listing.title ?? 'Listing')} · thot market`, `
+  const summary = escapeHtml(`${size.replace(/&[^;]+;/g, '')} · licensed data on thot market. Every sale is recorded on chain.`);
+  return shell(`${escapeHtml(listing.title ?? 'Listing')} — ${escapeHtml(thotAmount(listing.price_atoms))}`, `
 <article class="listing-page"><header><a class="listing-brand" href="/"><img src="/assets/thot-logo.png" alt="" width="34" height="38"><span>thot market</span></a></header>
 <h1>${escapeHtml(listing.title ?? 'Untitled listing')}</h1>
 <p class="listing-price">${escapeHtml(thotAmount(listing.price_atoms))}</p>
@@ -50,7 +55,7 @@ ${row('Listed', escapeHtml(isoDate(listing.created_at)))}
 <section class="listing-license"><h2>Buyer licence</h2><p>${escapeHtml(listing.license ?? 'See the workspace for the exact licence.')}</p></section>
 <p class="listing-note">This page shows public listing details only. The licensed conversation is delivered to the buyer after payment.</p>
 <div class="listing-actions"><a class="listing-buy" href="${escapeHtml(appUrl)}">Sign in to buy</a><a class="listing-browse" href="${escapeHtml(appUrl)}#thot-available">Browse all traces</a></div>
-</article>`);
+</article>`, summary);
 }
 
 /** A hidden, unlisted or unknown listing is clearly unavailable, never a 404. */

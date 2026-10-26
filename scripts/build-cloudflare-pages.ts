@@ -17,6 +17,8 @@ export const publicFiles: Readonly<Record<string, string>> = Object.freeze({
   'tutorial.html': 'tutorial.html',
   'whitepaper.html': 'whitepaper.html',
   'mechanism.html': 'mechanism.html',
+  'stats.html': 'stats.html',
+  'stats.js': 'stats.js',
   'affiliates.html': 'affiliates.html',
   'app.html': 'access.html',
   'site.css': 'site.css',
@@ -129,7 +131,9 @@ export async function buildCloudflarePages(options: { outputParent?: string; rev
     files.set('app.html', Buffer.from(page.replace(workspace, workspace.replace('>', ' hidden>')).replace(migration, migration.replace(' hidden', ''))));
   }
   files.set('_redirects', Buffer.from(redirects));
-  files.set('_headers', Buffer.from(headers));
+  // The live stats page and home numbers read the app's public stats endpoint; allow exactly that origin.
+  const appOrigin = 'appUrl' in accessConfig && accessConfig.appUrl && /^https:\/\//.test(accessConfig.appUrl) ? new URL(accessConfig.appUrl).origin : null;
+  files.set('_headers', Buffer.from(appOrigin ? headers.replace("connect-src 'self'", `connect-src 'self' ${appOrigin}`) : headers));
   files.set('404.html', Buffer.from(notFound));
   files.set('healthz.json', Buffer.from(JSON.stringify({ status: 'ok', service: 'thot-public-site', privateAppHosted: false }) + '\n'));
   files.set('v1/public/launch-config.json', Buffer.from(JSON.stringify(launch) + '\n'));

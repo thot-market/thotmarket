@@ -149,6 +149,39 @@ export class ThotAnalytics {
    await this.put(tx,'cursor',{kind:'analytics_cursor',through,...(partialIndex===undefined?{}:{partial_index:partialIndex}),through_at:new Date(end.timestamp*1000).toISOString(),hash:end.hash,target:head.number,complete:through===head.number&&partialIndex===undefined,deployment_at:deployed,terms,buyer_pricing:pricing,updated_at:this.service.now()});
   });return this.status();
  }
+ /** Public, verifiable market numbers for the stats page and the site: independent purchases only
+  * (treasury purchases are counted separately), each recent sale linked to its funding transaction.
+  * Cached for 30 s so a traffic spike costs one query per half minute. */
+ private publicCache?:{at:number;value:Promise<Document>};
+ publicStats():Promise<Document>{
+  const now=Date.now();
+  if(this.publicCache&&now-this.publicCache.at<30_000)return this.publicCache.value;
+  const value=this.service.db.transaction(async tx=>{
+   const indep="d->>'independent'='true' AND d->>'treasury'='false' AND d->>'seller'<>d->>'buyer'";
+   const t=(await tx.sql.query(`WITH o AS (SELECT document AS d FROM thot_records WHERE id LIKE $1 AND document->>'kind'='analytics_offer') SELECT
+    COUNT(*) FILTER (WHERE d->>'status'<>'6' AND ${indep})::integer AS purchases,
+    COUNT(*) FILTER (WHERE d->>'status'='5' AND ${indep})::integer AS finalized,
+    COALESCE(SUM((d->>'gross')::numeric) FILTER (WHERE d->>'status'<>'6' AND ${indep}),0)::text AS gross,
+    COALESCE(SUM((d->>'seller_amount')::numeric) FILTER (WHERE d->>'status'='5' AND ${indep}),0)::text AS paid,
+    COUNT(DISTINCT d->>'seller') FILTER (WHERE d->>'status'<>'6' AND ${indep})::integer AS sellers,
+    COUNT(DISTINCT d->>'buyer') FILTER (WHERE d->>'status'<>'6' AND ${indep})::integer AS buyers,
+    COUNT(*) FILTER (WHERE d->>'status'<>'6' AND d->>'treasury'='true')::integer AS treasury FROM o`,[this.namespace+'%'])).rows[0];
+   const listings=(await tx.sql.query("SELECT COUNT(*)::integer AS count FROM thot_records WHERE document->>'kind'='listing' AND document->>'active'='true' AND document ? 'signature' AND NOT document ? 'unlisted_at' AND NOT document ? 'release_deleted_at'")).rows[0].count;
+   const recent=(await tx.sql.query(`SELECT a.document->>'gross' AS gross,a.document->>'status' AS status,a.document->>'block' AS block,a.document->>'transaction_hash' AS tx,a.document->>'treasury' AS treasury,l.document->>'title' AS title
+    FROM thot_records a LEFT JOIN thot_records i ON i.document->>'kind'='intent' AND i.document->>'offer_id'=a.document->>'offer_id' LEFT JOIN thot_records l ON l.id=i.document->>'listing_id'
+    WHERE a.id LIKE $1 AND a.document->>'kind'='analytics_offer' AND a.document->>'status'<>'6' AND a.document->>'seller'<>a.document->>'buyer'
+    ORDER BY (a.document->>'block')::bigint DESC LIMIT 8`,[this.namespace+'%'])).rows;
+   const explorer=this.chain?.capabilities().explorer_url??null;
+   return {as_of:new Date().toISOString(),chain:this.chain?{name:this.chain.capabilities().chain_name,explorer_url:explorer}:null,listings_active:listings,
+    independent:{purchases:t.purchases,finalized:t.finalized,gross_atoms:t.gross,paid_to_sellers_atoms:t.paid,sellers:t.sellers,buyers:t.buyers},treasury:{purchases:t.treasury},
+    recent:recent.map(r=>({title:r.title??'Untitled item',gross_atoms:r.gross,status:{'1':'funded','2':'accepted','3':'delivered','4':'disputed','5':'paid'}[r.status as string]??'funded',block:Number(r.block),treasury:r.treasury==='true',
+     transaction_hash:r.tx,transaction_url:explorer&&/^0x[0-9a-f]{64}$/i.test(r.tx??'')?explorer.replace(/\/$/,'')+'/tx/'+r.tx:null})),
+    index:this.statusFrom(await tx.maybe('thot_records',this.namespace+'cursor')),
+    basis:'Independent purchases exclude treasury purchases, refunds and self-purchases. Paid to sellers counts finalized seller proceeds. Every sale links to its on-chain funding transaction.'};
+  });
+  value.catch(()=>{if(this.publicCache?.value===value)this.publicCache=undefined;});
+  this.publicCache={at:now,value};return value;
+ }
  async setProfile(actor:Actor,key:string,input:Document){
   allowed(actor);ensure(Object.keys(input).every(k=>['opted_in','label'].includes(k))&&typeof input.opted_in==='boolean','INVALID_LEADERBOARD_PROFILE');
   const label=String(input.label??'').trim();ensure(!input.opted_in||label.length>=2&&label.length<=40&&!/[\x00-\x1f\x7f]/.test(label),'INVALID_PUBLIC_LABEL');
