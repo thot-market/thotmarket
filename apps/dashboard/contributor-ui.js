@@ -69,7 +69,7 @@ export function createContributorUI({libraryUI,state,api,openDialog,dialog,refre
   function importDialog(kind='trace') {
     preview = null;
     importDraft = null;
-    openDialog('Upload your work','Choose a conversation or an explicit research package. Review it before saving privately.',`<form id="research-preview-form"><label>Content type<select id="research-kind"><option value="trace" ${kind==='trace'?'selected':''}>Claude Code / Codex conversation</option><option value="research" ${kind==='research'?'selected':''}>Research package</option></select></label><label>Research title<input id="package-title" maxlength="160" placeholder="Research report"></label><label>Main report filename (research only)<input id="package-entrypoint" placeholder="report.md"></label><div class="field"><label for="research-file">Selected files</label><input id="research-file" type="file" multiple accept=".jsonl,.json,.md,.txt,.csv,.py,.js,.mjs" required><small>Claude Code or Codex coding-session JSONL, up to 2 MB. Choose one conversation file. For research, explicitly select up to 32 report/data/code files: Markdown, text, JSON, CSV, Python or JavaScript; 200 KB each, 1 MB total. Code stays inert. Choose a Markdown/text main report. No enclosing folder is included.</small></div><button class="button" type="submit">Review selected work ↗</button></form>`);
+    openDialog('Add data','Upload files or a coding session. Nothing is saved until you review it.',`<form id="research-preview-form"><label>What are you adding?<select id="research-kind"><option value="research" ${kind==='research'?'selected':''}>Files or a dataset</option><option value="trace" ${kind==='trace'?'selected':''}>Claude Code / Codex session</option></select></label><label>Title<input id="package-title" maxlength="160" placeholder="e.g. Labelled street photos, March 2026"></label><label>Description (optional)<textarea id="package-description" maxlength="2000" rows="2" placeholder="What is in it and how it was made"></textarea></label><label>Main report file (optional)<input id="package-entrypoint" placeholder="report.md"></label><div class="field"><label for="research-file">Files</label><input id="research-file" type="file" multiple required><small>Any file type: images, PDF, audio, CSV, parquet, zip and more. Up to 64 files, 4 MB each and 5 MB in total; executables are refused. Text files (Markdown, text, JSON, CSV, Python, JavaScript) stay readable; other files are kept byte for byte. For a session, choose one .jsonl file up to 2 MB.</small></div><button class="button" type="submit">Review ↗</button></form>`);
   }
 
   function previewDialog(result) {
@@ -164,9 +164,20 @@ export function createContributorUI({libraryUI,state,api,openDialog,dialog,refre
     if (form.id !== 'research-preview-form') return false;
     const selected=[...(document.querySelector('#research-file')?.files??[])];
     if(document.querySelector('#research-kind')?.value==='research'){
-      if(!selected.length||selected.length>32||selected.reduce((n,f)=>n+f.size,0)>1_000_000||selected.some(f=>f.size>200_000))throw Error('Choose 1–32 research files, up to 200 KB each and 1 MB total.');
-      const files=[];for(const file of selected){const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(await file.arrayBuffer()),bytes=new TextEncoder().encode(text),sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join(''),ext=file.name.split('.').at(-1).toLowerCase(),media_type=({md:'text/markdown',txt:'text/plain',json:'application/json',csv:'text/csv',py:'text/x-python',js:'text/javascript',mjs:'text/javascript'})[ext];if(!media_type)throw Error('Unsupported research file type.');files.push({path:file.name,media_type,role:['py','js','mjs'].includes(ext)?'code':['json','csv'].includes(ext)?'data':'report',sha256,bytes:bytes.length,text});}
-      const entrypoint=document.querySelector('#package-entrypoint').value.trim(),title=document.querySelector('#package-title').value.trim(),content={schema_version:'thot.research-package/1',kind:'research',title,entrypoint,files,relationships:[],provenance:{mode:'imported_declaration'}};
+      if(!selected.length||selected.length>64||selected.reduce((n,f)=>n+f.size,0)>5_000_000||selected.some(f=>f.size>4_000_000))throw Error('Choose 1–64 files, up to 4 MB each and 5 MB in total.');
+      const textTypes={md:'text/markdown',txt:'text/plain',json:'application/json',csv:'text/csv',py:'text/x-python',js:'text/javascript',mjs:'text/javascript'};
+      const hex=bytes=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+      const files=[];
+      for(const file of selected){
+        const raw=new Uint8Array(await file.arrayBuffer()),ext=file.name.split('.').at(-1).toLowerCase(),sha256=hex(await crypto.subtle.digest('SHA-256',raw)),path=file.name.replace(/[^A-Za-z0-9_.-]/g,'_').replace(/^[._]+/,'')||'file';
+        let text=null;if(textTypes[ext]&&raw.length<=200_000){try{text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(raw);}catch{}}
+        if(text!==null&&!text.includes('\0')){files.push({path,media_type:textTypes[ext],role:['py','js','mjs'].includes(ext)?'code':['json','csv'].includes(ext)?'data':'report',sha256,bytes:raw.length,text});continue;}
+        // Any other file is kept byte for byte; the server checks its type against its content.
+        let binary='';for(let i=0;i<raw.length;i+=0x8000)binary+=String.fromCharCode(...raw.subarray(i,i+0x8000));
+        files.push({path,media_type:/^[a-z0-9][a-z0-9.+-]*\/[a-z0-9][a-z0-9.+-]*$/i.test(file.type)?file.type.toLowerCase():'application/octet-stream',role:'data',sha256,bytes:raw.length,base64:btoa(binary)});
+      }
+      const description=document.querySelector('#package-description')?.value.trim();
+      const entrypoint=document.querySelector('#package-entrypoint').value.trim(),title=document.querySelector('#package-title').value.trim(),content={schema_version:'thot.research-package/1',kind:'research',title,...(description?{description}:{}),entrypoint,files,relationships:[],provenance:{mode:'imported_declaration'}};
       importDraft={kind:'research',filename:'research-package.json',text:JSON.stringify(content)};const result=await api('/v1/contributor/import/preview',{method:'POST',body:importDraft});previewDialog(result);return true;
     }
     if(selected.length!==1)throw Error('Choose one coding-session file.');

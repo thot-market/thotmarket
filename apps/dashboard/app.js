@@ -1024,7 +1024,7 @@ async function showPublicCatalogue(){
   const listings=response?.ok?(await response.json()).listings??[]:[];
   if(state.actor||signedOutViewState!=='market'||main.querySelector('#public-catalogue'))return;
   const price=atoms=>{const n=BigInt(atoms??0),base=10n**18n,frac=String(n%base).padStart(18,'0').slice(0,2).replace(/0+$/,'');return (n/base).toLocaleString()+(frac?'.'+frac:'')+' THOT';};
-  const cards=listings.map(l=>`<li class="public-listing"><a href="${escape(l.public_path)}"><strong>${escape(l.title||'Untitled item')}</strong><span>${escape(price(l.price_atoms))}</span><small>${escape([l.workflow,l.turn_count?l.turn_count+' turns':'',l.capture_model?.claimed_model].filter(Boolean).join(' · '))}</small></a></li>`).join('');
+  const cards=listings.map(l=>`<li class="public-listing"><a href="${escape(l.public_path)}"><strong>${escape(l.title||'Untitled item')}</strong><span>${escape(price(l.price_atoms))}</span><small>${escape([l.workflow,l.turn_count?l.turn_count+' turns':'',l.file_count?l.file_count+' files':'',l.total_bytes?(l.total_bytes/1e6).toFixed(l.total_bytes<1e5?2:1)+' MB':'',l.capture_model?.claimed_model].filter(Boolean).join(' · '))}</small></a></li>`).join('');
   main.insertAdjacentHTML('beforeend',`<section id="public-catalogue" class="public-catalogue" aria-labelledby="public-catalogue-title"><h2 id="public-catalogue-title">For sale now</h2>${cards?`<ul>${cards}</ul>`:'<p class="journey-fine">No data are listed yet.</p>'}</section>`);
 }
 function showIdentityLogin(message='Use a short-lived access token from your configured identity issuer. This does not log in to the issuer for you.'){

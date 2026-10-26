@@ -24,17 +24,19 @@ const shell = (title: string, body: string) => `<!doctype html>
 
 export type PublicListingRecord = {
   title?: unknown; price_atoms?: unknown; license?: unknown; provenance?: unknown; workflow?: unknown;
-  turn_count?: unknown; file_count?: unknown; content_kind?: unknown; capture_model?: unknown; created_at?: unknown; seller?: unknown;
+  turn_count?: unknown; file_count?: unknown; file_types?: unknown; total_bytes?: unknown; content_kind?: unknown; capture_model?: unknown; created_at?: unknown; seller?: unknown;
 };
 
 /** Metadata-only listing page. `appUrl` is the workspace URL used for the buy action. */
 export function renderListingPage(listing: PublicListingRecord, appUrl: string) {
   const model = (listing.capture_model ?? null) as Document | null;
   const claimedModel = model?.evidence === 'user_supplied' ? String(model.claimed_model ?? 'Not recorded') + ' (claimed)' : String(model?.returned_model ?? model?.requested_model ?? 'Not recorded');
-  const size = listing.content_kind === 'research' ? `${escapeHtml(listing.file_count ?? '—')} files` : `${escapeHtml(listing.turn_count ?? '—')} turns`;
+  const megabytes = typeof listing.total_bytes === 'number' ? ` · ${(listing.total_bytes / 1e6).toFixed(listing.total_bytes < 1e5 ? 2 : 1)} MB` : '';
+  const types = Array.isArray(listing.file_types) && listing.file_types.length ? ` · ${listing.file_types.map(String).join(', ')}` : '';
+  const size = listing.content_kind === 'research' ? `${escapeHtml(listing.file_count ?? '—')} files${escapeHtml(megabytes + types)}` : `${escapeHtml(listing.turn_count ?? '—')} turns`;
   const row = (label: string, value: string) => `<div class="listing-row"><span>${label}</span><strong>${value}</strong></div>`;
   return shell(`${escapeHtml(listing.title ?? 'Listing')} · thot market`, `
-<article class="listing-page"><header><a class="listing-brand" href="/"><img src="/assets/thot-logo.png" alt="" width="34" height="38"><span>thot.</span></a></header>
+<article class="listing-page"><header><a class="listing-brand" href="/"><img src="/assets/thot-logo.png" alt="" width="34" height="38"><span>thot market</span></a></header>
 <h1>${escapeHtml(listing.title ?? 'Untitled listing')}</h1>
 <p class="listing-price">${escapeHtml(thotAmount(listing.price_atoms))}</p>
 <section class="listing-meta" aria-label="Public listing details">
@@ -54,7 +56,7 @@ ${row('Listed', escapeHtml(isoDate(listing.created_at)))}
 /** A hidden, unlisted or unknown listing is clearly unavailable, never a 404. */
 export function renderListingUnavailablePage(appUrl: string) {
   return shell('No longer available · thot market', `
-<article class="listing-page listing-unavailable"><header><a class="listing-brand" href="/"><img src="/assets/thot-logo.png" alt="" width="34" height="38"><span>thot.</span></a></header>
+<article class="listing-page listing-unavailable"><header><a class="listing-brand" href="/"><img src="/assets/thot-logo.png" alt="" width="34" height="38"><span>thot market</span></a></header>
 <h1>No longer available</h1>
 <p class="listing-note">This listing is no longer available for purchase.</p>
 <div class="listing-actions"><a class="listing-browse" href="${escapeHtml(appUrl)}#thot-available">Browse available traces</a></div>

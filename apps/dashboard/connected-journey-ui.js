@@ -11,7 +11,7 @@ export function welcomeHTML(signIn, {variant = 'contributor'} = {}) {
 export function createConnectedJourneyUI({state,openDialog,escape,thotUI}) {
   const option=(name,copy,action,client='')=>`<button class="journey-option" data-action="${action}"${client?` data-client="${client}"`:''}><span><strong>${name}</strong><small>${copy}</small></span><span aria-hidden="true">→</span></button>`;
   function chooser(){
-    openDialog('Add your work','Connect your AI tools or bring in a research package.',`<div class="journey-chooser">${option('OpenRouter','Connect your key. Record through the thot relay.','openrouter-open')}${option('Claude Code','Import history or connect local sessions.','journey-local','claude')}${option('Codex','Import history or connect local sessions.','journey-local','codex')}${option('Research package','Select report, code and data files. Review and save privately.','import-research-package')}</div><p class="legal-note">Saving is private. Listing an item requires separate permission.</p>`);
+    openDialog('Add data','Upload files or connect the AI tools you already use.',`<div class="journey-chooser">${option('Files or a dataset','Images, PDF, audio, CSV, parquet, zip, research… Review before saving.','import-research-package')}${option('Claude Code','Import history or connect local sessions.','journey-local','claude')}${option('Codex','Import history or connect local sessions.','journey-local','codex')}${option('OpenRouter','Connect your key. Record through the thot relay.','openrouter-open')}</div><p class="legal-note">Saving is private. Listing an item requires separate permission.</p>`);
   }
   async function handle(action,button){
     if(action==='journey-add'){chooser();return true;}

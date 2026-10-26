@@ -587,3 +587,4 @@ body{background:var(--paper)}
 .connected-app .brand{font-size:24px;letter-spacing:-.04em}
 /* Signed-out buyers on phones see the listings right after "Sign in", not after the explainer card. */
 @media(max-width:600px){.connected-app #main:has(#public-catalogue) .journey-example{display:none}}
+.connected-app .data-file-preview{display:block;max-width:100%;max-height:320px;margin:8px 0;border-radius:8px}

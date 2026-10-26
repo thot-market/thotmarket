@@ -141,8 +141,8 @@ export class PrivacyIntegrations implements PrivacyFacade {
     return {rights,scrub:{...scrub,signature:signCanonical(scrub,this.signingKey)},content:scrubbed.trace,features};
   }
   private assessResearch(traceId:string,value:Document,category:string,input:Document){
-    const content=validateResearchPackage(value),text=content.files.map(f=>f.text).join('\n'),flags:RightsFlag[]=[...(input.rights_flags??[])];
-    if(content.files.some(f=>redactCredentialSpans(f.text).count>0))flags.push('secret');
+    const content=validateResearchPackage(value),textFiles=content.files.filter(f=>typeof f.text==='string') as Array<{text:string}>,text=textFiles.map(f=>f.text).join('\n'),flags:RightsFlag[]=[...(input.rights_flags??[])];
+    if(textFiles.some(f=>redactCredentialSpans(f.text).count>0))flags.push('secret'); // binary files: rights and PII are the seller's attestation
     for(const [pattern,flag] of [[/attorney.client privileged|privileged legal|legal privilege/i,'privileged_legal'],[/client confidential/i,'client_confidential'],[/employer confidential/i,'employer_confidential'],[/material non.?public|\bMNPI\b|unreleased earnings/i,'mnpi_like'],[/brokerage account number|bank account number|routing number/i,'financial_account_sensitive']] as [RegExp,RightsFlag][])if(pattern.test(text))flags.push(flag);
     const rights=evaluateRights({traceId,flags,professionalFlow:category==='professional_flow',rightsConfirmed:input.rights_confirmed===true,components:content.files.map(f=>f.path),now:this.clock().toISOString()});
     const scrub={schema_version:'research.review/1',scrub_id:uuidv7(),trace_id:traceId,input_hash:canonicalHash(content),output_hash:canonicalHash(content),generated_at:this.clock().toISOString(),scrubber_version:'research-exact-files/1',edits_count:0,limitations:['Exact file bytes retained. No automatic redaction; sensitive findings block sale. Review every included file and its licensing rights.']};

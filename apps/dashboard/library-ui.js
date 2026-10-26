@@ -1,6 +1,11 @@
+// Non-text files are kept byte for byte: images preview inline, everything downloads as the original file.
+function binaryFileHTML(f,escape){
+  const href=`data:${escape(f.media_type)};base64,${escape(f.base64)}`,name=escape(f.path.split('/').at(-1));
+  return `${/^image\/(png|jpeg|gif|webp)$/.test(f.media_type)?`<img class="data-file-preview" src="${href}" alt="${name}">`:''}<a class="text-button" download="${name}" href="${href}">Download ${name}</a>`;
+}
 export function researchFilesHTML(content,escape,{editable=false}={}){
-  const inventory=(content.files??[]).map(f=>`<article class="library-turn" data-research-file><header><strong>${escape(f.path)}</strong> · ${escape(f.media_type)} · ${escape(f.bytes)} bytes${f.path===content.entrypoint?' · Main report':''}${editable&&f.path!==content.entrypoint?`<label><input type="checkbox" name="excluded_file" value="${escape(f.path)}"> Remove from release</label>`:''}</header><small>SHA-256: ${escape(f.sha256)}</small><pre>${escape(f.text??'')}</pre></article>`).join('');
-  return `<section aria-label="Research package"><p>Research package · ${content.files?.length??0} files. Imported declarations; code is not executed and references are not fetched.</p>${inventory}<details><summary>File relationships</summary><pre>${escape(JSON.stringify(content.relationships??[],null,2))}</pre></details></section>`;
+  const inventory=(content.files??[]).map(f=>`<article class="library-turn" data-research-file><header><strong>${escape(f.path)}</strong> · ${escape(f.media_type)} · ${escape(f.bytes)} bytes${f.path===content.entrypoint?' · Main report':''}${editable&&f.path!==content.entrypoint?`<label><input type="checkbox" name="excluded_file" value="${escape(f.path)}"> Remove from release</label>`:''}</header><small>SHA-256: ${escape(f.sha256)}</small>${typeof f.base64==='string'?binaryFileHTML(f,escape):`<pre>${escape(f.text??'')}</pre>`}</article>`).join('');
+  return `<section aria-label="Files"><p>${content.files?.length??0} files. Files are shown as uploaded; code is never run.</p>${inventory}<details><summary>File relationships</summary><pre>${escape(JSON.stringify(content.relationships??[],null,2))}</pre></details></section>`;
 }
 import {createTraceQcUI,traceQcStatus} from './qc-ui.js';
 export function createLibraryUI({state,api,openDialog,dialog,escape,toast}){

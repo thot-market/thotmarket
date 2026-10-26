@@ -51,7 +51,7 @@ test('coding-session import distinguishes private storage from one later automat
  (globalThis as any).document={querySelector:(selector:string)=>fields[selector]};t.after(()=>{(globalThis as any).document=prior;});
  const {instance,dialogs}=ui({items:[]},{title:'Coding session',content_commitment:'abc',turn_count:2});
  await instance.handle('import-research',{dataset:{}});
- assert.match(dialogs[0].join(' '),/Claude Code or Codex coding-session JSONL, up to 2 MB/);
+ assert.match(dialogs[0].join(' '),/Any file type: images, PDF, audio.*choose one \.jsonl file up to 2 MB/);
  await instance.onSubmit({id:'research-preview-form'});
  const html=dialogs.at(-1).join(' ');assert.match(html,/Saving keeps this conversation private/);assert.match(html,/do not list or sell it/);assert.match(html,/sign once to enable an automatic THOT sale/);assert.match(html,/matching purchase then needs no further approval/);assert.doesNotMatch(html,/approve each release/);
  instance.onChange({id:'research-rights'});assert.equal(fields['#confirm-research'].textContent,'Save privately with sale rights');assert.equal(fields['#research-license'].disabled,false);

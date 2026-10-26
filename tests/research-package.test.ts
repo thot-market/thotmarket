@@ -22,7 +22,7 @@ async function imported(app:Awaited<ReturnType<typeof createApplication>>,p=fixt
 
 test('research profile preserves exact UTF-8 files and relationships without invented turns',()=>{
  const p=fixture(),result=validateResearchPackage(p);assert.deepEqual(result,p);assert.equal('turns' in result,false);assert.equal(researchPreview(p).file_count,3);
- for(const f of result.files)assert.equal(createHash('sha256').update(f.text).digest('hex'),f.sha256);
+ for(const f of result.files)assert.equal(createHash('sha256').update(f.text!).digest('hex'),f.sha256);
 });
 test('research validation rejects traversal, normalized collisions, unsupported media and forged file commitments',()=>{
  const changes=[(p:any)=>p.files[0].path='../report.md',(p:any)=>p.files[1].path='REPORT.MD',(p:any)=>p.files[0].sha256='a'.repeat(64),(p:any)=>p.files[0].bytes++,(p:any)=>p.files[0].text+='changed',(p:any)=>p.files[1].media_type='text/html',(p:any)=>p.files[0].text='\ud800',(p:any)=>p.files[0].path='/absolute.md',(p:any)=>p.files[0].path='dir\\report.md',(p:any)=>p.owner_id=other.id,(p:any)=>p.provenance.mode='attested',(p:any)=>p.relationships[0].to='missing.py',(p:any)=>p.files[1].path='report.md/calculate.py',(p:any)=>p.entrypoint='calculate.py',(p:any)=>p.files.push(...p.files),(p:any)=>p.files[0].text='x'.repeat(200_001)];
@@ -61,7 +61,7 @@ test('research release assessment blocks credential-bearing files without changi
  const preview=await app.releasePreview.preview(owner,{trace_id:saved.trace_id});assert.equal(preview.sale_eligibility.can_list,false);assert.equal(preview.rights_status,'rejected');assert.deepEqual((await app.library.item(owner,saved.trace_id)).content,p);
 });
 test('research rendering treats markup and code as inert text and preserves inventory',()=>{
- const p=fixture();p.files[0]!.text='<script>globalThis.executed=true</script>';const escape=(s:any)=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');const html=researchFilesHTML(p,escape,{editable:true});assert.equal(html.includes('<script>'),false);assert.match(html,/&lt;script&gt;/);assert.match(html,/calculate.py/);assert.match(html,/name="excluded_file"/);assert.match(html,/code is not executed/);
+ const p=fixture();p.files[0]!.text='<script>globalThis.executed=true</script>';const escape=(s:any)=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');const html=researchFilesHTML(p,escape,{editable:true});assert.equal(html.includes('<script>'),false);assert.match(html,/&lt;script&gt;/);assert.match(html,/calculate.py/);assert.match(html,/name="excluded_file"/);assert.match(html,/code is never run/);
 });
 
 
@@ -75,4 +75,26 @@ test('interrupted research writes publish no partial package and retry recovers 
 
 test('concurrent research imports have one owner-bound identity and no duplicate inventory',async t=>{
  const app=await setup(t),p=fixture();const [first,second]=await Promise.all([imported(app,p),imported(app,p)]);assert.equal(first.trace_id,second.trace_id);assert.equal((await app.library.list(owner)).items.length,1);assert.equal((await app.service.staged.cleanup()).failed,0);
+});
+
+test('data packages carry any file type as committed bytes, without a main report', () => {
+  const png = Buffer.concat([Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]), Buffer.from('synthetic image body')]);
+  const csv = 'id,value\n1,2\n';
+  const binary = (path: string, media_type: string, raw: Buffer) => ({path, media_type, role: 'data', sha256: createHash('sha256').update(raw).digest('hex'), bytes: raw.length, base64: raw.toString('base64')});
+  const pkg = {schema_version: RESEARCH_FORMAT, kind: 'research', title: 'Synthetic labelled images', description: 'Two files for a data sale.', entrypoint: '',
+    files: [binary('images/cat.png', 'image/png', png), {path: 'labels.csv', media_type: 'text/csv', role: 'data', sha256: createHash('sha256').update(csv).digest('hex'), bytes: Buffer.byteLength(csv), text: csv}],
+    relationships: [], provenance: {mode: 'imported_declaration'}};
+  const valid = validateResearchPackage(pkg);
+  assert.equal(valid.files[0]!.base64, png.toString('base64'));
+  const preview = researchPreview(pkg);
+  assert.equal(preview.size_bytes, png.length + Buffer.byteLength(csv));
+  assert.ok(!JSON.stringify(preview).includes(png.toString('base64')), 'previews never carry file bytes');
+  const variant = (file: Record<string, unknown>) => ({...pkg, files: [{...pkg.files[0], ...file}]});
+  assert.throws(() => validateResearchPackage(variant({media_type: 'application/pdf'})), /PACKAGE_MEDIA_MISMATCH/);
+  const elf = Buffer.from([0x7f,0x45,0x4c,0x46,1,1,1,0]);
+  assert.throws(() => validateResearchPackage(variant(binary('tool', 'application/octet-stream', elf))), /EXECUTABLE_FILE_REFUSED/);
+  assert.throws(() => validateResearchPackage(variant({base64: png.toString('base64') + '\n'})), /INVALID_PACKAGE_BASE64/);
+  assert.throws(() => validateResearchPackage(variant({sha256: '0'.repeat(64)})), /PACKAGE_FILE_COMMITMENT_MISMATCH/);
+  assert.throws(() => validateResearchPackage(variant({text: 'both'})), /INVALID_PACKAGE_FILE/);
+  assert.throws(() => validateResearchPackage({...pkg, entrypoint: 'images/cat.png'}), /INVALID_PACKAGE_ENTRYPOINT/);
 });
