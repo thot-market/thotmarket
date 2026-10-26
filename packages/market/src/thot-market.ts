@@ -116,6 +116,11 @@ export class ThotMarketplace {
   const intents=records.filter(r=>r.kind==='intent'&&(r.owner_id===actor.id||r.seller_id===actor.id));
   // All chain-backed fields share one guarded, confirmed request snapshot.
   const chain=this.chain,block=chain?await chain.snapshot():null;lap('snapshot');
+  // Reads that do not depend on the account view start now, at the same confirmed height.
+  const early=<T,>(work:Promise<T>|T)=>{const p=Promise.resolve(work);p.catch(()=>{});return p;};
+  const valuationsRead=early(scope==='full'&&actor.role==='user'&&chain&&block?this.valuationRows(actor,records,wallet,block):[]);
+  const stakingRead=early(scope==='full'&&chain?stakingWorkspace(chain,wallet,block!):null);
+  const reserveBuyerRead=early(wallet&&chain?chain.isReserveBuyer(wallet,block!):false);
   const visible=intents.slice(-50),view=chain?await chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id)),block!):null;lap('account');
   const orders=[];
   if(view)for(let n=0;n<visible.length;n++){const i=visible[n]!,receipt=view.offers[n]!;if(receipt.status!==0||i.owner_id===actor.id)orders.push({...this.publicIntent(i),receipt});}
@@ -124,10 +129,9 @@ export class ThotMarketplace {
   // by the response scope; callers must load full before rendering those views.
   // Independent reads at the same confirmed height.
   const [valuations,holderRewards,staking,reserveBuyer]=await Promise.all([
-   scope==='full'&&actor.role==='user'&&chain&&block?this.valuationRows(actor,records,wallet,block):[],
+   valuationsRead,
    scope==='full'&&chain?holderRewardsWorkspace(chain,wallet,orders.filter(o=>o.receipt.independent&&!o.receipt.treasury).map(o=>o.id),block!):null,
-   scope==='full'&&chain?stakingWorkspace(chain,wallet,block!):null,
-   wallet&&chain?chain.isReserveBuyer(wallet,block!):false,
+   stakingRead,reserveBuyerRead,
   ]);lap('extras');
   // Anvil can change code at the same height without changing the block hash.
   if(chain&&!chain.publicChain())await chain.guard();

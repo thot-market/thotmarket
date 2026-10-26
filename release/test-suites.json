@@ -76,7 +76,8 @@
     "tests/public-site.test.ts",
     "tests/site-server.test.ts",
     "tests/research-package.test.ts",
-    "tests/release-tag.test.mjs"
+    "tests/release-tag.test.mjs",
+    "tests/read-retry-provider.test.ts"
    ]
   },
   "contracts": {

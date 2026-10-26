@@ -30,12 +30,24 @@ export function traceSaleEligibility(trace:Document,now:string){
   return result('READY_FOR_REVIEW','EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED',false,true);
 }
 
+// Card metadata (title, project, note) is small and its vault objects are write-once: every seal
+// gets a fresh object id. Caching it keeps frequent library refreshes from re-opening every record.
+const metaCache=new Map<string,Promise<Document>>(),META_CACHE_LIMIT=5000;
+function cachedOpen(service:ThotService,owner:string,ref:Document):Promise<Document>{
+  const key=owner+'\u0000'+String(ref.objectId);
+  let hit=metaCache.get(key);
+  if(hit){metaCache.delete(key);metaCache.set(key,hit);return hit;}
+  hit=service.privacy.open(owner,ref).catch((error:unknown)=>{metaCache.delete(key);throw error;});
+  metaCache.set(key,hit);
+  if(metaCache.size>META_CACHE_LIMIT)metaCache.delete(metaCache.keys().next().value!);
+  return hit;
+}
 export class TraceLibrary {
   readonly service:ThotService;
   constructor(service:ThotService){this.service=service;}
   canExplore(actor:Actor){return actor.role==='operator_security'||(actor.role==='user'&&this.service.config.traceExplorerViewers?.includes(actor.id)===true);}
   private async meta(t:Document){
-    const owner=t.owner_id,open=(ref:Document|undefined)=>ref?this.service.privacy.open(owner,ref):{};
+    const owner=t.owner_id,open=(ref:Document|undefined)=>ref?cachedOpen(this.service,owner,ref):{};
     const [privateMeta,personal,context]=await Promise.all([open(t.private_metadata_ref),open(t.personal_ref),open(t.context_ref)]) as Document[];
     return {title:personal.title??privateMeta.title??t.import_preview?.title??t.capture_preview?.title??'Saved conversation',project:context.project??'',bookmarked:personal.bookmarked===true,note:personal.note??'',answer_preview:privateMeta.answer_preview??''};
   }
