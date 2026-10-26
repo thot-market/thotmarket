@@ -74,6 +74,7 @@
     "tests/setup-install.test.ts",
     "tests/verifier-install.test.ts",
     "tests/public-site.test.ts",
+    "tests/token-bill.test.mjs",
     "tests/site-server.test.ts",
     "tests/research-package.test.ts",
     "tests/release-tag.test.mjs",

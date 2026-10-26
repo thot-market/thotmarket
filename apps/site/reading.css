@@ -67,3 +67,6 @@
 .stats-recent{list-style:none;padding:0;margin:12px 0 24px;display:grid;gap:10px}
 .stats-recent li{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;border-bottom:1px solid rgba(26,58,41,.12);padding:10px 0}
 .stats-recent li span{color:var(--muted,#5f6b5a);font-size:14px}.stats-recent li a{margin-left:auto;font-size:14px}.stats-note{font-size:13px;color:var(--muted,#5f6b5a);max-width:720px}
+.bill-drop{display:grid;gap:8px;border:2px dashed rgba(26,58,41,.3);border-radius:16px;padding:32px;background:#fffdf7;cursor:pointer;margin:0 0 16px}
+.bill-drop.is-over{border-color:#1a3a29;background:#f0ecd8}.bill-drop input{position:absolute;opacity:0;width:1px;height:1px}.bill-drop span{color:var(--muted,#5f6b5a)}
+.bill-card{width:100%;height:auto;border-radius:14px;box-shadow:0 8px 30px rgba(26,58,41,.15)}.bill-actions{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0 40px}

@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live market numbers — thot market</title>
-  <meta name="description" content="Live, verifiable numbers from the thot market: items for sale, independent purchases and THOT paid to sellers, each sale linked to its on-chain transaction.">
+  <meta name="description" content="Live numbers from the thot market: items for sale, sellers and the newest listings.">
   <meta property="og:title" content="thot market — live numbers">
-  <meta property="og:description" content="Items for sale, purchases and THOT paid to sellers. Every sale is on chain.">
+  <meta property="og:description" content="What people are selling right now: AI chats, datasets and files.">
   <meta property="og:image" content="https://thot.market/assets/thot-feast.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="theme-color" content="#f7f4e5">
@@ -18,23 +18,27 @@
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header wrap">
     <a class="brand" href="/"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
-    <nav class="main-nav" aria-label="Main navigation"><a href="/#how-it-works">How it works</a><a href="/read">The idea</a><a href="/stats" aria-current="page">Live numbers</a><a href="/mechanism">Mechanism</a></nav>
+    <nav class="main-nav" aria-label="Main navigation"><a href="/#how-it-works">How it works</a><a href="/read">The idea</a><a href="/stats" aria-current="page">Live numbers</a><a href="/bill">Token bill</a><a href="/mechanism">Mechanism</a></nav>
     <a class="button button-small" href="https://app.thot.market/app" data-workspace-link>Open app</a>
   </header>
   <main class="reading-main wrap stats-page" id="main">
     <p class="reading-topline">Live market numbers</p>
-    <h1>Real sales. On chain.</h1>
-    <p class="stats-lede">Every number below comes from the market contract. Every sale links to its transaction, so anyone can check it.</p>
-    <section class="stats-grid" aria-label="Market totals" data-stats-grid>
+    <h1>What people are selling right now.</h1>
+    <p class="stats-lede">Sellers list AI chats, datasets and files here and keep 99% of every sale. These numbers come straight from the live market.</p>
+    <section class="stats-grid" aria-label="Market totals">
       <div><strong data-stat="listings">—</strong><span>items for sale</span></div>
-      <div><strong data-stat="purchases">—</strong><span>independent purchases</span></div>
-      <div><strong data-stat="paid">—</strong><span>THOT paid to sellers</span></div>
-      <div><strong data-stat="people">—</strong><span>sellers · buyers</span></div>
+      <div><strong data-stat="sellers">—</strong><span>sellers</span></div>
+      <div data-sales hidden><strong data-stat="purchases">—</strong><span>independent purchases</span></div>
+      <div data-sales hidden><strong data-stat="paid">—</strong><span>THOT paid to sellers</span></div>
     </section>
-    <h2>Recent sales</h2>
-    <ol class="stats-recent" data-stats-recent><li>Loading…</li></ol>
+    <h2>Newest listings</h2>
+    <ol class="stats-recent" data-stats-newest><li>Loading…</li></ol>
+    <section data-sales hidden>
+      <h2>Recent sales</h2>
+      <ol class="stats-recent" data-stats-recent></ol>
+    </section>
     <p class="stats-note" data-stats-note>Checking the market…</p>
-    <a class="text-link" data-stats-share target="_blank" rel="noopener noreferrer" hidden>Share these numbers on X</a>
+    <a class="text-link" data-stats-share target="_blank" rel="noopener noreferrer" hidden>Share on X</a>
   </main>
 </body>
 </html>

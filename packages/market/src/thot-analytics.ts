@@ -52,6 +52,7 @@ export function referralPaymentBounds(referralEarned:string,otherEarned:string,p
   basis:'Contract claims pool seller, referral, protocol and refund credits. Role-specific payment is exact only when the bounds coincide.'};
 }
 
+export const PUBLIC_SALES_MINIMUM=3;
 export class ThotAnalytics {
  readonly service:ThotService;readonly chain?:ThotChain;private refreshing?:Promise<Document>;
  private storageUsage?: (owner:string)=>Promise<{bytes:number;objects:number}>;
@@ -166,18 +167,24 @@ export class ThotAnalytics {
     COUNT(DISTINCT d->>'seller') FILTER (WHERE d->>'status'<>'6' AND ${indep})::integer AS sellers,
     COUNT(DISTINCT d->>'buyer') FILTER (WHERE d->>'status'<>'6' AND ${indep})::integer AS buyers,
     COUNT(*) FILTER (WHERE d->>'status'<>'6' AND d->>'treasury'='true')::integer AS treasury FROM o`,[this.namespace+'%'])).rows[0];
-   const listings=(await tx.sql.query("SELECT COUNT(*)::integer AS count FROM thot_records WHERE document->>'kind'='listing' AND document->>'active'='true' AND document ? 'signature' AND NOT document ? 'unlisted_at' AND NOT document ? 'release_deleted_at'")).rows[0].count;
+   const active="document->>'kind'='listing' AND document->>'active'='true' AND document ? 'signature' AND NOT document ? 'unlisted_at' AND NOT document ? 'release_deleted_at'";
+   const supply=(await tx.sql.query(`SELECT COUNT(*)::integer AS count,COUNT(DISTINCT owner_id)::integer AS sellers FROM thot_records WHERE ${active}`)).rows[0];
+   const newest=(await tx.sql.query(`SELECT id,document->>'title' AS title,document->>'price_atoms' AS price,document->>'content_kind' AS kind,document->>'file_count' AS files,document->>'turn_count' AS turns FROM thot_records WHERE ${active} ORDER BY document->>'created_at' DESC LIMIT 8`)).rows;
    const recent=(await tx.sql.query(`SELECT a.document->>'gross' AS gross,a.document->>'status' AS status,a.document->>'block' AS block,a.document->>'transaction_hash' AS tx,a.document->>'treasury' AS treasury,l.document->>'title' AS title
     FROM thot_records a LEFT JOIN thot_records i ON i.document->>'kind'='intent' AND i.document->>'offer_id'=a.document->>'offer_id' LEFT JOIN thot_records l ON l.id=i.document->>'listing_id'
     WHERE a.id LIKE $1 AND a.document->>'kind'='analytics_offer' AND a.document->>'status'<>'6' AND a.document->>'seller'<>a.document->>'buyer'
     ORDER BY (a.document->>'block')::bigint DESC LIMIT 8`,[this.namespace+'%'])).rows;
    const explorer=this.chain?.capabilities().explorer_url??null;
-   return {as_of:new Date().toISOString(),chain:this.chain?{name:this.chain.capabilities().chain_name,explorer_url:explorer}:null,listings_active:listings,
-    independent:{purchases:t.purchases,finalized:t.finalized,gross_atoms:t.gross,paid_to_sellers_atoms:t.paid,sellers:t.sellers,buyers:t.buyers},treasury:{purchases:t.treasury},
-    recent:recent.map(r=>({title:r.title??'Untitled item',gross_atoms:r.gross,status:{'1':'funded','2':'accepted','3':'delivered','4':'disputed','5':'paid'}[r.status as string]??'funded',block:Number(r.block),treasury:r.treasury==='true',
-     transaction_hash:r.tx,transaction_url:explorer&&/^0x[0-9a-f]{64}$/i.test(r.tx??'')?explorer.replace(/\/$/,'')+'/tx/'+r.tx:null})),
+   // Sales totals appear once there are a few independent purchases, so early internal checks never read as market traction.
+   const salesPublic=t.purchases>=PUBLIC_SALES_MINIMUM;
+   return {as_of:new Date().toISOString(),chain:this.chain?{name:this.chain.capabilities().chain_name,explorer_url:explorer}:null,listings_active:supply.count,sellers_listing:supply.sellers,
+    newest_listings:newest.map(l=>({title:l.title??'Untitled item',price_atoms:l.price,public_path:'/l/'+String(l.id).replace(/^listing:/,''),summary:l.kind==='research'?`${l.files??'—'} files`:`${l.turns??'—'} turns`})),
+    sales_shown_from:PUBLIC_SALES_MINIMUM,
+    independent:salesPublic?{purchases:t.purchases,finalized:t.finalized,gross_atoms:t.gross,paid_to_sellers_atoms:t.paid,sellers:t.sellers,buyers:t.buyers}:null,treasury:salesPublic?{purchases:t.treasury}:null,
+    recent:salesPublic?recent.map(r=>({title:r.title??'Untitled item',gross_atoms:r.gross,status:{'1':'funded','2':'accepted','3':'delivered','4':'disputed','5':'paid'}[r.status as string]??'funded',block:Number(r.block),treasury:r.treasury==='true',
+     transaction_hash:r.tx,transaction_url:explorer&&/^0x[0-9a-f]{64}$/i.test(r.tx??'')?explorer.replace(/\/$/,'')+'/tx/'+r.tx:null})):[],
     index:this.statusFrom(await tx.maybe('thot_records',this.namespace+'cursor')),
-    basis:'Independent purchases exclude treasury purchases, refunds and self-purchases. Paid to sellers counts finalized seller proceeds. Every sale links to its on-chain funding transaction.'};
+    basis:'Independent purchases exclude treasury purchases, refunds and self-purchases. Paid to sellers counts finalized seller proceeds. Sales appear once there are '+PUBLIC_SALES_MINIMUM+' independent purchases.'};
   });
   value.catch(()=>{if(this.publicCache?.value===value)this.publicCache=undefined;});
   this.publicCache={at:now,value};return value;

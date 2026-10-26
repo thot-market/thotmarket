@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your AI token bill — thot market</title>
+  <meta name="description" content="See how many tokens your AI coding agents have burned. Reads your Claude Code and Codex logs in your browser; nothing is uploaded.">
+  <meta property="og:title" content="What is your AI token bill?">
+  <meta property="og:description" content="Tokens burned by your coding agents, on one card. Runs in your browser.">
+  <meta property="og:image" content="https://thot.market/assets/thot-feast.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#f7f4e5">
+  <link rel="canonical" href="https://thot.market/bill">
+  <link rel="icon" href="/assets/thot-logo.png">
+  <link rel="stylesheet" href="/site.css"><link rel="stylesheet" href="/reading.css">
+  <script type="module" src="/bill.js"></script>
+</head>
+<body class="reading-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header wrap">
+    <a class="brand" href="/"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="/#how-it-works">How it works</a><a href="/read">The idea</a><a href="/stats">Live numbers</a><a href="/bill" aria-current="page">Token bill</a><a href="/mechanism">Mechanism</a></nav>
+    <a class="button button-small" href="https://app.thot.market/app" data-workspace-link>Open app</a>
+  </header>
+  <main class="reading-main wrap bill-page" id="main">
+    <p class="reading-topline">Token bill</p>
+    <h1>How many tokens have your agents burned?</h1>
+    <p class="stats-lede">Pick your Claude Code or Codex history folder. This page reads it in your browser and draws one card. Nothing is uploaded.</p>
+    <label class="bill-drop" data-bill-drop>
+      <input type="file" webkitdirectory multiple data-bill-input>
+      <strong>Choose a folder, or drop it here</strong>
+      <span>Claude Code: <code>~/.claude/projects</code> · Codex: <code>~/.codex/sessions</code></span>
+      <span>On a Mac, press <kbd>Cmd</kbd> <kbd>Shift</kbd> <kbd>.</kbd> in the picker to show hidden folders.</span>
+    </label>
+    <p class="stats-note" data-bill-status aria-live="polite"></p>
+    <section class="bill-result" data-bill-result hidden>
+      <canvas class="bill-card" data-bill-card width="1200" height="675" aria-label="Your token bill card"></canvas>
+      <div class="bill-actions">
+        <a class="button" data-bill-download download="token-bill.png">Download card</a>
+        <a class="button secondary" data-bill-share target="_blank" rel="noopener noreferrer">Share on X</a>
+      </div>
+      <h2>Those sessions are worth something.</h2>
+      <p>Every session behind that number is data that AI teams pay for. On thot market you list them at your price and keep 99% of each sale. Private until you choose to sell.</p>
+      <a class="button" href="https://app.thot.market/app" data-workspace-link>Start selling your sessions</a>
+    </section>
+  </main>
+</body>
+</html>
