@@ -16,11 +16,12 @@ const fourthSql = await readFile(new URL('../migrations/004_agent_capture.sql', 
 const fifthSql = await readFile(new URL('../migrations/005_thot.sql', import.meta.url), 'utf8');
 const sixthSql = await readFile(new URL('../migrations/006_staged_storage.sql', import.meta.url), 'utf8');
 const seventhSql = await readFile(new URL('../migrations/007_trace_qc.sql', import.meta.url), 'utf8');
+const eighthSql = await readFile(new URL('../migrations/008_auth_market_indexes.sql', import.meta.url), 'utf8');
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
-const versions = [{ version: '001', sha256: hash(firstSql) }, { version: '002', sha256: hash(secondSql) }, { version: '003', sha256: hash(thirdSql) }, { version: '004', sha256: hash(fourthSql) }, { version: '005', sha256: hash(fifthSql) }, { version: '006', sha256: hash(sixthSql) }, { version: '007', sha256: hash(seventhSql) }];
+const versions = [{ version: '001', sha256: hash(firstSql) }, { version: '002', sha256: hash(secondSql) }, { version: '003', sha256: hash(thirdSql) }, { version: '004', sha256: hash(fourthSql) }, { version: '005', sha256: hash(fifthSql) }, { version: '006', sha256: hash(sixthSql) }, { version: '007', sha256: hash(seventhSql) }, { version: '008', sha256: hash(eighthSql) }];
 test('published migration bytes remain compatible with existing databases', async () => {
-  const names = ['001_initial.sql', '002_inference.sql', '003_operations.sql', '004_agent_capture.sql', '005_thot.sql', '006_staged_storage.sql', '007_trace_qc.sql'];
-  const sql = [firstSql, secondSql, thirdSql, fourthSql, fifthSql, sixthSql, seventhSql];
+  const names = ['001_initial.sql', '002_inference.sql', '003_operations.sql', '004_agent_capture.sql', '005_thot.sql', '006_staged_storage.sql', '007_trace_qc.sql', '008_auth_market_indexes.sql'];
+  const sql = [firstSql, secondSql, thirdSql, fourthSql, fifthSql, sixthSql, seventhSql, eighthSql];
   // The private tree projects THOT identifiers into the published THOT source.
   // The exported tree has already been projected and contains this suite manifest.
   const published = existsSync(new URL('../release/test-suites.json', import.meta.url))
@@ -38,6 +39,7 @@ test('published migration bytes remain compatible with existing databases', asyn
     { version: '005', sha256: '0e82cf32e92b2f2af0dcf916ba1dcb8d944d6499a05f53bbd0f87fe1385f3852' },
     { version: '006', sha256: '2a70ccc5cbe8d68cd494e850a76ac22497e7b5834d3817d2316227ab6bdaa631' },
     { version: '007', sha256: 'cae4192701aa51bc700f5584b89757a9d956131e3356de4d7419d6927e1e004a' },
+    { version: '008', sha256: 'e69779b30c29f39bb43bc29c2fc404230101b8267dba582983de2dbb663b9691' },
   ]);
 });
 async function directory(t: any) {
@@ -153,7 +155,7 @@ test('missing prefix and a database newer than the application are rejected with
     const dataDir = join(await directory(t), kind); await seedV1(dataDir); const raw = await PGlite.create(dataDir);
     if (kind === 'missing-prefix') await raw.query("UPDATE schema_versions SET version='002'");
     else {
-      await raw.query('INSERT INTO schema_versions(version,sha256) VALUES($1,$2),($3,$4),($5,$6),($7,$8),($9,$10),($11,$12),($13,$14)', ['002', hash(secondSql), '003', hash(thirdSql), '004', hash(fourthSql), '005', hash(fifthSql), '006', hash(sixthSql), '007', hash(seventhSql), '008', 'future']);
+      await raw.query('INSERT INTO schema_versions(version,sha256) VALUES($1,$2),($3,$4),($5,$6),($7,$8),($9,$10),($11,$12),($13,$14),($15,$16)', ['002', hash(secondSql), '003', hash(thirdSql), '004', hash(fourthSql), '005', hash(fifthSql), '006', hash(sixthSql), '007', hash(seventhSql), '008', hash(eighthSql), '009', 'future']);
     }
     await raw.close(); await assert.rejects(Database.open({ dataDir }), kind === 'newer' ? /DATABASE_VERSION_NEWER/ : /MIGRATION_DRIFT/);
     const check = await PGlite.create(dataDir);
@@ -178,4 +180,33 @@ test('partial migration DDL rolls back atomically and retry preserves the pre-up
   const db = await Database.open({ dataDir });
   try { assert.deepEqual(await oldRecords(db), before); assert.equal((await db.transaction(tx => reconcile(tx))).balanced, true); }
   finally { await db.close(); }
+});
+
+
+test('007 upgrade indexes existing auth and market records without changing their documents', async t => {
+  const dataDir = await directory(t); const raw = await PGlite.create(dataDir);
+  const sql = [firstSql,secondSql,thirdSql,fourthSql,fifthSql,sixthSql,seventhSql];
+  for(let i=0;i<sql.length;i++) {
+    await raw.exec(sql[i]!);
+    await raw.query('INSERT INTO schema_versions(version,sha256) VALUES($1,$2)',[String(i+1).padStart(3,'0'),hash(sql[i]!)]);
+  }
+  await raw.query(`INSERT INTO auth_access(id,owner_id,document) VALUES
+    ('existing-session','existing-user','{"kind":"wallet_session","issuer":"https://synthetic.invalid","subject":"existing","issued_at":100,"expires_at":200}'),
+    ('existing-membership','network','{"kind":"membership","enabled":false}'),
+    ('existing-rate','network','{"kind":"wallet_challenge_rate","window_end":200,"count":2}'),
+    ('existing-revocation','network','{"kind":"jwt_revocation","expires_at":300}')`);
+  await raw.query(`INSERT INTO thot_records(id,owner_id,document) VALUES
+    ('existing-wallet','existing-user','{"kind":"wallet","address":"synthetic-address"}'),
+    ('existing-listing','existing-user','{"kind":"listing","active":false}')`);
+  const beforeAuth=(await raw.query('SELECT * FROM auth_access ORDER BY id')).rows;
+  const beforeMarket=(await raw.query('SELECT * FROM thot_records ORDER BY id')).rows;
+  await raw.close(); const db=await Database.open({dataDir});
+  try {
+    assert.deepEqual((await db.query('SELECT * FROM auth_access ORDER BY id')).rows,beforeAuth);
+    assert.deepEqual((await db.query('SELECT * FROM thot_records ORDER BY id')).rows,beforeMarket);
+    const indexes=(await db.query<{indexname:string}>("SELECT indexname FROM pg_indexes WHERE schemaname='public'")).rows.map(r=>r.indexname);
+    for(const name of ['auth_access_kind_idx','auth_access_expiry_idx','auth_access_rate_expiry_idx','auth_access_wallet_subject_idx','thot_records_kind_owner_idx','thot_records_wallet_address_idx'])assert(indexes.includes(name));
+    assert.deepEqual((await db.query("SELECT id FROM auth_access WHERE document->>'kind'='wallet_session' AND (document->>'expires_at')::numeric<=250")).rows,[{id:'existing-session'}]);
+    assert.deepEqual((await db.query("SELECT id FROM auth_access WHERE document->>'kind'='membership' AND document->>'enabled'='false'")).rows,[{id:'existing-membership'}]);
+  } finally {await db.close();}
 });
