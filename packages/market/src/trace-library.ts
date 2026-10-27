@@ -89,12 +89,18 @@ export class TraceLibrary {
     const limit=Number(query.limit??30);ensure(Number.isSafeInteger(limit)&&limit>=1&&limit<=100,'INVALID_LIBRARY_LIMIT');
     let cursor:Document|undefined;if(query.cursor){try{cursor=JSON.parse(Buffer.from(String(query.cursor),'base64url').toString());}catch{ensure(false,'INVALID_LIBRARY_CURSOR');}ensure(typeof cursor?.created_at==='string'&&typeof cursor?.trace_id==='string','INVALID_LIBRARY_CURSOR');}
     const now=this.service.now();
-    const [traces,captures]=await this.service.db.transaction(async tx=>[
-      (await tx.list('traces',actor.id)).filter(t=>!t.deleted&&t.retention_expires_at>now),
-      new Map((await tx.list('agent_captures',actor.id)).map(c=>[c.capture_id,c])),
-    ] as const);
-    // Each card opens encrypted metadata, a network round trip on hosted storage: read them
-    // outside the transaction (which holds the service lock) and 16 groups at a time.
+    // One statement keeps traces and capture state in the same read snapshot without
+    // taking the service-wide write lock on every library refresh.
+    const rows=(await this.service.db.query(`
+      SELECT 'trace' AS kind,id,owner_id,document,created_at FROM traces WHERE owner_id=$1
+      UNION ALL
+      SELECT 'capture' AS kind,id,owner_id,document,created_at FROM agent_captures WHERE owner_id=$1
+      ORDER BY kind,created_at,id`,[actor.id])).rows;
+    const documents=(kind:string)=>rows.filter(row=>row.kind===kind).map(row=>({...row.document,id:row.id,owner_id:row.owner_id}));
+    const traces=documents('trace').filter(t=>!t.deleted&&t.retention_expires_at>now);
+    const captures=new Map(documents('capture').map(c=>[c.capture_id,c]));
+    // Each card opens encrypted metadata, a network round trip on hosted storage;
+    // bound those reads to 16 groups at a time.
     const groups=conversationGroups(traces),cards:Document[]=[];
     for(let i=0;i<groups.length;i+=16)cards.push(...await Promise.all(groups.slice(i,i+16).map(group=>this.groupCard(group,captures))));
     cards.sort((a,b)=>b.created_at.localeCompare(a.created_at)||b.trace_id.localeCompare(a.trace_id));
