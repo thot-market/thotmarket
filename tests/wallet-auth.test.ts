@@ -149,7 +149,6 @@ test('wallet login never resets disabled membership or changes contributor into 
     const id = 'membership:' + canonicalHash({ issuer: auth.issuer, subject: a.session.identity.subject }), row = await tx.get('auth_access', id);
     await tx.update('auth_access', id, { ...row, enabled: false });
   });
-  clock.now += 10_001; // a raw storage edit bypasses the cache invalidation, so it applies within the 10 s auth cache
   await assert.rejects(auth.authenticate(a.token), /UNAUTHENTICATED/);
   const p = await proof(configured, a.wallet); await assert.rejects(configured.verify(p.input, origin, p.cookies), /UNAUTHENTICATED/);
 });

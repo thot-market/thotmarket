@@ -184,3 +184,23 @@ test('development selector remains backward compatible and revoked local session
   const renewed = await call('/v1/dev/session', undefined, { role: 'user' }); assert.notEqual(renewed.body.token, raw);
   assert.equal((await call('/v1/traces', renewed.body.token)).status, 200);
 });
+
+
+test('concurrent authorization reads see revocation from another live store immediately',async t=>{
+  const {app,auth,clock}=await setup(t),raw=token(),verified=await auth.authenticate(raw);
+  const other=new AuthAccessStore(app.db,issuer,()=>clock.now);
+  for(const actor of await Promise.all(Array.from({length:64},()=>other.authenticate(verified.identity))))assert.deepEqual(actor,demoUser);
+  await auth.access.revoke(verified.identity,verified.actor,'cross-store-revoke');
+  await assert.rejects(other.authenticate(verified.identity),/UNAUTHENTICATED/);
+});
+
+test('the same credential immediately sees actor disablement and buyer approval withdrawal',async t=>{
+  const {app,auth}=await setup(t),user=token(),buyer=token({sub:'subject-buyer'});
+  await auth.authenticate(user);await auth.authenticate(buyer);
+  await app.db.transaction(async tx=>{
+    const u=await tx.get('users',demoUser.id);await tx.update('users',u.id,{...u,disabled:true});
+    const b=await tx.get('buyers',demoBuyer.buyer_id!);await tx.update('buyers',b.id,{...b,approved:false});
+  });
+  await assert.rejects(auth.authenticate(user),/AUTH_ACTOR_UNAVAILABLE/);
+  await assert.rejects(auth.authenticate(buyer),/BUYER_NOT_APPROVED/);
+});
