@@ -190,15 +190,36 @@ export class WalletAuth implements AuthProvider {
   }
 
   async authenticate(token: string) {
-    ensure(typeof token === 'string' && opaquePattern.test(token), 'UNAUTHENTICATED', 401);
-    const hash = canonicalHash(token), session = (await this.db.query('SELECT owner_id,document FROM auth_access WHERE id=$1', ['wallet-session:' + hash])).rows[0];
+    ensure(typeof token === 'string' && (opaquePattern.test(token)||/^qc_[A-Za-z0-9_-]{43}$/.test(token)), 'UNAUTHENTICATED', 401);
+    const hash = canonicalHash(token), session = (await this.db.query('SELECT owner_id,document FROM auth_access WHERE id=$1', [(token.startsWith('qc_')?'qc-session:':'wallet-session:') + hash])).rows[0];
     const stored = session?.document, now = this.now();
-    ensure(stored?.kind === 'wallet_session' && stored.issuer === this.issuer && stored.chain_id === this.chainId && stored.expires_at > now && stored.issued_at <= now, 'UNAUTHENTICATED', 401);
+    ensure(stored?.kind === (token.startsWith('qc_')?'qc_session':'wallet_session') && stored.issuer === this.issuer && stored.chain_id === this.chainId && stored.expires_at > now && stored.issued_at <= now, 'UNAUTHENTICATED', 401);
     const identity: VerifiedIdentity = { issuer: this.issuer, subject: stored.subject, jti: hash, issuedAt: stored.issued_at, expiresAt: stored.expires_at };
+    if(stored.kind==='qc_session'){
+      const parent=(await this.db.query('SELECT document FROM auth_access WHERE id=$1',['wallet-session:'+stored.parent_jti])).rows[0]?.document;
+      ensure(parent?.kind==='wallet_session'&&parent.subject===stored.subject&&parent.expires_at>now,'UNAUTHENTICATED',401);
+      await this.access.authenticate({...identity,jti:stored.parent_jti,issuedAt:parent.issued_at,expiresAt:parent.expires_at});
+    }
     const actor = await this.access.authenticate(identity);
     ensure(actor.id === session!.owner_id, 'UNAUTHENTICATED', 401);
     if (actor.role !== 'user') ensure(this.configuredRole(actor.role,stored.address), 'AUTH_OPERATOR_NOT_CONFIGURED', 403);
-    return { actor, identity, expires_at: new Date(identity.expiresAt * 1000).toISOString(), wallet_address: stored.address as string, chain_id: this.chainId };
+    return { actor, identity, expires_at: new Date(identity.expiresAt * 1000).toISOString(), wallet_address: stored.address as string, chain_id: this.chainId,...(stored.kind==='qc_session'?{scope:'local_qc' as const}:{}) };
+  }
+  async createQcSession(identity:VerifiedIdentity,actor:Actor){
+    ensure(actor.role==='operator_security','FORBIDDEN',403);
+    const token='qc_'+opaque(),hash=canonicalHash(token),now=this.now();
+    return this.db.transaction(async tx=>{
+      const parent=await tx.get('auth_access','wallet-session:'+identity.jti,actor.id);
+      ensure(parent.kind==='wallet_session'&&parent.expires_at>now&&parent.issuer===this.issuer,'UNAUTHENTICATED',401);
+      await tx.sql.query("DELETE FROM auth_access WHERE document->>'kind'='qc_session' AND (document->>'expires_at')::numeric<=$1",[now]);
+      const active=await tx.sql.query("SELECT id FROM auth_access WHERE owner_id=$1 AND document->>'kind'='qc_session' ORDER BY created_at,id",[actor.id]);
+      // Bound retained credentials; creating a new one retires the oldest of eight.
+      for(const row of active.rows.slice(0,Math.max(0,active.rows.length-7)))await tx.sql.query('DELETE FROM auth_access WHERE id=$1',[row.id]);
+      const expires=Math.min(parent.expires_at,now+8*3600);
+      await tx.insert('auth_access','qc-session:'+hash,actor.id,{kind:'qc_session',issuer:this.issuer,subject:parent.subject,address:parent.address,chain_id:this.chainId,issued_at:now,expires_at:expires,parent_jti:identity.jti});
+      await tx.audit(actor.id,'LocalQcSessionCreated',{expires_at:expires});
+      return {token,expires_at:new Date(expires*1000).toISOString(),scope:'local_qc'};
+    });
   }
   async revoke(identity: VerifiedIdentity, actor: Actor, key: string): Promise<{ revoked: true }> { await this.access.revoke(identity, actor, key); return { revoked: true }; }
 }

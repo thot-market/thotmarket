@@ -1,0 +1,11 @@
+{
+  "name": "@thotmarket/qc",
+  "version": "0.1.0",
+  "description": "Local, consent-scoped THOT quality review",
+  "type": "module",
+  "bin": {"thot-qc": "bin/thot-qc.js"},
+  "engines": {"node": ">=24.0.0"},
+  "files": ["bin/", "runtime/", "README.md", "LICENSE"],
+  "scripts": {"build": "node build.mjs", "prepack": "node build.mjs"},
+  "license": "MIT"
+}

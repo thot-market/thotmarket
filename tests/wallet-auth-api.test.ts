@@ -15,10 +15,10 @@ import type { Actor } from '../packages/market/src/service.ts';
 
 const origin = 'https://thot.example.test', host = 'thot.example.test';
 const config: WalletAuthConfig = { schema_version: 'thot.wallet-auth/1', origin, chain_id: 46630, allow_public_signup: true, session_ttl_seconds: 300 };
-async function setup(t: any, privy?: {app_id:string;client_id?:string}, aliases: string[] = [], readOnly=false, chainId:46630|4663=46630) {
+async function setup(t: any, privy?: {app_id:string;client_id?:string}, aliases: string[] = [], readOnly=false, chainId:46630|4663=46630, operators:string[]=[]) {
   const dir = await mkdtemp(join(tmpdir(), 'thot-wallet-http-')), clock = { now: Date.parse('2026-09-15T02:00:00Z') };
   const app = await createApplication({ memory: true, dataDir: dir, readOnly, config: { clock: () => new Date(clock.now) } });
-  const auth = await WalletAuth.create(app.db, {...config,chain_id:chainId,allowed_origins:aliases}, () => clock.now), logs: any[] = [];
+  const auth = await WalletAuth.create(app.db, {...config,chain_id:chainId,allowed_origins:aliases,operator_addresses:operators}, () => clock.now), logs: any[] = [];
   // Loopback transport, explicit HTTPS logical origin: these tests do not weaken production cookie policy.
   const server = createHttpServer(app, { externalAuth: auth, publicOrigin: origin, privy, readOnly, clock: () => clock.now, log: entry => logs.push(entry) });
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
@@ -312,4 +312,19 @@ test('public listing share pages show metadata only and unlisted work says no lo
   const unknown=await call('/l/018f0000000000000000000fff',{origin:null});
   assert.equal(unknown.status,200);assert.match(unknown.body,/No longer available/);
   assert.equal((await call('/l/'+publicId+'..',{origin:null})).status,401,'malformed ids never reach a listing page');
+});
+
+
+test('QC connections cannot buy, read originals, issue credentials or operate the service',async t=>{
+  const operator=Wallet.createRandom(),{call,login}=await setup(t,undefined,[],false,46630,[operator.address]),a=await login(operator);
+  const issuance=await call('/v1/operator/local-qc/session',{cookies:a.cookies,body:{}});assert.equal(issuance.status,200);
+  const headers={Authorization:'Bearer '+issuance.body.token};
+  assert.equal((await call('/v1/operator/trace-explorer',{headers})).status,200);
+  for(const [path,method] of [['/v1/operator/product','GET'],['/v1/contributor/library','GET'],['/v1/thot/offers/prepare','POST'],['/v1/operator/local-qc/session','POST']]){
+    const denied=await call(path!,{headers,method,...(method==='POST'?{body:{}}:{})});assert.equal(denied.status,403);assert.equal(denied.body.error,'QC_SESSION_SCOPE');
+  }
+  const missing=await call('/v1/operator/local-qc/nonexistent/source',{headers});assert.equal(missing.status,404);
+  assert.equal((await call('/v1/auth/session/revoke',{headers,body:{}})).status,200);
+  assert.equal((await call('/v1/operator/trace-explorer',{headers})).status,401);
+  assert.equal((await call('/v1/auth/session',{cookies:a.cookies})).status,200);
 });

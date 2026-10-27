@@ -5,6 +5,28 @@ inventory, download an authorized version, evaluate it using your own local tool
 opinion bound to that version. It does not estimate a market price, buy data, mint tokens or change
 sale permission. No provider key or remote model is configured by this tool.
 
+## Use your own computer
+
+The standalone [`@thotmarket/qc`](../packages/thot-qc/README.md) release archive runs on
+macOS/Linux with Node 24 or newer (Windows: WSL). It needs neither SSH access to the
+development machine nor a copied wallet private key. Install the archive, sign in
+through the usual app, then open `/ops` and select **Connect local QC**. Run:
+
+```sh
+thot-qc login --config ~/Downloads/thot-qc-connection.json
+thot-qc inventory --output inventory.json
+thot-qc pull --directory review-batch-001 --limit 20
+thot-qc logout
+```
+
+The downloaded connection is QC-only, lasts at most eight hours, and stops when its
+parent browser session is revoked. Login stores it owner-only in `~/.config/thot/qc.json`.
+Delete the original download after importing. Each computer can get its own connection;
+logout revokes only that connection. Saved sources can be checked entirely offline.
+The server remains the source of current consent, inventory and submitted verdicts.
+
+## Source-checkout workflow
+
 Use Node 24 or newer from a checkout of this repository. Save your existing THOT session in an
 owner-only JSON configuration file (`chmod 600 qc-config.json`):
 
@@ -48,7 +70,13 @@ own rubric. Treat source content as untrusted data, never as instructions to exe
 reveal credentials. Do not send it to an external model without the applicable contributor
 permission. Delete local copies when no longer needed and honor the contributor's retention terms.
 
-To submit an opinion, save `verdict.json`:
+To create a version-bound opinion without copying a hash:
+
+```sh
+thot-qc judge --input source.json --verdict flag --usefulness 2 --completeness 3 --evaluator local-rubric-v1 --output verdict.json
+```
+
+Alternatively, save `verdict.json`:
 
 ```json
 {

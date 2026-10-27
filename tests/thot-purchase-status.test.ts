@@ -4,6 +4,7 @@ import {ThotMarketplace} from '../packages/market/src/thot-market.ts';
 import {ThotChain} from '../packages/chain/thot.ts';
 import {holderRewardsWorkspace} from '../packages/chain/thot-holder-rewards.ts';
 import {Interface} from 'ethers';
+import {Database} from '../packages/storage/src/index.ts';
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};}
 
 test('all chain modes refuse paused offer preparation before writing an intent',async()=>{
@@ -30,7 +31,7 @@ test('workspace pause uses the same confirmed block as account and offers in eve
  }
 });
 
-test('buyer workspace defers estimates and staking but retains guarded account, receipts and isolation',async()=>{
+test('buyer workspace defers estimates and staking but retains guarded account, receipts and isolation',async t=>{
  const block={number:42,hash:'0x'+'a'.repeat(64),timestamp:1234},wallet='0x'+'1'.repeat(40),other='0x'+'2'.repeat(40);
  const records=[
   {id:'wallet:owner',kind:'wallet',owner_id:'owner',address:wallet},
@@ -45,7 +46,9 @@ test('buyer workspace defers estimates and staking but retains guarded account, 
   snapshot:async()=>{snapshots++;if(fail)throw Error('THOT_CODE_PIN_MISMATCH');return block;},
   readWorkspace:async(owner:string,ids:string[],b:any)=>{assert.equal(owner,wallet);assert.equal(b,block);assert.deepEqual(ids,['0x'+'3'.repeat(64)]);return {account:{wallet:owner,balance:'17',claimable:'3',block:b},offers:ids.map(id=>({id,status:2,block:b})),market_paused:true};},
   isReserveBuyer:async(owner:string,b:any)=>{assert.equal(owner,wallet);assert.equal(b,block);return false;},assertSnapshot:async(b:any)=>{assertions++;assert.equal(b,block);}};
- const market=Object.assign(Object.create(ThotMarketplace.prototype),{chain,service:{db:{transaction:async(fn:any)=>fn({list:async()=>records})}},capabilities:()=>({mode:'thot-production'}),valuationRows:async()=>{valuations++;return [{trace_id:'my-trace'}];}});
+ const db=await Database.open();t.after(()=>db.close());
+ await db.transaction(async tx=>{for(const [index,row] of records.entries())await tx.insert('thot_records',row.id??'intent-'+index,row.owner_id,row);});
+ const market=Object.assign(Object.create(ThotMarketplace.prototype),{chain,service:{db},capabilities:()=>({mode:'thot-production'}),valuationRows:async()=>{valuations++;return [{trace_id:'my-trace'}];}});
  const first=await market.workspace({id:'owner',role:'user'},{scope:'buyer'});
  assert.equal(first.workspace_scope,'buyer');assert.equal(first.account.balance,'17');assert.equal(first.market_paused,true);
  assert.equal(first.orders.length,1);assert.equal(first.orders[0].receipt.block,first.account.block);

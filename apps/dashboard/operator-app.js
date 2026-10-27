@@ -64,7 +64,7 @@ function deniedHTML(){
 function render(){
   if(state.role!=='operator_security')return deniedHTML();
   clearNotice();refreshButton.disabled=false;signOutButton.hidden=false;identity.textContent='Verified operator';
-  main.innerHTML=environmentUI.sectionHTML();
+  main.innerHTML=`<section class="panel audit-card"><h2>Review data on your computer</h2><p>Download a QC connection valid for up to 8 hours. It can read approved review copies and save your verdicts.</p><button class="button secondary" data-action="connect-local-qc">Connect local QC</button><p class="legal-note">Signing out here also disconnects this QC connection. Private originals and payment controls are excluded.</p></section>`+environmentUI.sectionHTML();
 }
 async function refresh(){
   if(state.role!=='operator_security')return;
@@ -97,6 +97,12 @@ async function inspectReconciliation(){const record=await api('/v1/operator/reco
 async function inspectInventory(){const record=await api('/v1/operator/trace-explorer');openDialog('Trace inventory','Operational inventory metadata only. Private conversation content is excluded.',`<p>This inspection is requested explicitly and does not expose private prompts or responses.</p><pre class="json-view" tabindex="0" aria-label="Trace inventory JSON">${json(record)}</pre>`);}
 async function runAction(action,button){
   if(action==='close-dialog'){dialog.close();return;}
+  if(action==='connect-local-qc'){
+    const session=await api('/v1/operator/local-qc/session',{method:'POST',body:{}});
+    const blob=new Blob([JSON.stringify({origin:location.origin,token:session.token,expires_at:session.expires_at,scope:session.scope})+'\n'],{type:'application/json'});
+    const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='thot-qc-connection.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    toast('Connection downloaded. Run thot-qc login --config with this file on your computer.');return;
+  }
   if(action==='refresh'){await refresh();return;}
   if(action==='sign-out'){await walletAuth?.signOut();return;}
   if(action==='reconciliation'){await inspectReconciliation();return;}

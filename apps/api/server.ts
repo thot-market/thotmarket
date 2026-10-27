@@ -261,10 +261,17 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       const publicAuth=req.method==='POST'&&(route==='/v1/dev/session'||['/v1/device-pairing/sessions','/v1/device-pairing/sessions/token','/v1/device-pairing/sessions/events'].includes(route)||externalAuth instanceof WalletAuth&&['/v1/auth/wallet/challenge','/v1/auth/wallet/verify'].includes(route));
       const relayRoute=req.method==='POST'&&route==='/v1/openrouter/chat/completions';
       const delegated=req.method==='POST'&&(!!deviceCapture||!!captureCapability||!!historyDevice);
+      let readSession: Awaited<ReturnType<NonNullable<typeof externalAuth>['authenticate']>> | undefined;
       const authenticateSession=async()=>{
+        if(readSession)return readSession;
         ensure(token,'UNAUTHENTICATED',401);
         if(cookieToken&&req.method!=='GET'&&req.method!=='HEAD'&&externalAuth instanceof WalletAuth)externalAuth.requireOrigin(req.headers.origin);
-        if(externalAuth)return externalAuth.authenticate(token);
+        if(externalAuth){const session=await externalAuth.authenticate(token);
+          if(session.scope==='local_qc')ensure(
+            req.method==='GET'&&(route==='/v1/operator/trace-explorer'||route==='/v1/auth/session'||/^\/v1\/operator\/local-qc\/[^/]+\/source$/.test(route))||
+            req.method==='POST'&&(route==='/v1/auth/session/revoke'||/^\/v1\/operator\/local-qc\/[^/]+\/review$/.test(route)),
+            'QC_SESSION_SCOPE',403);
+          if(req.method==='GET'||req.method==='HEAD')readSession=session;return session;}
         const session=sessions.get(token);ensure(session&&session.expires>sessionNow(),'UNAUTHENTICATED',401);
         return {actor:session.actor,expires_at:new Date(session.expires).toISOString(),identity:undefined};
       };
@@ -356,7 +363,11 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       if(route!=='/v1/auth/session/revoke')await access.consume(actor,req.method==='POST'||req.method==='PATCH');
       const segments=route.split('/').filter(Boolean).map(s=>decodeURIComponent(s));
       let result:unknown;
-      if(route==='/v1/auth/session'&&req.method==='GET')result={...(externalAuth instanceof WalletAuth?{wallet_address:identity?.subject.split(':').at(-1),chain_id:externalAuth.chainId}:{}),actor,expires_at:expiresAt,mode:authMode,permissions:{trace_explorer:app.library.canExplore(actor)}};
+      if(route==='/v1/auth/session'&&req.method==='GET')result={...(externalAuth instanceof WalletAuth?{wallet_address:identity?.subject.split(':').at(-1),chain_id:externalAuth.chainId}:{}),actor,expires_at:expiresAt,mode:authMode,...('scope' in verified?{scope:verified.scope}:{}),permissions:{trace_explorer:app.library.canExplore(actor)}};
+      else if(route==='/v1/operator/local-qc/session'&&req.method==='POST'){
+        ensure(externalAuth instanceof WalletAuth&&identity,'WALLET_AUTH_REQUIRED',403);
+        result=await externalAuth.createQcSession(identity,actor);
+      }
       else if(route==='/v1/maintenance/stats'&&req.method==='GET'){
         ensure(url.searchParams.size===0,'INVALID_MAINTENANCE_QUERY');result=await maintenanceStats(service,actor);
       }
@@ -601,6 +612,8 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       const storageCapacity=validationCode!==null&&['VAULT_OWNER_QUOTA','VAULT_GLOBAL_QUOTA','VAULT_JOURNAL_CAPACITY','VAULT_DISK_HEADROOM'].includes(validationCode);
       const status=error instanceof DomainError?error.status:storageUnavailable?503:storageCapacity?429:validationCode?400:500;
       const code=error instanceof DomainError?error.code:validationCode??'INTERNAL_ERROR';
+      if(!res.headersSent&&status===429)res.setHeader('Retry-After','60');
+      if(!res.headersSent&&status===503)res.setHeader('Retry-After','1');
       if(['STORAGE_BUSY','STORAGE_OPERATION_IN_PROGRESS','STORAGE_OPERATION_EXPIRED','STAGED_STATE_CHANGED'].includes(code))res.setHeader('Retry-After','1');
       if(status>=500)recordReadDiagnostic(error,requestId,route,phase);
       if(!res.headersSent){if(route==='/v1/openrouter/chat/completions')res.setHeader('x-should-retry','false');if(externalAuth instanceof WalletAuth&&route==='/v1/auth/session/revoke'&&req.headers.origin===externalAuth.origin&&req.headers.host===new URL(externalAuth.origin).host)res.setHeader('Set-Cookie',[externalAuth.clearSessionCookie(),externalAuth.clearChallengeCookie()]);reply(status,{error:code,request_id:requestId});}else res.destroy();
@@ -615,6 +628,8 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
   server.once('close',()=>{clearTimeout(diagnosticExpiryTimer);readDiagnostics=[];});
   // Never tell a client to send a large body before its credentials and budget pass.
   server.on('checkContinue',handle);
+  // Reuse connections across normal 5-second polling/navigation gaps.
+  server.keepAliveTimeout=15000;
   server.requestTimeout=15000;server.headersTimeout=10000;
   return server;
 }

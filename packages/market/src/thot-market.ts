@@ -96,9 +96,17 @@ export class ThotMarketplace {
    return {address:recovered};
   });
  }
+ // Keep unrelated wallets, signatures and job records out of read-only browsing.
+ private async browsingRecords(actor:Actor,full=false){
+  const result=await this.service.db.query(`SELECT id,owner_id,document FROM thot_records
+   WHERE id=$1 OR (document->>'kind'='listing' AND (document->>'active'='true' OR owner_id=$2))
+    OR (document->>'kind'='intent' AND (owner_id=$2 OR document->>'seller_id'=$2))
+    OR ($3 AND document->>'kind'='sale_observation') ORDER BY created_at,id`,['wallet:'+actor.id,actor.id,full]);
+  return result.rows.map(row=>({...row.document,id:row.id,owner_id:row.owner_id}));
+ }
  async catalog(actor:Actor){
   allowed(actor);
-  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
+  const records=await this.browsingRecords(actor);
   // Public listing metadata is useful before the guarded account snapshot is
   // available. This does not establish chain availability or authorize payment;
   // preparing a purchase still performs the existing fresh checks.
@@ -109,7 +117,7 @@ export class ThotMarketplace {
   allowed(actor);
   let at=performance.now();const timing:Record<string,number>={},lap=(name:string)=>{const now=performance.now();timing[name]=now-at;at=now;};
   const scope=options.scope??'full';ensure(scope==='buyer'||scope==='full','INVALID_WORKSPACE_SCOPE');
-  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));lap('db');
+  const records=await this.browsingRecords(actor,scope==='full'&&actor.role==='user');lap('db');
   const wallet=records.find(r=>r.id==='wallet:'+actor.id)?.address;
   const listings=records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r));
   const own=records.filter(r=>r.kind==='listing'&&r.owner_id===actor.id).map(r=>({...this.publicListing(r),trace_id:r.trace_id,active:r.active}));
@@ -146,15 +154,15 @@ export class ThotMarketplace {
  private listingActive(r:Document){return r.kind==='listing'&&r.active===true&&!!r.signature&&!r.unlisted_at&&!r.release_deleted_at;}
  /** Public catalogue for signed-out browsing: the same metadata each listing's share page shows, newest first. */
  async publicCatalog(){
-  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
-  return {listings:records.filter(r=>this.listingActive(r)).slice(-48).reverse().map(r=>this.publicListing(r))};
+  const result=await this.service.db.query("SELECT id,owner_id,document FROM thot_records WHERE document->>'kind'='listing' AND document->>'active'='true' AND COALESCE(document->>'signature','')<>'' AND COALESCE(document->>'unlisted_at','')='' AND COALESCE(document->>'release_deleted_at','')='' ORDER BY created_at DESC,id DESC LIMIT 48");
+  return {listings:result.rows.map(row=>this.publicListing({...row.document,id:row.id,owner_id:row.owner_id}))};
  }
  /** Public, unauthenticated listing view for the share page: metadata only. */
  async publicListingView(id:string){
   const normalized=String(id).replace(/^listing:/,'');
   ensure(/^[A-Za-z0-9_-]{1,80}$/.test(normalized),'INVALID_LISTING_ID',400);
-  const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
-  const row=records.find(r=>r.kind==='listing'&&(String(r.id)===('listing:'+normalized)||String(r.id)===normalized));
+  const result=await this.service.db.query("SELECT id,owner_id,document FROM thot_records WHERE id IN ($1,$2) AND document->>'kind'='listing' ORDER BY created_at,id LIMIT 1",['listing:'+normalized,normalized]);
+  const found=result.rows[0],row=found?{...found.document,id:found.id,owner_id:found.owner_id}:undefined;
   if(!row)return {available:false as const};
   if(!this.listingActive(row))return {available:false as const,unlisted:true as const};
   return {available:true as const,listing:this.publicListing(row)};

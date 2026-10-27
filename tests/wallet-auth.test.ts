@@ -204,3 +204,21 @@ test('wallet config fails closed for HTTP, unreviewed chains, accidental privile
   await assert.rejects(loadWalletAuthConfig(link), /AUTH_CONFIGURATION_UNAVAILABLE/);
   await chmod(file, 0o666); await assert.rejects(loadWalletAuthConfig(file), /INSECURE_AUTH_CONFIGURATION/);
 });
+
+test('local QC connections expire, revoke independently and stop when their parent signs out',async t=>{
+  const wallet=Wallet.createRandom(),{auth,db,clock}=await setup(t,{operator_addresses:[wallet.address]}),a=await login(auth,wallet);
+  const qc=await auth.createQcSession(a.session.identity,a.session.actor);
+  const session=await auth.authenticate(qc.token);assert.equal(session.scope,'local_qc');
+  assert.equal(session.actor.id,a.session.actor.id);
+  assert.ok(!JSON.stringify((await db.query('SELECT document FROM auth_access')).rows).includes(qc.token));
+  await assert.rejects(auth.createQcSession(session.identity,session.actor));
+  await auth.revoke(session.identity,session.actor,'synthetic-qc-revoke');
+  await assert.rejects(auth.authenticate(qc.token),/UNAUTHENTICATED/);
+  await auth.authenticate(a.token);
+  const other=await auth.createQcSession(a.session.identity,a.session.actor);
+  await auth.revoke(a.session.identity,a.session.actor,'synthetic-parent-revoke');
+  await assert.rejects(auth.authenticate(other.token),/UNAUTHENTICATED/);
+  clock.now+=1000;const b=await login(auth,wallet),expiring=await auth.createQcSession(b.session.identity,b.session.actor);
+  clock.now=Date.parse(expiring.expires_at);
+  await assert.rejects(auth.authenticate(expiring.token),/UNAUTHENTICATED/);
+});

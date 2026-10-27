@@ -173,6 +173,7 @@
   "packaging": {
    "serial": true,
    "node": [
+        "tests/qc-package.test.mjs",
     "tests/private-image-bootstrap.test.mjs",
     "tests/private-image-package.test.mjs",
     "tests/private-anvil-automine.test.mjs",
