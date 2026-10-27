@@ -8,9 +8,9 @@ import { createApplication } from '../packages/market/src/bootstrap.ts';
 import { createCvmPreMigrationSnapshot, CVM_DATABASE_SNAPSHOT_LIMITS, snapshotCapacityBudget, assertSnapshotCapacity, type SnapshotFilesystemCapacity } from '../scripts/cvm-prestart.ts';
 import { listTree, type SnapshotEntry } from '../packages/operations/src/paths.ts';
 
-const supportedVersions=['001','002','003','004','005','006','007'];
-for (const version of ['003', '004', '005', '006']) {
-  test(`CVM prestart snapshots schema ${version} before 007 and restores ciphertext under the same external key`, async () => {
+const supportedVersions=['001','002','003','004','005','006','007','008'];
+for (const version of ['003', '004', '005', '006', '007']) {
+  test(`CVM prestart snapshots schema ${version} before 008 and restores ciphertext under the same external key`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'thot-cvm-prestart-'));
     const dataDir = join(root, 'data'), restored = join(root, 'restored');
     let app: Awaited<ReturnType<typeof createApplication>> | undefined;
@@ -19,9 +19,13 @@ for (const version of ['003', '004', '005', '006']) {
       app = await createApplication({ dataDir, masterKey });
       const sealed = await app.privacy.seal('demo-user', { text: 'snapshot ciphertext' });
       // Remove all newer DDL and version rows so the fixture has a genuine old schema.
-      await app.db.query('DROP TABLE trace_qc_runs,trace_qc_reviews');
-      await app.db.query("DELETE FROM schema_versions WHERE version='007'");
-      if(version!=='006'){
+      await app.db.query('DROP INDEX auth_access_kind_idx,auth_access_expiry_idx,auth_access_rate_expiry_idx,auth_access_wallet_subject_idx,thot_records_kind_owner_idx,thot_records_wallet_address_idx');
+      await app.db.query("DELETE FROM schema_versions WHERE version='008'");
+      if(Number(version)<7){
+        await app.db.query('DROP TABLE trace_qc_runs,trace_qc_reviews');
+        await app.db.query("DELETE FROM schema_versions WHERE version='007'");
+      }
+      if(Number(version)<6){
         await app.db.query('DROP TABLE storage_write_attempts,storage_command_claims');
         await app.db.query('ALTER TABLE outbox_events DROP COLUMN claim_token');
         await app.db.query("ALTER TABLE outbox_events DROP CONSTRAINT outbox_events_status_check");
@@ -47,7 +51,7 @@ for (const version of ['003', '004', '005', '006']) {
           [async()=>{throw Error('synthetic inaccessible statfs');},'PRESTART_CAPACITY_UNAVAILABLE'],
         ]as const){
           await assert.rejects(createCvmPreMigrationSnapshot(dataDir,{filesystemCapacity:async path=>{
-            const entries=await readdir(path),temporary=entries.find(name=>name.startsWith('.before-007-'))!;
+            const entries=await readdir(path),temporary=entries.find(name=>name.startsWith('.before-008-'))!;
             assert(temporary);assert.deepEqual(await readdir(join(path,temporary)),[],'No payload is written before the capacity check.');
             return capacity();
           }}),new RegExp(code));
@@ -62,7 +66,7 @@ for (const version of ['003', '004', '005', '006']) {
       const made = await createCvmPreMigrationSnapshot(dataDir);
       assert.equal(made.status, 'created'); const path = (made as any).path;
       const manifest = JSON.parse(await readFile(join(path, 'manifest.json'), 'utf8'));
-      assert.equal(manifest.before_migration, '007');
+      assert.equal(manifest.before_migration, '008');
       assert.equal(manifest.key_custody, 'external');
       assert.deepEqual(manifest.schema_versions,supportedVersions.slice(0,Number(version)));
       assert(manifest.entries.some((entry: any) => entry.path === `objects/${sealed.objectId}.sealed`));
@@ -81,8 +85,8 @@ for (const version of ['003', '004', '005', '006']) {
       const raw = await PGlite.create(join(restored, 'postgres'));
       try {
         assert.equal((await raw.query<{ name: string | null }>("SELECT to_regclass('public.thot_records') AS name")).rows[0]!.name, Number(version)>=5?'thot_records':null);
-        assert.equal((await raw.query<{ name: string | null }>("SELECT to_regclass('public.storage_write_attempts') AS name")).rows[0]!.name, version==='006'?'storage_write_attempts':null);
-        for(const table of ['trace_qc_runs','trace_qc_reviews'])assert.equal((await raw.query<{ name: string | null }>('SELECT to_regclass($1) AS name',['public.'+table])).rows[0]!.name,null,'QC schema must not appear before the upgrade.');
+        assert.equal((await raw.query<{ name: string | null }>("SELECT to_regclass('public.storage_write_attempts') AS name")).rows[0]!.name, Number(version)>=6?'storage_write_attempts':null);
+        for(const table of ['trace_qc_runs','trace_qc_reviews'])assert.equal((await raw.query<{ name: string | null }>('SELECT to_regclass($1) AS name',['public.'+table])).rows[0]!.name,Number(version)>=7?table:null,'Snapshot must retain exactly the original QC schema.');
       } finally { await raw.close(); }
       app = await createApplication({ dataDir: restored, masterKey });
       assert.deepEqual((await app.db.query('SELECT version FROM schema_versions ORDER BY version')).rows.map((row: any) => row.version),supportedVersions);
@@ -97,11 +101,11 @@ for (const version of ['003', '004', '005', '006']) {
   });
 }
 
-test('CVM prestart skips a database that already has migration 007', async () => {
+test('CVM prestart skips a database that already has migration 008', async () => {
   const root = await mkdtemp(join(tmpdir(), 'thot-cvm-prestart-current-')), dataDir = join(root, 'data');
   try {
     const app = await createApplication({ dataDir, masterKey: Buffer.alloc(32, 9) }); await app.close();
-    assert.deepEqual(await createCvmPreMigrationSnapshot(dataDir), { status: 'not-needed', reason: 'MIGRATION_007_ALREADY_APPLIED' });
+    assert.deepEqual(await createCvmPreMigrationSnapshot(dataDir), { status: 'not-needed', reason: 'MIGRATION_008_ALREADY_APPLIED' });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -110,7 +114,7 @@ test('CVM prestart rejects a newer or incomplete migration history without makin
     const root = await mkdtemp(join(tmpdir(), 'thot-cvm-prestart-unsupported-')), dataDir = join(root, 'data');
     try {
       const app = await createApplication({ dataDir, masterKey: Buffer.alloc(32, 9) });
-      if (kind === 'newer') await app.db.query("INSERT INTO schema_versions(version,sha256) VALUES('008','future')");
+      if (kind === 'newer') await app.db.query("INSERT INTO schema_versions(version,sha256) VALUES('009','future')");
       else await app.db.query("DELETE FROM schema_versions WHERE version='002'");
       await app.close();
       await assert.rejects(createCvmPreMigrationSnapshot(dataDir), /UNSUPPORTED_PRESTART_SCHEMA/);

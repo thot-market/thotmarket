@@ -194,7 +194,7 @@ retained terminal records without requiring the owner to visit a page.
 This automation uses the local deterministic engine only. It does not call the
 optional semantic adapter, use a provider key, send traces to a model, perform
 cleaning, or spend funds. Worker queue/status metadata uses existing tables;
-there is no schema migration after task 0033's migration 007.
+the QC tables remain migration 007; migration 008 adds authentication and marketplace indexes only. Cold startup snapshots before the latest migration using the shared migration manifest.
 
 ## Reused upstream material
 

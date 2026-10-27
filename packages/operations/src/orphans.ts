@@ -1,3 +1,4 @@
+import { MIGRATION_VERSIONS } from '../../storage/src/migrations.ts';
 import { PGlite } from '@electric-sql/pglite';
 import { lstat, mkdir, readdir, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -30,7 +31,7 @@ async function collectReferences(db: PGlite): Promise<References> {
   const tables = (await db.query<{ table_name: string }>("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")).rows;
   let ambiguous = tables.some(row => !knownTables.has(row.table_name));
   if (!tables.some(row => row.table_name === 'schema_versions')) ambiguous = true;
-  else if ((await db.query<{ version: string }>('SELECT version FROM schema_versions')).rows.some(row => !['001', '002', '003', '004', '005', '006', '007'].includes(row.version))) ambiguous = true;
+  else if ((await db.query<{ version: string }>('SELECT version FROM schema_versions')).rows.some(row => !MIGRATION_VERSIONS.includes(row.version))) ambiguous = true;
   const schema = (await db.query<{ table_name: string; column_name: string; data_type: string }>("SELECT table_name,column_name,data_type FROM information_schema.columns WHERE table_schema='public'")).rows;
   for (const table of tables) {
     if (!knownTables.has(table.table_name)) continue;
