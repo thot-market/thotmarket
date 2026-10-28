@@ -22,12 +22,12 @@ before(async()=>{
 });
 after(async()=>{await browser?.close();});
 
-async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user',listingCount=1,checkout=false}={}){
+async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user',listingCount=1,checkout=false,failPrepareAt=0}={}){
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
  const listings=Array.from({length:listingCount},(_,i)=>({...listing,id:i?'synthetic-listing-'+i:listing.id,title:i?'Synthetic research comparison '+(i+1):listing.title}));
  page.setDefaultTimeout(15000);
  const chain=deferred(),catalog=deferred(),requests=[],errors=[];
- let revoked=false,failed=failWorkspace;
+ let revoked=false,failed=failWorkspace,prepareCalls=0;
  t.after(async()=>{chain.resolve();catalog.resolve();await context.close();});
  page.on('pageerror',e=>errors.push(e.message));
  t.after(()=>assert.deepEqual(errors,[]));
@@ -55,8 +55,8 @@ async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vaul
      if(path==='/v1/auth/session')return send(revoked?{}:{actor:{id:'synthetic-reader',role},wallet_address:wallet,chain_id:31337},revoked?401:200);
      if(path==='/v1/auth/session/revoke'){revoked=true;return send({});}
      if(path==='/v1/thot/catalog'){if(holdCatalog)await catalog.promise;return send({...catalogue,listings});}
-     if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,listings,workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
-     if(path==='/v1/thot/offers/prepare'&&checkout){const i=listings.findIndex(l=>l.id===route.request().postDataJSON().listing_id);assert(i>=0);return send({id:'0x'+String(i+10).padStart(64,'0'),wallet,seller,buyer_total:'1000000000000000000',transactions:[{to:seller,data:'0xaaaa',value:'0x0',chainId:'0x7a69'}]});}
+     if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,account:{...workspace.account,balance:'100000000000000000000'},listings,workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
+     if(path==='/v1/thot/offers/prepare'&&checkout){if(++prepareCalls===failPrepareAt)return send({error:'THOT_DAILY_PREPARATION_LIMIT'},429);const i=listings.findIndex(l=>l.id===route.request().postDataJSON().listing_id);assert(i>=0);return send({id:'0x'+String(i+10).padStart(64,'0'),wallet,seller,buyer_total:'1000000000000000000',transactions:[{to:seller,data:'0xaaaa',value:'0x0',chainId:'0x7a69'}]});}
      if(path==='/v1/money/capabilities')return send({mode:'mock'});
      if(path==='/v1/earnings')return send({entitlements:[],settlements:[],burn_allocations:[]});
      if(path==='/v1/contributor/portfolio')return send({items:[],robinhood:{status:'not_linked'}});
@@ -246,4 +246,16 @@ test('cart reviews two items once and drives sequential wallet payments without 
  await f.page.getByRole('button',{name:'Pay 2 THOT',exact:true}).click();await f.page.getByRole('heading',{name:'Checkout complete',exact:true}).waitFor().catch(async e=>{await f.snapshot('cart-error');throw new Error(await f.page.locator('#detail-dialog').innerText(),{cause:e});});
  assert.equal(await f.page.evaluate(()=>window.fixturePayments.length),2);assert.equal(await add.nth(0).getAttribute('aria-pressed'),'false');
  await f.snapshot('cart-complete');await f.page.getByRole('button',{name:'View purchases',exact:true}).click();await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();assert.equal(await f.page.locator('#detail-dialog').evaluate(d=>d.open),false);
+});
+
+
+test('twenty-item checkout exposes a preparation failure by its button and retries successfully',async t=>{
+ const f=await fixture(t,{listingCount:20,checkout:true,failPrepareAt:11});await f.open();f.release();await ready(f.page).waitFor();
+ const add=f.page.locator('[data-action="thot-cart-toggle"]');for(let i=0;i<20;i++)await add.nth(i).click();
+ await f.page.getByRole('button',{name:'Cart (20)',exact:true}).click();
+ const review=f.page.getByRole('button',{name:'Review checkout',exact:true});await review.click();
+ await f.page.locator('#cart-checkout-status[role="alert"]').waitFor();assert.match(await f.page.locator('#cart-checkout-status').innerText(),/limit/);
+ assert(await review.isEnabled());const bounds=await review.boundingBox();assert(bounds.y>=0&&bounds.y+bounds.height<=1000);await f.snapshot('cart-limit-feedback');await review.click();
+ await f.page.getByRole('button',{name:'Pay 20 THOT',exact:true}).waitFor();assert.equal(await f.page.evaluate(()=>window.fixturePayments.length),0);
+ await f.snapshot('cart-twenty-review');
 });

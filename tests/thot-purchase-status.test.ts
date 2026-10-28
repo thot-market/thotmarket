@@ -104,3 +104,13 @@ test('listing preparation refuses private, incomplete and stale releases before 
   await assert.rejects(ThotMarketplace.prototype.listTrace.call(market as any,{id:'seller',role:'user'},'key',input),/TRACE_INELIGIBLE/);assert.equal(opens,0);
  }
 });
+
+
+test('wallet preparation permits a full cart after ten earlier quotes but retains a daily ceiling',async()=>{
+ const now=Date.now();
+ for(const count of [10,29,99,100]){
+  const tx={maybe:async()=>null,list:async()=>Array.from({length:count},()=>({kind:'intent',created_at:new Date(now).toISOString()}))};
+  const market={now:()=>now,enabled:()=>({config:{},marketPaused:async()=>false}),wallet:async()=>{throw Error('PASSED_QUOTA');},service:{db:{command:async(_actor:any,_key:any,_input:any,run:any)=>run(tx)}}};
+  await assert.rejects(ThotMarketplace.prototype.prepareOffer.call(market as any,{id:'buyer',role:'buyer_member'},'key',{listing_id:'synthetic'}),count<100?/PASSED_QUOTA/:/THOT_DAILY_PREPARATION_LIMIT/);
+ }
+});

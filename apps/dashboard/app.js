@@ -270,7 +270,7 @@ const errorMessages = {
   LISTING_NOT_PREPARED: 'This listing can no longer be activated. Preview the item again to prepare fresh sale terms.',
   EXPLICIT_AUTOMATIC_SALE_CONSENT_REQUIRED: 'Review the item, licence and price, then authorize the automatic sale before enabling it.',
   THOT_DELIVERY_OPERATOR_REQUIRED: 'Your funded release is queued for operator acknowledgment. Its content stays private until delivery is recorded. Retry after the operator processes it.',
-  THOT_DAILY_PREPARATION_LIMIT: 'This account has reached its limit of 10 prepared offers in 24 hours. Existing orders remain available.',
+  THOT_DAILY_PREPARATION_LIMIT: 'This account has reached its limit of 100 prepared offers in 24 hours. Existing orders remain available.',
   LICENSE_RETENTION_EXPIRED: 'This license’s 30-day retrieval period has ended.',
   FORBIDDEN: 'This action is unavailable for your current account and role.',
   NOT_FOUND: 'That record is unavailable to your current account.',
@@ -860,7 +860,7 @@ async function safely(task, button) {
   catch (error) {
     if(error.name==='StaleWorkspaceError')return;
     const target = dialog.open && document.querySelector('#dialog-error');
-    if (target) { target.textContent = Number(error?.code)===4001?'You cancelled the wallet request. Nothing was sent for this step. Continue when you are ready.':error.message; target.hidden = false; target.scrollIntoView({ block: 'nearest' }); }
+    if (target) { target.textContent = Number(error?.code)===4001?'You cancelled the wallet request. Nothing was sent for this step. Continue when you are ready.':error.message; target.hidden = false; target.scrollIntoView({ block: 'nearest' }); const checkoutError=document.querySelector('#cart-checkout-status');if(checkoutError){checkoutError.textContent=target.textContent;checkoutError.setAttribute('role','alert');} }
     else { notice(error.message); if (!state.loaded&&!document.querySelector('#identity-form')&&!renderCatalogue()&&!renderContributorLoading()) main.innerHTML = `<div class="panel">${empty('The workspace is unavailable.', 'Check the local service, then refresh. No account totals are shown until records can be loaded.', '<button class="button" data-action="refresh">Try again ↻</button>')}</div>`; }
   } finally { if (button?.isConnected) button.disabled = false; }
 }

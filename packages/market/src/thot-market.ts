@@ -314,7 +314,7 @@ export class ThotMarketplace {
    const recent=ownedIntents.filter(r=>Date.parse(r.created_at)>this.now()-86400000);
    const campaignPurchase=chain.config.reserveCampaigns&&input.funding_source==='reserve';
    const mayResume=input.funding_source==='reserve'&&ownedIntents.some(r=>r.treasury&&r.manual_funding&&!r.unfunded_closed&&r.listing_id===input.listing_id&&(r.campaign_id??undefined)===input.campaign_id);
-   const belowPreparationLimit=campaignPurchase?recent.filter(r=>r.treasury).length<1000:recent.filter(r=>!chain.config.reserveCampaigns||!r.treasury).length<10;
+   const belowPreparationLimit=campaignPurchase?recent.filter(r=>r.treasury).length<1000:recent.filter(r=>!chain.config.reserveCampaigns||!r.treasury).length<100;
    ensure(mayResume||belowPreparationLimit,'THOT_DAILY_PREPARATION_LIMIT',429);
    const wallet=await this.wallet(tx,actor),l=await tx.get('thot_records',input.listing_id);
    ensure(l.kind==='listing'&&l.active&&l.signature&&l.authorization&&l.owner_id!==actor.id&&l.wallet!==wallet,'LISTING_UNAVAILABLE');

@@ -65,6 +65,7 @@ export async function purchaseApprovalReady({request,expected,from,token,market,
 export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,download,getProvider=()=>globalThis.window?.ethereum,recoveryStorage=globalThis.window?.sessionStorage,copyText=text=>globalThis.navigator.clipboard.writeText(text)}) {
  let pending=null,listingMetadata=null,listingScope=null,listingEnrollment=null,listingDirty=false,samplingPreview=null,samplingScope=null,reserveSelection=null,inFlight=false;
  let treasuryView='library',cartQuote=null,cartRunning=false;
+ const cartPrepareKeys=new Map();
  const cartMemory=new Map();
  const recoveries=new Map();
  const fmt=value=>{const n=BigInt(value??0),base=10n**18n,frac=String(n%base).padStart(18,'0').slice(0,4).replace(/0+$/,'');return `${(n/base).toLocaleString()}${frac?'.'+frac:''} THOT`;}; // 100 THOT, 99.2 THOT: no padded zeros
@@ -395,7 +396,7 @@ ${tradeEvidenceOptions(listingMetadata)}
  }
  function showCart(){
   const ids=cartIds(),listings=state.thot?.listings??[];
-  openDialog('Your cart','Pay with your wallet',`<div class="cart-items">${ids.map(id=>{const l=listings.find(l=>l.id===id);return `<div class="cart-item"><div><strong>${escape(l?.title??'Listing unavailable')}</strong><small>${l?escape(fmt(l.price_atoms)):'Remove this item to continue'}</small></div>${button('cart-remove','Remove',id)}</div>`;}).join('')||'<p>Your cart is empty.</p>'}</div><p>Review the exact total once, then confirm the wallet requests in sequence. Each item is a separate purchase; if one stops, earlier purchases remain yours.</p>`,button('cart-review','Review checkout','',!ids.length,true));
+  openDialog('Your cart','Pay with your wallet',`<div class="cart-items">${ids.map(id=>{const l=listings.find(l=>l.id===id);return `<div class="cart-item"><div><strong>${escape(l?.title??'Listing unavailable')}</strong><small>${l?escape(fmt(l.price_atoms)):'Remove this item to continue'}</small></div>${button('cart-remove','Remove',id)}</div>`;}).join('')||'<p>Your cart is empty.</p>'}</div><p>Review the exact total once, then confirm the wallet requests in sequence. Each item is a separate purchase; if one stops, earlier purchases remain yours.</p>`,'<p id="cart-checkout-status" role="status" aria-live="polite"></p>'+button('cart-review','Review checkout','',!ids.length,true));
  }
  function listingCard(l,{browseOnly=false,workspace=state.thot}={}){
   const w=workspace,canBuy=!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet);
@@ -615,12 +616,16 @@ ${tradeEvidenceOptions(listingMetadata)}
    if(purchasesPaused())throw Error(pauseNotice());
    const ids=[...cartIds()];if(!ids.length)throw Error('Add an item first.');
    const items=[];inFlight=true;element.disabled=true;cartQuote=null;
+   const status=globalThis.document?.querySelector('#cart-checkout-status');if(status)status.setAttribute('role','status');
+   const originalLabel=element.textContent;
    try{
-    for(const listingId of ids){const l=state.thot.listings.find(l=>l.id===listingId);if(!l||sameWallet(l.seller,state.thot.wallet))throw Error('A selected listing is unavailable. Refresh and remove it from the cart.');const prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:listingId}});current();if(BigInt(prepared.buyer_total)<=0n)throw Error('Invalid checkout quote.');items.push({listingId,title:l.title,license:l.license,prepared});}
+    for(const listingId of ids){const l=state.thot.listings.find(l=>l.id===listingId);if(!l||sameWallet(l.seller,state.thot.wallet))throw Error('A selected listing is unavailable. Refresh and remove it from the cart.');element.textContent=`Preparing ${items.length+1} of ${ids.length}…`;if(status)status.textContent=element.textContent;
+     const key=recoveryKey()+':'+listingId;let attempt=cartPrepareKeys.get(key);if(!attempt||Date.now()-attempt.at>60000){attempt={at:Date.now(),id:crypto.randomUUID()};cartPrepareKeys.set(key,attempt);}
+     const prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:listingId},idempotencyKey:attempt.id});current();if(BigInt(prepared.buyer_total)<=0n)throw Error('Invalid checkout quote.');items.push({listingId,title:l.title,license:l.license,prepared});}
     const total=items.reduce((n,i)=>n+BigInt(i.prepared.buyer_total),0n);if(state.thot.account?.balance==null||total>BigInt(state.thot.account.balance))throw Error('Your THOT balance does not cover the cart total.');
-    cartQuote={items,current,key:recoveryKey()};
+    cartQuote={items,current,key:recoveryKey()};cartPrepareKeys.clear();
     openDialog('Review checkout',`${items.length} items · paid from your wallet`,items.map(i=>`<div class="cart-item"><div><strong>${escape(i.title)}</strong><details><summary>Licence</summary><p>${escape(i.license)}</p></details></div><strong>${escape(exactAmount(i.prepared.buyer_total))}</strong></div>`).join('')+`<div class="checkout-summary"><div><small>Total payment</small><strong>${escape(exactAmount(total))}</strong></div></div><p>Network gas is additional. Confirm each wallet request. Purchases run in order and stop on a rejection or error; completed items are not charged again.</p>`,button('cart-pay','Pay '+escape(exactAmount(total)),'',false,true));
-   }finally{inFlight=false;element.disabled=false;}return true;
+   }finally{inFlight=false;element.disabled=false;element.textContent=originalLabel;}return true;
   }
   if(op==='cart-pay'){
    if(inFlight)return true;const quote=cartQuote;if(!quote)throw Error('Review the cart total again.');quote.current();if(quote.key!==recoveryKey())throw Error('Your account changed. Review checkout again.');
@@ -1010,6 +1015,6 @@ ${tradeEvidenceOptions(listingMetadata)}
   const body=op==='lock'?{action:op,amount:document.querySelector('#thot-lock').value}:op==='refer'?{action:op,referrer:document.querySelector('#thot-referrer').value}:op==='withdraw'||op==='extend'?{action:op,lot_id:Number(id)}:op==='dispute-confirm'?{action:'dispute',id,reason:document.querySelector('#thot-reason').value}:{action:op,id};
   const prepared=await api('/v1/thot/transaction',{method:'POST',body});current();review(op==='dispute-confirm'?'Review your dispute':'Review THOT action',{...prepared,...(['claim','finalize','cancelOffer','refundExpired','refundUndelivered','withdraw','staking-claim','dispute-confirm'].includes(op)?{exit:true}:{}),...(op==='dispute-confirm'?{confirmDisputeId:id}:{})});return true;
  }
- const clearPrivateReview=()=>{cartQuote=null;cartMemory.clear();treasuryView='library';listingMetadata=null;listingScope=null;listingEnrollment=null;listingDirty=false;};
+ const clearPrivateReview=()=>{cartPrepareKeys.clear();cartQuote=null;cartMemory.clear();treasuryView='library';listingMetadata=null;listingScope=null;listingEnrollment=null;listingDirty=false;};
  return {clearPrivateReview,walletSummaryHTML,catalogueHTML,purchasesHTML,offersHTML,earningsHTML,tokenHTML,valuationsHTML,samplingHTML,disputesHTML,onInput,action};
 }

@@ -13,7 +13,7 @@ function fixture(t,request,respond,options={}){
  const state={actor:{id:'seller'},generation:1,role:'user',thot:{market_paused:false,wallet:owner,capabilities:{chain_id:31337,dispute_seconds:3600}}};
  const requests=[],dialogs=[],calls=[],notices=[],previewResponse=options.previewResponse;let refreshes=0;
  globalThis.window={ethereum:{request:async p=>{requests.push(p);if(p.method==='eth_requestAccounts')return [state.thot.wallet];if(p.method==='eth_chainId')return '0x7a69';if(p.method==='eth_blockNumber')return '0x20';if(p.method==='eth_getBlockByNumber')return {hash:hash(999)};const result=await request(p,state);return p.method==='eth_getTransactionReceipt'&&result?{transactionHash:p.params[0],blockNumber:'0x10',blockHash:hash(999),...result}:result;}}};
- globalThis.document={querySelector:()=>({value:'10000'})};
+ globalThis.document={querySelector:()=>({value:'10000',setAttribute(){}})};
  const ui=createThotUI({state,api:async(path,options)=>{calls.push({path,options});if(path.endsWith('/preview')){if(previewResponse)return previewResponse(path,options);const metadata=respond?await respond('/v1/thot/listings/metadata',options):{};return {...metadata,trace_id:options.body.trace_id,content:{turns:[{role:'user',content:'Synthetic reviewed release'}]},sale_eligibility:{can_list:true},exclusion:{supported:false}};}return respond?respond(path,options):{transactions,notice:'Review the lock.'};},openDialog:(...args)=>dialogs.push(args),dialog:{close(){}},refresh:async()=>{refreshes++;},escape:String,json:JSON.stringify,toast:m=>notices.push(m),...options});
  t.after(()=>{globalThis.window=previousWindow;globalThis.document=previousDocument;});
  return {ui,state,requests,dialogs,calls,notices,get refreshes(){return refreshes;},prepare:()=>ui.action('thot-lock',button()),send:()=>ui.action('thot-send',button())};
@@ -1140,4 +1140,29 @@ test('cart review never truncates fractional quoted payments',async t=>{
  const f=cartFixture(t,{quoteAmount:'997000000000001'});await f.select();await f.act('cart-review');
  assert.match(f.dialogs.at(-1)[2],/0\.000997000000000001 THOT/);
  assert.match(f.dialogs.at(-1)[3],/Pay 0\.001994000000000002 THOT/);
+});
+
+
+test('full twenty-item cart prepares every quote without sending a payment',async t=>{
+ const f=cartFixture(t,{balance:'100000000000000000000'});
+ f.state.thot.listings=Array.from({length:20},(_,i)=>({id:String(i),title:'Synthetic '+i,seller:other,price_atoms:'1000000000000000000',license:'Synthetic licence'}));
+ for(const l of f.state.thot.listings)await f.act('cart-toggle',l.id);
+ await f.act('cart-review');assert.match(f.dialogs.at(-1)[3],/Pay 20 THOT/);
+ assert.equal(f.calls.filter(c=>c.path==='/v1/thot/offers/prepare').length,20);assert.equal(f.sends,0);
+});
+
+test('retrying a partially failed cart reuses preparation keys for already prepared items',async t=>{
+ let fail=true;const seen=[];
+ const f=fixture(t,async()=>{throw Error('must not sign');},async(path,options)=>{
+  seen.push({id:options.body.listing_id,key:options.idempotencyKey});
+  if(options.body.listing_id==='b'&&fail){fail=false;throw Error('Temporarily unavailable');}
+  return {buyer_total:'1000000000000000000',transactions:[transactions[1]]};
+ });
+ f.state.thot.account={balance:'10000000000000000000'};
+ f.state.thot.listings=['a','b'].map(id=>({id,title:id,seller:other,price_atoms:'1000000000000000000',license:'Synthetic'}));
+ const act=op=>f.ui.action('thot-'+op,{dataset:{},disabled:false});
+ for(const id of ['a','b'])await f.ui.action('thot-cart-toggle',{dataset:{id},disabled:false});
+ await assert.rejects(act('cart-review'),/Temporarily unavailable/);await act('cart-review');
+ assert.equal(seen[0].key,seen[2].key);assert.equal(seen[1].key,seen[3].key);assert.notEqual(seen[0].key,seen[1].key);
+ assert.equal(f.requests.length,0);assert.match(f.dialogs.at(-1)[3],/Pay 2 THOT/);
 });
