@@ -186,3 +186,20 @@ test('chain failure leaves the private library usable and account changes clear 
  await f.page.getByRole('heading',{name:'Sign in with your wallet.'}).waitFor();
  assert.equal(await f.page.getByRole('button',{name:libraryItem.title,exact:true}).count(),0);
 });
+
+test('primary navigation has one active destination and Purchases opens purchase history',async t=>{
+ const f=await fixture(t);f.release();await f.page.goto(origin+'/app#thot-available');
+ await f.page.locator('.thot-listing').first().waitFor();
+ await f.page.locator('.journey-nav [data-view="receipts"]').click();
+ await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();
+ assert.equal(await f.page.locator('.journey-nav [aria-current="page"]').count(),1);
+ assert.equal(await f.page.locator('.journey-nav [aria-current="page"]').getAttribute('data-view'),'receipts');
+ assert.equal(await f.page.locator('#thot-buyer-purchases').isVisible(),true);
+ await f.page.reload();await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();
+ assert.equal(new URL(f.page.url()).hash,'#receipts');
+ await f.page.setViewportSize({width:390,height:844});
+ assert.equal(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await f.page.locator('.journey-nav [data-view="market"]').click();
+ await f.page.locator('.thot-listing').first().waitFor();
+ assert.equal(await f.page.locator('.journey-nav .active').count(),1);
+});

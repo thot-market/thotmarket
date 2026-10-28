@@ -157,3 +157,21 @@ test('shared treasury exposes prospective staking budgets only to governance and
  assert.match(html,/Treasury library/);assert.match(html,/Shared research/);assert.match(html,/Read trace/);
  assert.doesNotMatch(html,/data-action="thot-reserve-resume"/);
  });
+
+test('treasury opens the shared library and switches sections without fetching or losing form values',async t=>{
+ const f=fixture(t),panels=['library','buy','budgets','governance'].map(id=>({dataset:{treasuryPanel:id},hidden:id!=='library'}));
+ const tabs=panels.map(p=>({dataset:{id:p.dataset.treasuryPanel},setAttribute(name,value){this[name]=value;}}));
+ globalThis.document.querySelectorAll=selector=>selector==='[data-treasury-panel]'?panels:tabs;
+ assert.match(f.ui.samplingHTML(),/data-treasury-panel="library" aria-label="Library" >/);
+ assert.match(f.ui.samplingHTML(),/data-treasury-panel="budgets" aria-label="Budgets" hidden/);
+ assert.match(f.ui.samplingHTML(),/No shared purchases yet/);
+ f.inputs['#thot-campaign-purpose'].value='Preserve this edited purpose';
+ for(const id of ['buy','budgets','governance','library']){
+  await f.ui.action('thot-treasury-view',button(id));
+  assert.deepEqual(panels.filter(p=>!p.hidden).map(p=>p.dataset.treasuryPanel),[id]);
+  assert.deepEqual(tabs.filter(p=>p['aria-pressed']==='true').map(p=>p.dataset.id),[id]);
+ }
+ assert.equal(f.inputs['#thot-campaign-purpose'].value,'Preserve this edited purpose');assert.equal(f.calls.length,0);
+ await f.ui.action('thot-treasury-view',button('budgets'));f.ui.clearPrivateReview();
+ assert.match(f.ui.samplingHTML(),/data-treasury-panel="library" aria-label="Library" >/);
+});

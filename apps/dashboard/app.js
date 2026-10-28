@@ -45,7 +45,7 @@ const isThotMode=mode=>['thot-anvil','thot-testnet','thot-production'].includes(
 // Remember navigation only. Credentials and licensed content never enter browser storage.
 const rememberedViewKey='thot.workspace-view.v1';
 function allowedView(view){
-  return ['market','thot','referrals','leaderboard'].includes(view)||
+  return ['market','thot','referrals','leaderboard'].includes(view)||(view==='receipts'&&isThotMode(state.thot?.capabilities.mode))||
     (state.role==='user'&&['vault','earnings','receipts'].includes(view))||
     (view==='operator'&&(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer))||
     (state.canExplore&&view==='explorer');
@@ -123,7 +123,7 @@ function restoredView(){
 function forgetView(){try{window.sessionStorage?.removeItem(rememberedViewKey);}catch{}}
 function stopPurchasesRefresh(){clearTimeout(purchasesTimer);purchasesTimer=null;}
 function purchasesVisible(){
-  return !signingOut&&state.loaded&&state.actor&&(state.token||authMode==='wallet_siwe')&&state.view==='market'&&!document.hidden&&isThotMode(state.thot?.capabilities.mode);
+  return !signingOut&&state.loaded&&state.actor&&(state.token||authMode==='wallet_siwe')&&['market','receipts'].includes(state.view)&&!document.hidden&&isThotMode(state.thot?.capabilities.mode);
 }
 function pendingPurchases(){
   const wallet=state.thot?.wallet?.toLowerCase();
@@ -622,6 +622,7 @@ async function runInference() {
   render();
 }
 function receipts() {
+  if(isThotMode(state.thot?.capabilities.mode))return heading('YOUR ACCOUNT','Purchases','Open the data you bought and check pending payments.')+`<section id="thot-buyer-purchases">${thotUI.purchasesHTML()}</section>${state.role==='user'?'<details class="technical-details"><summary>Export account receipts</summary><p>Download your account’s permission and payment records. Private conversation bodies are not included.</p><button class="button secondary" data-action="audit">Download audit export</button></details>':''}`;
   return heading('PORTABLE EVIDENCE / RECEIPTS', 'A record you can take with you.', 'Export your provenance, credential and outcome receipts together with policies, authorizations, licenses and settlements.') +
   `<section class="panel audit-card"><p class="eyebrow">YOUR ACCOUNT / JSON EXPORT</p><h2>The complete permission trail.</h2><p>The export includes your account’s portable records and a canonical content commitment. Raw item bodies and private credential or brokerage evidence stay outside this audit export.</p><div class="receipt-layers"><div class="receipt-layer">Source and scrub receipts<span>Versioned evidence</span></div><div class="receipt-layer">Policies and authorizations<span>Exact permission</span></div><div class="receipt-layer">Licenses and settlements<span>Economic records</span></div></div><button class="button" data-action="audit">Download audit export ↓</button><p class="legal-note">Exports are generated from the current local database, scoped to your contributor account.</p></section>`;
 }
@@ -664,20 +665,20 @@ function renderView() {
   if (!state.loaded || !state.actor || (!state.token && authMode!=='wallet_siwe') || signingOut) { stopEarningsRefresh(); return; }
   document.querySelector('.journey-menu')?.removeAttribute?.('hidden');
   rememberView();schedulePurchasesRefresh();
-  main.classList.toggle('thot-workspace',(isThotMode(state.thot?.capabilities.mode)&&['thot','market','earnings','vault'].includes(state.view))||(isThotMode(state.thotSampling?.capabilities.mode)&&state.view==='operator'));
+  main.classList.toggle('thot-workspace',(isThotMode(state.thot?.capabilities.mode)&&['thot','market','earnings','vault','receipts'].includes(state.view))||(isThotMode(state.thotSampling?.capabilities.mode)&&state.view==='operator'));
   const operationsLink=document.querySelector('#operations-console-link');if(operationsLink)operationsLink.hidden=state.role!=='operator_security';
   const treasuryNav=document.querySelector('[data-view=operator].nav-item');if(treasuryNav)treasuryNav.hidden=!(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer);
-  document.title=({vault:'My data',market:'Marketplace',earnings:'Earnings',thot:'THOT',operator:'Treasury',receipts:'Receipts',explorer:'Trace explorer',referrals:'Referrals',leaderboard:'Market activity'}[state.view]??'Your workspace')+' · thot market';
+  document.title=({vault:'My data',market:'Marketplace',earnings:'Earnings',thot:'THOT',operator:'Treasury',receipts:'Purchases',explorer:'Trace explorer',referrals:'Referrals',leaderboard:'Market activity'}[state.view]??'Your workspace')+' · thot market';
   for(const view of ['referrals','leaderboard']){const nav=document.querySelector(`[data-view=${view}].nav-item`);if(nav)nav.hidden=!isThotMode(state.thot?.capabilities.mode);}
   scheduleEarningsRefresh();
   const explorerNav=document.querySelector('#trace-explorer-nav');if(explorerNav){explorerNav.hidden=!(state.canExplore||state.role==='operator_security');explorerNav.classList.toggle('active',state.view==='explorer');}
   if(state.view==='explorer'){main.innerHTML=(state.canExplore||state.role==='operator_security')?traceExplorerUI.sectionHTML():empty('Trace explorer unavailable.','This account does not have permission to view operational inventory.');return;}
-  document.querySelectorAll('[data-view].nav-item').forEach(button => {const active=button.dataset.view===state.view||(button.dataset.view==='vault'&&['earnings','receipts'].includes(state.view));button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
+  document.querySelectorAll('[data-view].nav-item').forEach(button => {const active=button.dataset.view===state.view;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
   if(['referrals','leaderboard'].includes(state.view)&&isThotMode(state.thot?.capabilities.mode)){
     main.innerHTML=state.view==='referrals'?heading('YOUR NETWORK','Referrals','Follow attributed contributors, finalized referral credits and payments.')+analyticsUI.referralsHTML():analyticsUI.leaderboardHTML();
     void safely(()=>analyticsUI.ready());return;
   }
-  const needsContributor = ['vault', 'earnings', 'receipts'].includes(state.view) || (state.view === 'market' && state.role === 'operator_security'&&!state.thot?.reserve_buyer);
+  const needsContributor = (['vault', 'earnings'].includes(state.view)||state.view==='receipts'&&!isThotMode(state.thot?.capabilities.mode)) || (state.view === 'market' && state.role === 'operator_security'&&!state.thot?.reserve_buyer);
   if (needsContributor && state.role !== 'user') {
     main.innerHTML = heading('SCOPED WORKSPACES', 'Your role keeps records separate.', `You are viewing as ${roleName(state.role)}. Private data, earnings and contributor receipts belong to the contributor workspace.`) + `<div class="panel">${authMode==='development'?empty('Open the contributor workspace.', 'Changing the local role selects the separate development account for that role.', '<button class="button" data-action="contributor-role">Switch to contributor</button>'):empty('A contributor identity is required.', 'Sign out and connect an authorized contributor identity to access its private workspace.')}</div>`; return;
   }
