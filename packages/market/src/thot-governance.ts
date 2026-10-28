@@ -32,6 +32,17 @@ const checkedAmount=(value:unknown,allowZero=false)=>{ensure(typeof value==='str
 export class ThotGovernance {
  chain:ThotChain;constructor(chain:ThotChain){this.chain=chain;}
  private async contract(){ensure(this.chain.config.manualReserve,'RESERVE_GOVERNANCE_UNAVAILABLE');const address=await this.chain.reserve.governor();return new Contract(address,THOT_GOVERNOR_ABI,this.chain.provider);}
+ async ownsTreasury(wallet:string){
+  const chain=this.chain;
+  if(!chain.config.manualReserve||!chain.config.governor)return false;
+  const block=await chain.snapshot(),at={blockTag:block.number},address=chain.config.governor;
+  const [bound,code]=await Promise.all([chain.reserve.governor(at),chain.provider.getCode(address,block.number)]);
+  ensure(getAddress(bound)===getAddress(address)&&code!=='0x'&&keccak256(code).toLowerCase()===chain.config.codeHashes.governor?.toLowerCase(),'THOT_GOVERNOR_PIN_MISMATCH',503);
+  const governor=new Contract(address,THOT_GOVERNOR_ABI,chain.provider);
+  const owners=await governor.getOwners(at);
+  await chain.assertSnapshot(block);
+  return owners.some((owner:string)=>getAddress(owner)===getAddress(wallet));
+ }
  async workspace(wallet:string){
   const concurrent=this.chain.config.reserveCampaigns===true,vault=concurrent?new Interface(THOT_CAMPAIGN_RESERVE_ABI):legacyVault;
   const block=await this.chain.snapshot(),governor=await this.contract(),at={blockTag:block.number},reserve=new Contract(this.chain.config.reserve,vault,this.chain.provider),exchange=new Contract(this.chain.config.market,market,this.chain.provider);

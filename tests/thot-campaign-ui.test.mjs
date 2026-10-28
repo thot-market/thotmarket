@@ -149,3 +149,11 @@ test('shared treasury exposes prospective staking budgets only to governance and
  assert.doesNotMatch(f.ui.samplingHTML(),/Fund a staking offer/);
  await assert.rejects(f.ui.action('thot-gov-create_staking_campaign',button()),/governance owner/);
 });
+
+ test('governance library renders a delivered purchase initiated by another member',t=>{
+ const f=fixture(t,{reserveBuyer:false});
+ f.state.thotSampling.jobs=[{id:'shared-order',title:'Shared research',gross:atoms(10),shared:true,resume_available:false,receipt:{status:3}}];
+ const html=f.ui.samplingHTML();
+ assert.match(html,/Treasury library/);assert.match(html,/Shared research/);assert.match(html,/Read trace/);
+ assert.doesNotMatch(html,/data-action="thot-reserve-resume"/);
+ });

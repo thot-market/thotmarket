@@ -382,20 +382,22 @@ export class ThotMarketplace {
   ensure(actual===expected&&typeof i.reserve_buyer_wallet==='string'&&getAddress(buyer)===getAddress(i.reserve_buyer_wallet),'ONCHAIN_CAMPAIGN_MISMATCH',409);
   await chain.assertSnapshot(o.block);
  }
- private async checked(actor:Actor,id:string){
+ private async checked(actor:Actor,id:string,sharedDelivery=false){
   const chain=this.enabled();
   const data=await this.service.db.transaction(async tx=>{
    const i=await tx.get('thot_records','intent:'+id);
    const wallet=i.treasury&&i.owner_id===actor.id?chain.config.reserve:await this.wallet(tx,actor);
-   ensure(i.owner_id===actor.id||i.seller_id===actor.id,'NOT_FOUND',404);
+   ensure(i.owner_id===actor.id||i.seller_id===actor.id||sharedDelivery&&i.treasury&&i.wallet===chain.config.reserve,'NOT_FOUND',404);
    const l=await tx.get('thot_records',i.listing_id);
    return {wallet,i,l};
   });
+  const shared=data.i.owner_id!==actor.id&&data.i.seller_id!==actor.id;
+  if(shared)ensure(await new ThotGovernance(chain).ownsTreasury(data.wallet),'NOT_FOUND',404);
   const o=await chain.offer(id);
   ensure(o.status!==0,'OFFER_NOT_CONFIRMED',409);
   ensure(o.buyer===data.i.wallet&&o.seller===data.i.seller_wallet&&o.gross===data.i.gross&&o.seller_gross===(data.i.seller_gross??data.i.gross)&&o.buyer_surcharge===(data.i.buyer_surcharge??'0')&&o.buyer_total===(data.i.buyer_total??data.i.gross)&&o.license_hash===data.i.license_hash&&o.evidence_hash===data.i.evidence_hash,'ONCHAIN_OFFER_MISMATCH',409);
   await this.assertCampaignFunding(data.i,o);
-  return {...data,o};
+  return {...data,o,shared};
  }
  async reviewOffer(actor:Actor,id:string){
   const {i,l,o}=await this.checked(actor,id);ensure(i.seller_id===actor.id,'FORBIDDEN',403);
@@ -404,7 +406,8 @@ export class ThotMarketplace {
   return {receipt:o,release,license:l.license,transaction:!i.automatic&&o.status===1?this.enabled().transaction('market','acceptOffer',[id,o.quote_digest]):null};
  }
  async delivery(actor:Actor,id:string){
-  const checked=await this.checked(actor,id);const {i,l}=checked;let o=checked.o;ensure(i.owner_id===actor.id,'FORBIDDEN',403);
+  const checked=await this.checked(actor,id,true);const {i,l,shared}=checked;let o=checked.o;ensure(i.owner_id===actor.id||shared,'FORBIDDEN',403);
+  if(shared)ensure([3,4,5].includes(o.status),'DELIVERY_NOT_AUTHORIZED',409);
   ensure([2,3,4,5].includes(o.status),'DELIVERY_NOT_AUTHORIZED',409);
   ensure(!this.readOnly||o.status!==2,'THOT_READ_ONLY',403);
   ensure(!l.release_deleted_at&&o.block.timestamp<o.accepted_at+(l.retention_days??30)*86400,'LICENSE_RETENTION_EXPIRED',410);
@@ -421,12 +424,13 @@ export class ThotMarketplace {
    o=(await this.checked(actor,id)).o;
   }
   ensure([3,4,5].includes(o.status)&&o.delivery_hash===digest(release),'THOT_DELIVERY_ACK_PENDING',409);
+  if(shared)ensure(await new ThotGovernance(this.enabled()).ownsTreasury(checked.wallet),'NOT_FOUND',404);
   await this.service.db.transaction(async tx=>{
    const job=await tx.maybe('thot_records','delivery:'+id);if(job){job.status='confirmed';job.block=o.block.number;await tx.update('thot_records',job.id,job);}
-   await tx.audit(actor.id,'ThotDeliveryRetrieved',{offer_id:id,release_hash:o.evidence_hash,block:o.block.number});
+   await tx.audit(actor.id,'ThotDeliveryRetrieved',{offer_id:id,release_hash:o.evidence_hash,block:o.block.number,...(shared?{access_scope:'treasury_governance'}:{})});
   });
-  const buyerRelease=i.treasury?release:((({brokerage_evidence:_privateProof,...licensed})=>licensed)(release));
-  return {receipt:o,release:buyerRelease,delivery_hash:o.evidence_hash,acknowledgment:null,notice:`The operator attests this committed release is available. This does not prove the buyer read it. The ${o.dispute_seconds/3600}-hour dispute window protects delivery disputes. Undisputed sales finalize and pay automatically when the settlement worker confirms the deadline.`};
+  const buyerRelease=i.treasury&&!shared?release:((({brokerage_evidence:_privateProof,...licensed})=>licensed)(release));
+  return {access_scope:i.treasury?'treasury':'personal',receipt:o,release:buyerRelease,delivery_hash:o.evidence_hash,acknowledgment:null,notice:`The operator attests this committed release is available. This does not prove the buyer read it. The ${o.dispute_seconds/3600}-hour dispute window protects delivery disputes. Undisputed sales finalize and pay automatically when the settlement worker confirms the deadline.`};
  }
  private async retentionSnapshot(tx:Transaction,traceId:string):Promise<RetentionSnapshot>{
   const source=await tx.get('traces',traceId),records=await tx.list('thot_records');
@@ -542,9 +546,10 @@ export class ThotMarketplace {
   const records=allRecords.filter(r=>r.owner_id===actor.id);
   const batches=records.filter(r=>r.kind==='sampling_batch').slice(-20).map(r=>({id:r.id,policy:r.policy,sample_count:r.sample_count,gross:r.gross,created_at:r.created_at,inventory_commitment:r.inventory_commitment,seed:r.seed}));
   const jobs=[];
-  for(const i of records.filter(r=>r.kind==='intent'&&r.treasury).slice(-50)){
+  for(const i of allRecords.filter(r=>r.kind==='intent'&&r.treasury&&(r.owner_id===actor.id||governance?.owner&&r.wallet===chain.config.reserve)).slice(-50)){
    const receipt=await this.enabled().offer(i.offer_id);
-   jobs.push({...this.publicIntent(i),status:i.job_status??null,error:i.last_error??null,receipt,resume_available:reserveBuyer&&i.manual_funding===true&&!i.unfunded_closed&&receipt.status===0});
+   if(i.owner_id!==actor.id&&![3,4,5].includes(receipt.status))continue;
+   jobs.push({...this.publicIntent(i),shared:i.owner_id!==actor.id,status:i.job_status??null,error:i.last_error??null,receipt,resume_available:i.owner_id===actor.id&&reserveBuyer&&i.manual_funding===true&&!i.unfunded_closed&&receipt.status===0});
   }
   const samples=[];
   for(const selection of reserveBuyer?allRecords.filter(r=>r.kind==='treasury_sample_selection'):[]){

@@ -32,6 +32,12 @@ test('explicit legacy two-owner controller preserves unsigned approval and timel
   const config={...f.config,reserve:await reserve.getAddress(),market:await market.getAddress(),governor:await governor.getAddress(),manualReserve:true,localDeliverySigner:a[0],deploymentBlock:block.number,deploymentBlockHash:block.hash,codeHashes:{...f.config.codeHashes}};
   for(const key of ['reserve','market','governor'])config.codeHashes[key]=keccak256(await f.provider.getCode(config[key]));
   chain=new ThotChain(config);const api=new ThotGovernance(chain);
+  assert.equal(await api.ownsTreasury(a[0]),true);
+  assert.equal(await api.ownsTreasury(a[1]),true);
+  assert.equal(await api.ownsTreasury(a[6]),true);
+  assert.equal(await api.ownsTreasury(a[3]),false);
+  const wrongPin=new ThotChain({...config,codeHashes:{...config.codeHashes,governor:'0x'+'0'.repeat(64)}});
+  try{await assert.rejects(new ThotGovernance(wrongPin).ownsTreasury(a[0]),/THOT_GOVERNOR_PIN_MISMATCH/);}finally{wrongPin.provider.destroy();}
   const prepare=(input,owner=a[0])=>api.prepare(owner,input);
   const submit=async(input)=>{
    const nonce=await governor.nextNonce(),p=await prepare(input),t=p.transactions[0],decoded=governor.interface.parseTransaction(t);

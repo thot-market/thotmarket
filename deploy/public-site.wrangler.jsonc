@@ -1,0 +1,17 @@
+{
+  "name": "thot-public-site",
+  "main": "../apps/site/edge-worker.js",
+  "compatibility_date": "2026-09-16",
+  "workers_dev": false,
+  "preview_urls": false,
+  "upload_source_maps": false,
+  "routes": [{ "pattern": "thot.market/*", "zone_name": "thot.market" }],
+  "assets": {
+    "directory": "../work/cloudflare-pages/thot-market",
+    "binding": "ASSETS",
+    "run_worker_first": ["/v1/public/catalogue"],
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  "observability": { "enabled": false }
+}

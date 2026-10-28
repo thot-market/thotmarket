@@ -12,33 +12,54 @@
   <link rel="canonical" href="https://thot.market/stats">
   <link rel="icon" href="/assets/thot-logo.png">
   <link rel="stylesheet" href="/site.css"><link rel="stylesheet" href="/reading.css">
-  <script src="/stats.js" defer></script>
+  <script src="/site.js" defer></script>
+  <script src="/stats.js" type="module"></script>
 </head>
 <body class="reading-page">
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header wrap">
-    <a class="brand" href="/"><img src="/assets/thot-logo.png" alt="" width="64" height="64"><span>thot market</span></a>
-    <nav class="main-nav" aria-label="Main navigation"><a href="/#how-it-works">How it works</a><a href="/read">The idea</a><a href="/stats" aria-current="page">Live numbers</a><a href="/bill">Token bill</a><a href="/mechanism">Mechanism</a></nav>
-    <a class="button button-small" href="https://app.thot.market/app" data-workspace-link>Open app</a>
+    <a class="brand" href="/" aria-label="thot market home">
+      <img src="/assets/thot-logo.png" alt="" width="64" height="64">
+      <span>thot market</span>
+    </a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="/#how-it-works">How it works</a>
+      <a href="/read">The idea</a>
+      <a href="/stats" aria-current="page">Live numbers</a>
+      <a href="/bill">Token bill</a>
+      <a href="/affiliates">Referrals</a>
+      <a href="/mechanism">Mechanism</a>
+    </nav>
+    <div class="header-actions">
+      <a class="trade-link" data-token-link href="/#token" hidden>Trade THOT <svg class="arrow-icon" aria-hidden="true" focusable="false" viewBox="0 0 12 12" width="0.7em" height="0.7em"><path d="M2.5 9.5 9.5 2.5M4 2.5h5.5V8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <a class="button button-small" href="https://app.thot.market/app" data-workspace-link>Open app</a>
+    </div>
   </header>
-  <main class="reading-main wrap stats-page" id="main">
-    <p class="reading-topline">Live market numbers</p>
-    <h1>What people are selling right now.</h1>
-    <p class="stats-lede">Sellers list AI chats, datasets and files here and keep 99% of every sale. These numbers come straight from the live market.</p>
-    <section class="stats-grid" aria-label="Market totals">
-      <div><strong data-stat="listings">—</strong><span>items for sale</span></div>
-      <div><strong data-stat="sellers">—</strong><span>sellers</span></div>
-      <div data-sales hidden><strong data-stat="purchases">—</strong><span>independent purchases</span></div>
-      <div data-sales hidden><strong data-stat="paid">—</strong><span>THOT paid to sellers</span></div>
+  <main class="wrap market-dashboard" id="main">
+    <div class="market-heading"><div><p class="market-kicker">THOT / DATA NETWORK</p><h1>The market, in motion.</h1></div><a class="button button-small" href="https://app.thot.market/app" data-workspace-link>Contribute data</a></div>
+    <div class="market-status"><span class="market-status-dot" aria-hidden="true"></span><span data-stats-note role="status">Connecting to the market…</span><button class="market-refresh" type="button" data-refresh>Refresh</button></div>
+    <section class="market-metrics" aria-label="Public catalogue metrics">
+      <div><span>Active listings</span><strong data-stat="listings">—</strong><small>Available to license</small></div>
+      <div><span>Conversation turns</span><strong data-stat="turns">—</strong><small data-turns-scope>Across displayed listings</small></div>
+      <div><span>Added in 7 days</span><strong data-stat="week">—</strong><small data-week-scope>Still listed today · UTC</small></div>
+      <div><span>Contributors</span><strong data-stat="sellers">—</strong><small>Accounts with active listings</small></div>
     </section>
-    <h2>Newest listings</h2>
-    <ol class="stats-recent" data-stats-newest><li>Loading…</li></ol>
-    <section data-sales hidden>
-      <h2>Recent sales</h2>
-      <ol class="stats-recent" data-stats-recent></ol>
+    <section class="market-panels">
+      <div class="market-chart-panel">
+        <div class="market-panel-heading"><div><h2>Catalogue timeline</h2><p data-chart-subtitle>Current listings, grouped by original listing date</p></div><div class="market-toggle" role="group" aria-label="Chart measure"><button type="button" data-chart="listings" aria-pressed="true">Listings</button><button type="button" data-chart="turns" aria-pressed="false">Turns</button></div></div>
+        <div class="market-chart" data-chart-container><p class="market-placeholder">Loading timeline…</p></div>
+        <div class="market-chart-footer"><span><i></i> Cumulative within today's catalogue</span><span data-chart-range>—</span></div>
+      </div>
+      <aside class="market-source-panel"><div class="market-panel-heading"><div><h2>Inside the catalogue</h2><p>Sources &amp; formats</p></div></div><div data-sources class="market-sources"><p class="market-placeholder">Loading sources…</p></div><div class="market-source-note">Public metadata only.<br>Conversation content stays private until licensed.</div></aside>
     </section>
-    <p class="stats-note" data-stats-note>Checking the market…</p>
-    <a class="text-link" data-stats-share target="_blank" rel="noopener noreferrer" hidden>Share on X</a>
+    <section class="market-sales-row" data-sales hidden aria-label="Independent sales"><span><strong data-stat="purchases">—</strong> independent purchases</span><span><strong data-stat="paid">—</strong> THOT in finalized seller proceeds</span></section>
+    <section aria-labelledby="catalogue-heading">
+      <div class="market-catalogue-heading"><h2 id="catalogue-heading">Explore the data <span data-results-count></span></h2><label class="market-search"><span class="sr-only">Search public listings</span><input type="search" data-search placeholder="Search titles, models, sources…" autocomplete="off"></label></div>
+      <div class="market-filters" role="group" aria-label="Catalogue filters"><button type="button" data-filter="all" aria-pressed="true">All data</button><button type="button" data-filter="conversations" aria-pressed="false">Conversations</button><button type="button" data-filter="files" aria-pressed="false">Files &amp; datasets</button><label>Sort <select data-sort><option value="newest">Newest first</option><option value="turns">Most turns</option><option value="price">Lowest price</option></select></label></div>
+      <p class="market-swipe">Scroll the table sideways for model, size and price →</p><div class="market-table-wrap"><table class="market-table"><thead><tr><th>Dataset / trace</th><th>Source / model</th><th>Size</th><th>Listed</th><th>Price</th><th><span class="sr-only">Open listing</span></th></tr></thead><tbody data-catalogue><tr><td colspan="6">Loading public listings…</td></tr></tbody></table></div>
+      <div class="market-catalogue-footer"><span data-catalogue-scope></span><a href="https://app.thot.market/app#thot-available">Open marketplace →</a></div>
+    </section>
+    <details class="market-method"><summary>What these numbers mean</summary><p>Counts cover active public listings, not private uploads or unique underlying conversations. The directory shows up to the latest 48 listings. Turns are the sum of published turn counts in those listings; the same underlying conversation may appear in more than one listing. They are not model tokens. Provider token usage is not currently available in this public feed.</p><p>The timeline reconstructs today's catalogue from its original listing dates. Removed listings are excluded, so this is not historical market size or net growth. Seven-day additions count currently listed records within the last seven days. No projected growth is shown. Sales metrics appear only when the public API reports sufficient independent purchases.</p></details>
   </main>
 </body>
 </html>

@@ -178,3 +178,8 @@ p{text-wrap:pretty}
 
 #token-contract{min-width:0;overflow-wrap:anywhere;}
 #thot-contract-address{display:block;overflow-wrap:anywhere;}
+
+/* Keep the public navigation identical across landing and reading pages. */
+.main-nav a{white-space:nowrap}
+.main-nav a[aria-current="page"]{text-decoration:underline;text-decoration-color:var(--moss-light);text-underline-offset:6px}
+@media(min-width:861px) and (max-width:1240px){.site-header{flex-wrap:wrap;padding-block:13px 16px;gap:8px 20px}.main-nav{order:3;width:100%;justify-content:center;padding-top:8px}}

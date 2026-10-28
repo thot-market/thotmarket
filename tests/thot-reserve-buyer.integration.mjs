@@ -17,15 +17,15 @@ test('three reserve reviewers share one persistent complete release per 20 contr
   const token=await f.deploy('ThotTestToken',[addresses[0],parseEther('1000000000')]),locks=await f.deploy('ThotLockVault',[await token.getAddress()]);
   const governor=await f.deploy('ThotGovernor',[[addresses[0],addresses[1],addresses[6]]]);
   const reserve=await f.deploy('ThotReserveVault',[await token.getAddress(),await governor.getAddress(),addresses[0]]);
-  const market=await f.deploy('ThotMarket',[await token.getAddress(),await locks.getAddress(),await reserve.getAddress(),addresses[0],addresses[0],addresses[4]]);
+  const market=await f.deploy('ThotMarket',[await token.getAddress(),await locks.getAddress(),await reserve.getAddress(),await governor.getAddress(),addresses[0],addresses[4]]);
   await(await token.transfer(await reserve.getAddress(),parseEther('500000000'))).wait();
   const start=await f.now()+86400+30;
   const governed=async(data)=>{const nonce=await governor.nextNonce(),op=await governor.operationId(nonce,await reserve.getAddress(),data);await(await governor.submit(await reserve.getAddress(),data)).wait();await(await governor.connect(f.buyer).confirm(op)).wait();await(await governor.execute(op)).wait();return op;};
   await governed(reserve.interface.encodeFunctionData('queueCampaign',[await market.getAddress(),start]));
   await f.warp(start);await governed(reserve.interface.encodeFunctionData('executeCampaign',[await market.getAddress(),start]));
   const block=await f.provider.getBlock('latest');
-  const config={...f.config,token:await token.getAddress(),locks:await locks.getAddress(),market:await market.getAddress(),reserve:await reserve.getAddress(),deploymentBlock:block.number,deploymentBlockHash:block.hash,codeHashes:{},localDeliverySigner:addresses[0],streamSales:true,manualReserve:true};
-  for(const k of ['token','market','locks','reserve'])config.codeHashes[k]=keccak256(await f.provider.getCode(config[k]));
+  const config={...f.config,token:await token.getAddress(),locks:await locks.getAddress(),market:await market.getAddress(),reserve:await reserve.getAddress(),governor:await governor.getAddress(),deploymentBlock:block.number,deploymentBlockHash:block.hash,codeHashes:{},localDeliverySigner:addresses[0],streamSales:true,manualReserve:true};
+  for(const k of ['token','market','locks','reserve','governor'])config.codeHashes[k]=keccak256(await f.provider.getCode(config[k]));
   app=await createApplication({dataDir:dir,thot:config});
   const thirdReviewer={id:'reserve-reviewer-three',role:'user'};
   for(const [actor,signer] of [[demoUser,f.seller],[demoBuyer,f.buyer],[demoOperator,f.admin],[thirdReviewer,f.other]]){const c=await app.thot.challenge(actor,randomUUID(),{address:await signer.getAddress()},'http://localhost');await app.thot.link(actor,randomUUID(),{id:c.id,signature:await signer.signMessage(c.message)});}
@@ -106,6 +106,13 @@ test('three reserve reviewers share one persistent complete release per 20 contr
   await assert.rejects(app.thot.buyerSample(demoBuyer,{listing_id:selected.id,evaluation_only:true,funding_source:'reserve'}),/TREASURY_SAMPLE_UNAVAILABLE/,'a funded inactive listing no longer grants free sample access');
   assert.equal((await app.thot.samplingWorkspace(demoOperator)).samples.length,0,'withdrawn selection is not redrawn');
   const release=await app.thot.delivery(demoBuyer,offer.id);assert(release.release.content.turns[0].content.length>0);
+  for(const member of [demoOperator,thirdReviewer]){
+   const shared=(await app.thot.samplingWorkspace(member)).jobs.find(j=>j.id===offer.id);
+   assert(shared?.shared);assert.equal(shared.resume_available,false);
+   const received=await app.thot.delivery(member,offer.id);assert.deepEqual(received.release.content,release.release.content);
+   assert.equal(received.release.brokerage_evidence,undefined);
+  }
+  await assert.rejects(app.thot.delivery(copyActor,offer.id),/NOT_FOUND/);
   await assert.rejects(app.thot.transaction(demoBuyer,{action:'dispute',id:offer.id,reason:'The delivered licensed research has a synthetic defect.'}),/SUBJECTIVE_DISPUTE_UNAVAILABLE/);
   await assert.rejects(f.buyer.sendTransaction({to:config.reserve,data:market.interface.encodeFunctionData('dispute',[offer.id,keccak256(Buffer.from('blocked treasury complaint'))])}));
   await f.advance(Number(await market.DISPUTE_WINDOW())+1);await app.thot.processSales();assert.equal(await token.balanceOf(await selectedEntry.signer.getAddress()),parseEther('99.96'));
