@@ -45,7 +45,7 @@ const isThotMode=mode=>['thot-anvil','thot-testnet','thot-production'].includes(
 // Remember navigation only. Credentials and licensed content never enter browser storage.
 const rememberedViewKey='thot.workspace-view.v1';
 function allowedView(view){
-  return ['market','thot','referrals','leaderboard'].includes(view)||(view==='receipts'&&isThotMode(state.thot?.capabilities.mode))||
+  return ['market','thot','referrals','leaderboard'].includes(view)||(view==='receipts'&&['user','buyer_admin','buyer_member','operator_security'].includes(state.role))||
     (state.role==='user'&&['vault','earnings','receipts'].includes(view))||
     (view==='operator'&&(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer))||
     (state.canExplore&&view==='explorer');

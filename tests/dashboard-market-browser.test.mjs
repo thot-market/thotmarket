@@ -22,7 +22,7 @@ before(async()=>{
 });
 after(async()=>{await browser?.close();});
 
-async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault'}={}){
+async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user'}={}){
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
  const chain=deferred(),catalog=deferred(),requests=[],errors=[];
  let revoked=false,failed=failWorkspace;
@@ -47,7 +47,7 @@ async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vaul
    if(path.startsWith('/v1/')){
      requests.push({path,search:u.search,method:route.request().method()});
      if(path==='/v1/auth/capabilities')return send({mode:'wallet_siwe',wallet:{chain_id:31337,rpc_url:origin+'/rpc'}});
-     if(path==='/v1/auth/session')return send(revoked?{}:{actor:{id:'synthetic-reader',role:'user'},wallet_address:wallet,chain_id:31337},revoked?401:200);
+     if(path==='/v1/auth/session')return send(revoked?{}:{actor:{id:'synthetic-reader',role},wallet_address:wallet,chain_id:31337},revoked?401:200);
      if(path==='/v1/auth/session/revoke'){revoked=true;return send({});}
      if(path==='/v1/thot/catalog'){if(holdCatalog)await catalog.promise;return send(catalogue);}
      if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
@@ -203,3 +203,10 @@ test('primary navigation has one active destination and Purchases opens purchase
  await f.page.locator('.thot-listing').first().waitFor();
  assert.equal(await f.page.locator('.journey-nav .active').count(),1);
 });
+
+ test('buyer purchase route survives reload before workspace capabilities arrive',async t=>{
+ const f=await fixture(t,{role:'buyer_admin'});f.release();await f.page.goto(origin+'/app#receipts');
+ await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();
+ await f.page.reload();await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();
+ assert.equal(new URL(f.page.url()).hash,'#receipts');
+ });
