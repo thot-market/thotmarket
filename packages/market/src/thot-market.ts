@@ -391,8 +391,8 @@ export class ThotMarketplace {
    const l=await tx.get('thot_records',i.listing_id);
    return {wallet,i,l};
   });
-  const shared=data.i.owner_id!==actor.id&&data.i.seller_id!==actor.id;
-  if(shared)ensure(await new ThotGovernance(chain).ownsTreasury(data.wallet),'NOT_FOUND',404);
+  const shared=sharedDelivery&&data.i.treasury===true&&data.i.owner_id!==actor.id;
+  if(shared)ensure(data.i.wallet===chain.config.reserve&&await new ThotGovernance(chain).ownsTreasury(data.wallet),'NOT_FOUND',404);
   const o=await chain.offer(id);
   ensure(o.status!==0,'OFFER_NOT_CONFIRMED',409);
   ensure(o.buyer===data.i.wallet&&o.seller===data.i.seller_wallet&&o.gross===data.i.gross&&o.seller_gross===(data.i.seller_gross??data.i.gross)&&o.buyer_surcharge===(data.i.buyer_surcharge??'0')&&o.buyer_total===(data.i.buyer_total??data.i.gross)&&o.license_hash===data.i.license_hash&&o.evidence_hash===data.i.evidence_hash,'ONCHAIN_OFFER_MISMATCH',409);

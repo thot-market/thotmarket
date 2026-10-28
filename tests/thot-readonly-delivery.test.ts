@@ -47,17 +47,19 @@ test('treasury deliveries are shared with current governors only, without expand
  const hash='0x'+canonicalHash(release).replace(/^sha256:/,'');
  const ref=await app.privacy.seal(demoUser.id,release);
  let status=3,owner=true,checks=0,timestamp=2;
- ThotGovernance.prototype.ownsTreasury=async function(address){assert.equal(address,wallet);checks++;return owner;};
+ ThotGovernance.prototype.ownsTreasury=async function(address){assert([wallet,'0x'+'2'.repeat(40)].includes(address));checks++;return owner;};
  ThotGovernance.prototype.workspace=async function(){return {owner} as Awaited<ReturnType<typeof originalWorkspace>>;};
  app.thot.chain={config:{reserve,reserveCampaigns:false,manualReserve:true},capabilities:()=>({}),isReserveBuyer:async()=>false,reserveState:async()=>({}),offer:async()=>({status,buyer:reserve,seller:'0x'+'2'.repeat(40),gross:'1',seller_gross:'1',buyer_surcharge:'0',buyer_total:'1',license_hash:'0x'+'b'.repeat(64),evidence_hash:hash,delivery_hash:hash,accepted_at:1,dispute_seconds:3600,block:{timestamp,number:10}})} as unknown as ThotChain;
  await app.db.transaction(async tx=>{
   await tx.insert('thot_records','wallet:'+demoBuyer.id,demoBuyer.id,{kind:'wallet',address:wallet});
+  await tx.insert('thot_records','wallet:'+demoUser.id,demoUser.id,{kind:'wallet',address:'0x'+'2'.repeat(40)});
   await tx.insert('thot_records','listing',demoUser.id,{kind:'listing',release_ref:ref,retention_days:30});
   await tx.insert('thot_records','intent:'+id,'another-purchaser',{kind:'intent',treasury:true,offer_id:id,listing_id:'listing',wallet:reserve,seller_wallet:'0x'+'2'.repeat(40),seller_id:demoUser.id,gross:'1',seller_gross:'1',buyer_surcharge:'0',buyer_total:'1',license_hash:'0x'+'b'.repeat(64),evidence_hash:hash});
  });
  const library=await app.thot.samplingWorkspace(demoBuyer);assert.equal(library.jobs.length,1);assert.equal(library.jobs[0].shared,true);assert.equal(library.jobs[0].resume_available,false);
  const result=await app.thot.delivery(demoBuyer,id);
  assert.deepEqual(result.release,{content:release.content,license:release.license});assert.equal(checks,2);
+ assert.deepEqual((await app.thot.delivery(demoUser,id)).release,result.release,'a governor who also sold this release can use the shared library');
  owner=false;await assert.rejects(app.thot.delivery(demoBuyer,id),/NOT_FOUND/);await assert.rejects(app.thot.samplingWorkspace(demoBuyer),/RESERVE_BUYER_OR_GOVERNANCE_OWNER_REQUIRED/);
  owner=true;status=2;assert.equal((await app.thot.samplingWorkspace(demoBuyer)).jobs.length,0);await assert.rejects(app.thot.delivery(demoBuyer,id),/DELIVERY_NOT_AUTHORIZED/);
  status=3;timestamp=1+30*86400;await assert.rejects(app.thot.delivery(demoBuyer,id),/LICENSE_RETENTION_EXPIRED/);
