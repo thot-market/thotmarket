@@ -103,7 +103,7 @@ test('listing choices use the private library title without changing their item 
 
 test('Offers, Earnings and THOT have distinct content and keep actions in their intended view',()=>{
  const {ui}=viewFixture(),offers=ui.offersHTML(),earnings=ui.earningsHTML(),token=ui.tokenHTML();
- assert.match(offers,/<h1>Buy an item\. Put it to work\.<\/h1>/);
+ assert.match(offers,/<h1>Marketplace<\/h1>/);
  assert.match(offers,/data-action="thot-list-configure"/);assert.match(offers,/data-action="thot-buy"/);
  assert.doesNotMatch(offers,/id="thot-lock"|id="thot-referrer"|data-action="thot-claim"/);
  assert.match(earnings,/<h1>What your work has earned\.<\/h1>/);assert.match(earnings,/data-action="thot-claim"/);

@@ -622,3 +622,31 @@ body{background:var(--paper)}
 @media(max-width:600px){.connected-app .journey-nav{display:flex;justify-content:flex-start;padding-top:8px;gap:2px}.connected-app .journey-nav .nav-item{flex:0 0 auto;padding:8px 12px}.connected-app .workspace-section{padding:9px 12px}.connected-app .workspace-sections{gap:2px}.connected-app .treasury-empty{padding:28px 18px}.connected-app .journey-account{margin-left:0}}
 .connected-app .thot-workspace>.page-heading+.legal-note{margin:10px 0;font-size:12px}
 @media(max-width:600px){.connected-app .journey-nav{display:flex;flex-wrap:wrap;overflow:visible}.connected-app .journey-nav .nav-item{padding:8px 10px;min-height:38px}.connected-app .workspace-sections{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;margin:12px 0 20px}.connected-app .workspace-section{font-size:12px;padding:8px 3px}.connected-app .page-heading{gap:10px}.connected-app [data-treasury-panel]>.section-head{flex-direction:row;align-items:flex-start}.connected-app [data-treasury-panel]>.section-head>div{min-width:0}.connected-app [data-treasury-panel]>.section-head>.pill{flex-shrink:0;font-size:10px}}
+
+/* Compact marketplace directory; secondary metadata stays within each row. */
+.connected-app .thot-listings{display:block;border-top:1px solid var(--line)}
+.connected-app .thot-listing{display:grid;grid-template-columns:minmax(200px,1fr) minmax(220px,.8fr) 90px 215px;gap:20px;align-items:start;padding:16px 12px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent}
+.connected-app .thot-listing:hover{background:var(--surface)}
+.connected-app .thot-listing h3{font:650 16px/1.4 "Bricolage Grotesque",ui-sans-serif,sans-serif;letter-spacing:0;margin:0 0 6px}
+.connected-app .thot-listing details{font-size:12px;margin:0}
+.connected-app .thot-listing details p{font-size:13px;line-height:1.5}
+.connected-app .thot-listing summary{color:var(--muted);cursor:pointer}
+.connected-app .market-seller{min-width:0}
+.connected-app .market-seller .thot-seller-wallet{margin:0;padding:0;border:0;background:transparent;gap:6px}
+.connected-app .market-seller .thot-seller-address{font-size:10px;overflow-wrap:anywhere}
+.connected-app .market-seller .thot-seller-label,.connected-app .market-column-label{display:block;font-size:10px;line-height:1.4;color:var(--muted);margin-bottom:4px}
+.connected-app .market-size{font-size:13px;font-variant-numeric:tabular-nums}
+.connected-app .thot-listing-purchase{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;padding:0;margin:0;border:0;background:transparent}
+.connected-app .thot-listing-purchase .market-column-label{grid-column:1;margin:0}
+.connected-app .thot-listing-purchase .thot-listing-price{grid-column:1;font-size:15px;font-weight:650;white-space:normal;margin:0}
+.connected-app .thot-listing-purchase .button{grid-column:2;grid-row:1/3;width:auto;padding:9px 12px;min-height:36px;font-size:12px;white-space:nowrap}
+@media(max-width:1100px){.connected-app .thot-listing{grid-template-columns:minmax(180px,1fr) 210px 65px 180px;gap:12px}}
+@media(max-width:800px){.connected-app .thot-listing{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;padding:14px 0}.connected-app .thot-listing-body{grid-column:1/-1}.connected-app .market-seller{grid-column:1}.connected-app .market-size{grid-column:2}.connected-app .thot-listing-purchase{grid-column:1/-1;grid-template-columns:1fr auto}.connected-app .thot-listing-purchase .button{min-height:44px}.connected-app .thot-listing h3{font-size:16px}}
+@media(min-width:801px){.connected-app .thot-listing{padding-block:12px}.connected-app .thot-listing summary{min-height:24px;padding-block:2px;font-size:12px}}
+.connected-app .thot-workspace:has(.thot-listings) .page-heading{margin-bottom:12px;gap:12px;align-items:center}
+.connected-app .thot-workspace:has(.thot-listings) .page-heading h1{font-size:28px;margin-bottom:6px}
+.connected-app .thot-workspace:has(.thot-listings) .page-heading .eyebrow{display:none}
+.connected-app .thot-workspace:has(.thot-listings) .thot-section-nav{margin-block:12px}
+.connected-app .market-seller .thot-seller-wallet>div{min-width:0}
+.connected-app .market-seller .thot-seller-address{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:800px){.connected-app .thot-listing{grid-template-columns:minmax(0,1fr) 110px;gap:8px 12px}.connected-app .thot-listing-body{grid-column:1;grid-row:1}.connected-app .market-seller{grid-column:1;grid-row:2}.connected-app .market-size{grid-column:2;grid-row:2}.connected-app .thot-listing-purchase{grid-column:2;grid-row:1;display:flex;flex-direction:column;align-items:flex-end;gap:4px}.connected-app .market-seller .thot-copy-wallet{padding:6px;min-height:36px}.connected-app .thot-listing-purchase .button{width:100%}.connected-app .thot-workspace:has(.thot-listings) .page-heading{flex-direction:row;flex-wrap:wrap}.connected-app .thot-workspace:has(.thot-listings) .section-head{margin-block:16px;gap:6px}}

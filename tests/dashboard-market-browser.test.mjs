@@ -22,8 +22,9 @@ before(async()=>{
 });
 after(async()=>{await browser?.close();});
 
-async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user'}={}){
+async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user',listingCount=1}={}){
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
+ const listings=Array.from({length:listingCount},(_,i)=>({...listing,id:i?'synthetic-listing-'+i:listing.id,title:i?'Synthetic research comparison '+(i+1):listing.title}));
  const chain=deferred(),catalog=deferred(),requests=[],errors=[];
  let revoked=false,failed=failWorkspace;
  t.after(async()=>{chain.resolve();catalog.resolve();await context.close();});
@@ -49,8 +50,8 @@ async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vaul
      if(path==='/v1/auth/capabilities')return send({mode:'wallet_siwe',wallet:{chain_id:31337,rpc_url:origin+'/rpc'}});
      if(path==='/v1/auth/session')return send(revoked?{}:{actor:{id:'synthetic-reader',role},wallet_address:wallet,chain_id:31337},revoked?401:200);
      if(path==='/v1/auth/session/revoke'){revoked=true;return send({});}
-     if(path==='/v1/thot/catalog'){if(holdCatalog)await catalog.promise;return send(catalogue);}
-     if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
+     if(path==='/v1/thot/catalog'){if(holdCatalog)await catalog.promise;return send({...catalogue,listings});}
+     if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,listings,workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
      if(path==='/v1/money/capabilities')return send({mode:'mock'});
      if(path==='/v1/earnings')return send({entitlements:[],settlements:[],burn_allocations:[]});
      if(path==='/v1/contributor/portfolio')return send({items:[],robinhood:{status:'not_linked'}});
@@ -210,3 +211,22 @@ test('primary navigation has one active destination and Purchases opens purchase
  await f.page.reload();await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();
  assert.equal(new URL(f.page.url()).hash,'#receipts');
  });
+
+
+test('marketplace uses compact aligned rows with expandable terms on desktop and usable mobile actions',async t=>{
+ const f=await fixture(t,{listingCount:10});await f.open();f.release();await ready(f.page).waitFor();
+ const rows=f.page.locator('.thot-listing');assert.equal(await rows.count(),10);
+ const first=await rows.nth(0).boundingBox(),second=await rows.nth(1).boundingBox();
+ assert(first.height<110,'collapsed listing stays under 110px');assert.equal(first.x,second.x);
+ assert(Math.abs(first.y+first.height-second.y)<2,'directory rows have no card gaps');
+ assert.equal(await rows.nth(0).locator('details').getAttribute('open'),null);
+ await f.snapshot('marketplace-directory-desktop');
+ await rows.nth(0).locator('summary').click();assert(await rows.nth(0).getByText(listing.license,{exact:true}).isVisible());
+ assert.equal(await rows.nth(1).locator('details').getAttribute('open'),null);
+ await rows.nth(0).locator('summary').click();
+ await f.page.setViewportSize({width:390,height:844});
+ assert(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ const action=await ready(f.page).boundingBox();assert(action.width>=44&&action.height>=44);
+ await f.snapshot('marketplace-directory-mobile');
+ assert.equal(f.requests.filter(r=>r.method!=='GET').length,0);
+});
