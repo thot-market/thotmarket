@@ -108,7 +108,7 @@ test('Offers, Earnings and THOT have distinct content and keep actions in their 
  assert.doesNotMatch(offers,/id="thot-lock"|id="thot-referrer"|data-action="thot-claim"/);
  assert.match(earnings,/<h1>What your work has earned\.<\/h1>/);assert.match(earnings,/data-action="thot-claim"/);
  assert.doesNotMatch(earnings,/id="thot-lock"|id="thot-referrer"|id="thot-workflow"|data-action="thot-buy"/);
- assert.match(token,/<h1>Put time behind your THOT\.<\/h1>/);
+ assert.match(token,/<h1>Wallet & THOT<\/h1>/);
  assert.match(token,/data-staking-preview/);assert.match(token,/Enrollment opens after the reward pool is funded/);
  assert.doesNotMatch(token,/id="thot-lock"|Lock tiers/);assert.match(token,/id="thot-referrer"/);
  assert.doesNotMatch(token,/data-action="thot-buy"|Your sale receipts/);assert.match(token,/data-action="thot-claim"/);
