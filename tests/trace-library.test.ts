@@ -209,3 +209,11 @@ test('a completed private capture remains readable but cannot use import rights 
   await assert.rejects(app.portfolio.prepareSale(actor,'no-retroactive-capture-rights',saved.trace_id,{content_commitment:canonicalHash(item.content),rights_confirmed:true,model_output_licensed:true}),/PRIVATE_IMPORT_REQUIRED/);
   assert.equal((await app.library.item(actor,saved.trace_id)).sale_eligibility.can_list,false);
 });
+
+test('operator retention diagnostics show tombstones but never content or object references',async t=>{
+ const app=await fixture(t);
+ await app.db.transaction(async tx=>{await tx.insert('traces','expired-fixture',actor.id,{trace_id:'expired-fixture',created_at:'2026-01-01T00:00:00Z',retention_expires_at:'2026-01-31T00:00:00Z',deleted:true,display_status:'EXPIRED',source_private_objects_deleted:true,private_objects_deleted:true,raw_ref:{objectId:'secret-object'},private_note:'never expose'});});
+ const r=await app.library.operator(operator,{view:'retention'});assert.equal(r.total_matches,1);assert.equal(r.items[0].state,'EXPIRED');assert.equal(r.items[0].all_objects_deleted,true);assert.equal(r.items[0].retention_expires_at,'2026-01-31T00:00:00Z');assert.doesNotMatch(JSON.stringify(r),/secret-object|never expose|demo-user/);
+ await assert.rejects(app.library.operator(actor,{view:'retention'}),/FORBIDDEN/);
+ assert.equal((await app.library.operator(operator)).summary.saved,0);
+});

@@ -1095,3 +1095,43 @@ test('listing review and THOT page distinguish configured tariff profiles and un
   assert.equal(f.calls.some(call=>call.path==='/v1/thot/listings'),false);assert.equal(f.requests.length,0);
  }
 });
+
+function cartFixture(t,{failAt=0,uncertain=false,balance='10000000000000000000',checkoutDialog}={}){
+ let sends=0,reject=true;const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+ const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===failAt&&reject){reject=false;throw Object.assign(Error(uncertain?'Connection lost':'User rejected'),uncertain?{}:{code:4001});}return hash(sends);}return {status:'0x1'};},async(path,options)=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{id:hash(options.body.listing_id==='a'?101:102),wallet:owner,seller:other,buyer_total:'1000000000000000000',transactions:[transactions[1]]},{recoveryStorage:storage,...(checkoutDialog?{dialog:checkoutDialog}:{})});
+ f.state.thot.account={balance};f.state.thot.capabilities.mode='thot-anvil';f.state.thot.listings=['a','b'].map(id=>({id,title:'Synthetic '+id,seller:other,price_atoms:'1000000000000000000',license:'Synthetic licence'}));
+ const act=(op,id='')=>f.ui.action('thot-'+op,{dataset:{id},disabled:false});
+ return {...f,act,data,get sends(){return sends;},async select(){await act('cart-toggle','a');await act('cart-toggle','b');}};
+}
+test('cart quotes exact total once and completes sequential purchases, removing only paid items',async t=>{
+ const f=cartFixture(t);await f.select();await f.act('cart-review');assert.match(f.dialogs.at(-1)[3],/Pay 2 THOT/);assert.equal(f.sends,0);
+ await f.act('cart-pay');assert.equal(f.sends,2);assert.equal(f.dialogs.at(-1)[0],'Checkout complete');assert.match(f.ui.offersHTML(),/Cart \(0\)/);
+});
+test('cart stops on rejection, retains unpaid items, and a retry never resends the completed item',async t=>{
+ const f=cartFixture(t,{failAt:2});await f.select();await f.act('cart-review');await assert.rejects(f.act('cart-pay'),/User rejected/);assert.equal(f.sends,2);assert.match(f.ui.offersHTML(),/Cart \(1\)/);
+ await f.act('send');assert.equal(f.sends,3);assert.match(f.ui.offersHTML(),/Cart \(0\)/);
+});
+test('cart never resends an ambiguous payment and refuses insufficient aggregate balance',async t=>{
+ const f=cartFixture(t,{failAt:1,uncertain:true});await f.select();await f.act('cart-review');await assert.rejects(f.act('cart-pay'),/Connection lost/);await f.act('cart-review');assert.equal(f.dialogs.at(-1)[0],'Continue your purchase');await assert.rejects(f.act('send'),/may already have submitted/);assert.equal(f.sends,1);
+});
+test('cart invalidates reviewed quotes when items or account change',async t=>{
+ const f=cartFixture(t);await f.select();await f.act('cart-review');await f.act('cart-remove','a');await assert.rejects(f.act('cart-pay'),/Review the cart total/);assert.equal(f.sends,0);
+ await f.act('cart-review');f.state.generation++;await assert.rejects(f.act('cart-pay'),/account changed/);assert.equal(f.sends,0);
+});
+test('cart checks the combined balance before asking for a signature',async t=>{
+ const f=cartFixture(t,{balance:'1500000000000000000'});await f.select();await assert.rejects(f.act('cart-review'),/balance does not cover/);assert.equal(f.sends,0);
+});
+
+test('cart recovery after a recreated UI checks the saved hash and removes only its paid listing',async t=>{
+ const f=cartFixture(t,{failAt:2});await f.select();await f.act('cart-review');await assert.rejects(f.act('cart-pay'),/User rejected/);
+ const storage={getItem:k=>f.data.get(k),setItem:(k,v)=>f.data.set(k,v),removeItem:k=>f.data.delete(k)};
+ const ui=createThotUI({state:f.state,api:async()=>({market_paused:false}),openDialog:()=>{},dialog:{close(){}},refresh:async()=>{},escape:String,json:JSON.stringify,toast:()=>{},recoveryStorage:storage});
+ await ui.action('thot-resume-payment',button());await ui.action('thot-send',button());assert.equal(f.sends,3);assert.match(ui.offersHTML(),/Cart \(0\)/);
+});
+
+
+test('closing the checkout stops the next item without losing a confirmed payment',async t=>{
+ const dialog={open:true,close(){this.open=false;}},f=cartFixture(t,{checkoutDialog:dialog});await f.select();await f.act('cart-review');
+ const request=window.ethereum.request;window.ethereum.request=async p=>{const r=await request(p);if(p.method==='eth_sendTransaction')dialog.open=false;return r;};
+ await assert.rejects(f.act('cart-pay'),/Checkout paused/);assert.equal(f.sends,1);assert.match(f.ui.offersHTML(),/Cart \(1\)/);
+});

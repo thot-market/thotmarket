@@ -64,7 +64,8 @@ export async function purchaseApprovalReady({request,expected,from,token,market,
 // Contributors sign explicit enrollment terms; only the reserve worker moves its own funds.
 export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,toast,download,getProvider=()=>globalThis.window?.ethereum,recoveryStorage=globalThis.window?.sessionStorage,copyText=text=>globalThis.navigator.clipboard.writeText(text)}) {
  let pending=null,listingMetadata=null,listingScope=null,listingEnrollment=null,listingDirty=false,samplingPreview=null,samplingScope=null,reserveSelection=null,inFlight=false;
- let treasuryView='library';
+ let treasuryView='library',cartQuote=null,cartRunning=false;
+ const cartMemory=new Map();
  const recoveries=new Map();
  const fmt=value=>{const n=BigInt(value??0),base=10n**18n,frac=String(n%base).padStart(18,'0').slice(0,4).replace(/0+$/,'');return `${(n/base).toLocaleString()}${frac?'.'+frac:''} THOT`;}; // 100 THOT, 99.2 THOT: no padded zeros
  const inputAtoms=value=>{const text=String(value??'').trim();if(!/^(?:0|[1-9]\d*)(?:\.\d{1,18})?$/.test(text))throw Error('Enter a nonnegative THOT amount with at most 18 decimals.');const [whole,fraction='']=text.split('.');return (BigInt(whole)*10n**18n+BigInt(fraction.padEnd(18,'0'))).toString();};
@@ -106,8 +107,8 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  const storageKey=key=>'thot.wallet-recovery.v1:'+key;
  function saveRecovery(operation){
   if(!recoveryStorage)return;
-  const {key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics,seller}=operation;
-  recoveryStorage.setItem(storageKey(key),JSON.stringify({version:1,key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics,seller}));
+  const {key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics,seller,cartListingId}=operation;
+  recoveryStorage.setItem(storageKey(key),JSON.stringify({version:1,key,id,wallet,authority,confirmDisputeId,purchase,exit,notice,steps,buyer_total,economics,seller,cartListingId}));
  }
  function savedRecovery(key){
   if(recoveries.has(key))return recoveries.get(key);
@@ -239,7 +240,8 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
    pending=saved;title=saved.purchase?'Continue your purchase':'Resume your previous wallet action';
    extra=`<p class="checkout-resume">Your ${saved.purchase?'purchase':'wallet action'} is saved. Continue from the last step below.</p>`+(saved.purchase&&saved.buyer_total?purchaseReviewHTML(saved,false):(saved.extra??legacyPurchaseSummary(saved)));
   }else{
-   pending={...prepared,key,extra,steps:prepared.transactions.map(transaction=>({transaction,hash:null,confirmed:false,uncertain:false,reverted:false}))};
+   const transactions=prepared.transactions??prepared.steps?.map(step=>step.transaction);if(!Array.isArray(transactions)||!transactions.length)throw Error('No wallet transactions to review. Refresh the purchase.');
+   pending={...prepared,key,extra,steps:transactions.map(transaction=>({transaction,hash:null,confirmed:false,uncertain:false,reverted:false}))};
    recoveries.set(key,pending);
   }
   for(const [i,step] of pending.steps.entries()){delete step.allowanceSatisfied;delete step.paymentSubmitted;if(purchaseApproval(pending,step)&&pending.steps.slice(i+1).some(s=>s.hash&&s.transaction?.to?.toLowerCase()===capabilities().market?.toLowerCase()))step.paymentSubmitted=true;}
@@ -378,10 +380,26 @@ ${tradeEvidenceOptions(listingMetadata)}
    ${settlementHTML(r,{refundPaid,buyerTotal:r.buyer_total??o.buyer_total??r.gross??o.gross})}${settlementActions(o)}${refundPaid?`<p>${explorerLink('tx',o.refund_transaction)}</p>`:''}
    <details><summary>Purchase receipt</summary><p class="mono">${escape(o.id)}</p></details></article>`;
  }
+ function cartKey(){return 'thot.cart.v1:'+recoveryKey();}
+ function cartIds(){
+  const key=cartKey();if(cartMemory.has(key))return cartMemory.get(key);
+  let ids=[];try{const raw=JSON.parse(recoveryStorage?.getItem(key)??'[]');if(Array.isArray(raw))ids=[...new Set(raw.filter(x=>typeof x==='string'&&x.length>0&&x.length<=160))].slice(0,20);}catch{}
+  cartMemory.set(key,ids);return ids;
+ }
+ function saveCart(ids){cartMemory.set(cartKey(),ids);try{recoveryStorage?.setItem(cartKey(),JSON.stringify(ids));}catch{}cartQuote=null;}
+ function cartBarHTML(){return `<div class="market-cart-bar" data-market-cart><span><strong>${cartIds().length}</strong> selected</span>${button('cart-open','Cart ('+cartIds().length+')','',!cartIds().length,false)}</div>`;}
+ function updateCart(){
+  const bar=globalThis.document?.querySelector('[data-market-cart]');if(bar)bar.outerHTML=cartBarHTML();
+  for(const el of globalThis.document?.querySelectorAll?.('[data-action="thot-cart-toggle"]')??[]){const selected=cartIds().includes(el.dataset.id);el.textContent=selected?'✓ Added':'Add to cart';el.setAttribute('aria-pressed',String(selected));}
+ }
+ function showCart(){
+  const ids=cartIds(),listings=state.thot?.listings??[];
+  openDialog('Your cart','Pay with your wallet',`<div class="cart-items">${ids.map(id=>{const l=listings.find(l=>l.id===id);return `<div class="cart-item"><div><strong>${escape(l?.title??'Listing unavailable')}</strong><small>${l?escape(fmt(l.price_atoms)):'Remove this item to continue'}</small></div>${button('cart-remove','Remove',id)}</div>`;}).join('')||'<p>Your cart is empty.</p>'}</div><p>Review the exact total once, then confirm the wallet requests in sequence. Each item is a separate purchase; if one stops, earlier purchases remain yours.</p>`,button('cart-review','Review checkout','',!ids.length,true));
+ }
  function listingCard(l,{browseOnly=false,workspace=state.thot}={}){
   const w=workspace,canBuy=!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet);
   const size=l.content_kind==='research'?`${escape(l.file_count)} files${l.total_bytes?` · ${escape((l.total_bytes/1e6).toFixed(l.total_bytes<1e5?2:1))} MB`:''}`:`${escape(l.turn_count)} turns`;
-  return `<article class="thot-listing" data-listing-id="${escape(l.id)}"><div class="thot-listing-body"><h3>${escape(l.title)}</h3><details><summary>License &amp; source</summary><p>${escape(l.license)}</p><p>${escape(l.workflow)} · ${escape(l.provenance)}</p>${l.content_kind==='research'?`<p>${l.file_types?.length?escape(l.file_types.join(', '))+' · ':''}Uploaded by the seller · source not verified.</p>`:modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,canBuy?l.id:undefined)}${canBuy?(l.content_kind==='research'?'':button('assay','Check metadata',l.id))+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):''):''}</details></div><div class="market-seller">${sellerWalletHTML(l.seller)}</div><div class="market-size"><span class="market-column-label">Size</span>${size}</div><div class="thot-listing-purchase"><span class="market-column-label">Listed price</span><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong>${canBuy&&!purchasesPaused()?button('buy','View & buy',l.id,false,true):''}${!browseOnly&&sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
+  return `<article class="thot-listing" data-listing-id="${escape(l.id)}"><div class="thot-listing-body"><h3>${escape(l.title)}</h3><details><summary>License &amp; source</summary><p>${escape(l.license)}</p><p>${escape(l.workflow)} · ${escape(l.provenance)}</p>${l.content_kind==='research'?`<p>${l.file_types?.length?escape(l.file_types.join(', '))+' · ':''}Uploaded by the seller · source not verified.</p>`:modelHTML(l.capture_model)}${brokerageHTML(l.brokerage_claim,canBuy?l.id:undefined)}${canBuy?(l.content_kind==='research'?'':button('assay','Check metadata',l.id))+(w.reserve_buyer&&l.treasury_sample_available?button('buyer-sample','Inspect selected reserve sample',l.id)+(purchasesPaused()?'':button('reserve-buy','Buy using reserve',l.id)):''):''}</details></div><div class="market-seller">${sellerWalletHTML(l.seller)}</div><div class="market-size"><span class="market-column-label">Size</span>${size}</div><div class="thot-listing-purchase"><span class="market-column-label">Listed price</span><strong class="thot-listing-price">${escape(fmt(l.price_atoms))}</strong>${canBuy&&!purchasesPaused()?button('buy','View & buy',l.id,false,true)+`<button class="button secondary market-cart-choice" data-action="thot-cart-toggle" data-id="${escape(l.id)}" aria-pressed="${cartIds().includes(l.id)}">${cartIds().includes(l.id)?'✓ Added':'Add to cart'}</button>`:''}${!browseOnly&&sameWallet(l.seller,w.wallet)?button('unlist','Revoke future sale',l.id):''}</div></article>`;
  }
  function catalogueHTML(catalogue,{failed=false,catalogueError=false}={}){
   const listings=catalogue?.listings??[],available=listings.filter(l=>!sameWallet(l.seller,catalogue?.wallet));
@@ -398,7 +416,7 @@ ${tradeEvidenceOptions(listingMetadata)}
   const w=state.thot,orders=(w.orders??[]).filter(o=>sameWallet(o.buyer,w.wallet));
   const unpaid=orders.filter(isClosedUnpaidPurchase),open=orders.filter(o=>o.receipt.status<5&&!isClosedUnpaidPurchase(o)),closed=orders.filter(o=>o.receipt.status>=5);
   const waiting=open.some(o=>[0,1,2].includes(o.receipt.status));
-  return `<div class="section-head" id="thot-purchases"><h2>Your purchases</h2>${nav('thot','Manage THOT →')}</div>${waiting?'<p id="purchases-freshness" class="legal-note" role="status">Checking delivery automatically. No new payment is sent.</p>':''}<section class="cards">${open.map(orderCard).join('')||'<div class="panel"><p>No pending purchases.</p><button class="button secondary" data-view="market">Browse marketplace</button></div>'}</section>
+  return `<div class="section-head" id="thot-purchases"><h2>Your purchases</h2>${nav('thot','Manage THOT →')}</div>${waiting?'<p id="purchases-freshness" class="legal-note" role="status">Checking delivery automatically. No new payment is sent.</p>':''}<section class="cards">${open.map(orderCard).join('')||'<p class="legal-note">No pending purchases.</p>'}</section>
    ${closed.length?`<details class="technical-details" id="thot-history" ${state.view==='receipts'?'open':''}><summary>Completed & refunded purchases (${closed.length})</summary><section class="cards">${closed.map(orderCard).join('')}</section></details>`:''}
    ${unpaid.length?`<details class="technical-details" data-unpaid-attempts><summary>Unpaid purchase attempts (${unpaid.length})</summary><section class="cards">${unpaid.map(o=>`<article class="panel thot-unpaid-attempt" data-purchase-id="${escape(o.id)}"><span class="pill">Not paid · unavailable</span><h3>${escape(o.title)}</h3><p>This purchase review is no longer available. No payment was confirmed for this attempt.</p><details><summary>Purchase reference</summary><p class="mono">${escape(o.id)}</p></details></article>`).join('')}</section></details>`:''}
    ${w.orders_truncated?'<p class="legal-note">Showing purchases within the latest 50 account purchase and sale records.</p>':''}`;
@@ -415,7 +433,7 @@ ${tradeEvidenceOptions(listingMetadata)}
    (state.role!=='user'&&w.account&&BigInt(w.account.claimable)>0n?`<section class="panel"><h2>Available to claim</h2><strong>${escape(fmt(w.account.claimable))}</strong><p>Contract funds ready to return to your wallet, including purchase refunds and any eligible referral payouts.</p>${button('claim','Claim tokens')}</section>`:'')+
    `<div class="section-head" id="thot-available"><h2>For sale</h2><p>Content unlocks after purchase.</p></div>${purchasesPaused()?`<p role="status">${escape(pauseNotice())}</p>`:''}
    <details class="technical-details"><summary>Check workflow and length</summary><p>Check listing metadata using allowlisted predicate results without seeing the conversation.</p><div class="thot-filters"><div><label for="thot-workflow">Workflow</label><select id="thot-workflow"><option value="coding">Coding</option><option value="investment_research">Investment research</option><option value="research">Research</option><option value="contract_review">Contract review</option></select></div><div><label for="thot-min-turns">Minimum turns</label><input id="thot-min-turns" type="number" min="1" max="1000" value="2"></div></div></details>
-   <section class="thot-listings" aria-label="For sale">${available.map(listingCard).join('')||'<div class="panel thot-empty"><h3>No data available yet</h3><p>Contributor-authorized research will appear here. Refresh to check for new listings.</p></div>'}</section>
+   ${w.wallet?cartBarHTML():''}<section class="thot-listings" aria-label="For sale">${available.map(listingCard).join('')||'<div class="panel thot-empty"><h3>No data available yet</h3><p>Contributor-authorized research will appear here. Refresh to check for new listings.</p></div>'}</section>
    <section id="thot-buyer-purchases">${purchasesHTML()}</section>
    ${w.wallet&&state.role==='user'?`<details class="technical-details" id="thot-contribute"><summary>Manage your listings</summary><div class="section-head"><h2>Sell your data</h2>${nav('earnings','View earnings →')}</div><section class="panel"><h3>List an item you choose</h3><p>Set a price and authorize the exact scrubbed release. Buyers can then purchase it automatically.</p>${traces.length?`<label for="thot-trace">Your item</label><select id="thot-trace">${traces.map(t=>`<option value="${escape(t.trace_id)}">${escape(traceTitle(t))}</option>`).join('')}</select>${capabilities().trade_evidence===true?button('trade-evidence-begin','Add trade proof'):''}${button('list-configure','Set listing terms')}`:`<p>Save an item in your private library first.</p>${nav('vault','Open your data →')}`}</section>${own.length?`<h3>Your active listings</h3><section class="thot-listings">${own.map(listingCard).join('')}</section>`:''}${sales.length?`<details class="technical-details"><summary>Your sale receipts (${sales.length})</summary><section class="cards">${sales.map(orderCard).join('')}</section></details>`:''}</details>`:''}${contractDetails()}`;
  }
@@ -580,6 +598,38 @@ ${tradeEvidenceOptions(listingMetadata)}
  async function action(name,element){
   if(!name.startsWith('thot-'))return false;
   const op=name.slice(5),id=element.dataset.id,current=scope();
+  if(cartRunning&&op!=='send')throw Error('Finish or cancel the current wallet request first.');
+  if(op==='cart-toggle'||op==='cart-remove'){
+   if(inFlight)throw Error('Wait for the current wallet request.');
+   const ids=cartIds(),selected=ids.includes(id);
+   if(op==='cart-remove'||selected)saveCart(ids.filter(x=>x!==id));
+   else{const l=state.thot?.listings?.find(l=>l.id===id);if(!l||!state.thot.wallet||sameWallet(l.seller,state.thot.wallet))throw Error('This listing cannot be added.');if(ids.length>=20)throw Error('Check out up to 20 items at a time.');saveCart([...ids,id]);}
+   updateCart();if(op==='cart-remove')showCart();return true;
+  }
+  if(op==='cart-done'){dialog.close();globalThis.document?.querySelector('.journey-nav [data-view=receipts]')?.click?.();return true;}
+  if(op==='cart-open'){showCart();return true;}
+  if(op==='cart-review'){
+   if(inFlight)throw Error('Wait for the current wallet request.');
+   const saved=savedRecovery(recoveryKey());if(saved&&attempted(saved)){review('Continue your purchase',saved);return true;}
+   if(purchasesPaused())throw Error(pauseNotice());
+   const ids=[...cartIds()];if(!ids.length)throw Error('Add an item first.');
+   const items=[];inFlight=true;element.disabled=true;cartQuote=null;
+   try{
+    for(const listingId of ids){const l=state.thot.listings.find(l=>l.id===listingId);if(!l||sameWallet(l.seller,state.thot.wallet))throw Error('A selected listing is unavailable. Refresh and remove it from the cart.');const prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:listingId}});current();if(BigInt(prepared.buyer_total)<=0n)throw Error('Invalid checkout quote.');items.push({listingId,title:l.title,license:l.license,prepared});}
+    const total=items.reduce((n,i)=>n+BigInt(i.prepared.buyer_total),0n);if(state.thot.account?.balance==null||total>BigInt(state.thot.account.balance))throw Error('Your THOT balance does not cover the cart total.');
+    cartQuote={items,current,key:recoveryKey()};
+    openDialog('Review checkout',`${items.length} items · paid from your wallet`,items.map(i=>`<div class="cart-item"><div><strong>${escape(i.title)}</strong><details><summary>Licence</summary><p>${escape(i.license)}</p></details></div><strong>${escape(fmt(i.prepared.buyer_total))}</strong></div>`).join('')+`<div class="checkout-summary"><div><small>Total payment</small><strong>${escape(fmt(total))}</strong></div></div><p>Network gas is additional. Confirm each wallet request. Purchases run in order and stop on a rejection or error; completed items are not charged again.</p>`,button('cart-pay','Pay '+escape(fmt(total)),'',false,true));
+   }finally{inFlight=false;element.disabled=false;}return true;
+  }
+  if(op==='cart-pay'){
+   if(inFlight)return true;const quote=cartQuote;if(!quote)throw Error('Review the cart total again.');quote.current();if(quote.key!==recoveryKey())throw Error('Your account changed. Review checkout again.');
+   const saved=savedRecovery(recoveryKey());if(saved&&attempted(saved)){review('Continue your purchase',saved);return true;}
+   cartRunning=true;cartQuote=null;let completed=0;
+   try{
+    for(const item of quote.items){quote.current();if(dialog.open===false)throw Error('Checkout paused. Continue from your cart.');if(!cartIds().includes(item.listingId))throw Error('Cart changed. Review checkout again.');review(`Checkout ${completed+1} of ${quote.items.length}`,{...item.prepared,purchase:true,cartListingId:item.listingId},`<h3>${escape(item.title)}</h3>`+purchaseReviewHTML(item.prepared,false));await action('thot-send',{dataset:{},disabled:false});quote.current();if(pending)throw Error('Check the current payment before continuing.');completed++;}
+    await refresh();if(quote.key!==recoveryKey())throw Error('Account changed. Check purchases in the original account.');openDialog('Checkout complete',`${completed} items paid`, '<p>Your purchases are saved. Open Purchases to follow delivery and read your data.</p>','<button class="button" data-action="thot-cart-done">View purchases</button>');
+   }finally{cartRunning=false;updateCart();}return true;
+  }
   if(op==='treasury-view'){
    if(!['library','buy','budgets','governance'].includes(id))return true;
    treasuryView=id;
@@ -709,6 +759,7 @@ ${tradeEvidenceOptions(listingMetadata)}
     const from=await connected(operation.authority==='operator');operation.current();
     if(operation.wallet&&!sameWallet(operation.wallet,from))throw Error('The prepared action requires a different wallet. Review it again.');
     for(const step of operation.steps){
+     if(cartRunning&&operation.cartListingId&&dialog.open===false)throw Error('Checkout paused. Continue from your cart.');
      // Already submitted transactions must reconcile even during a pause.
      if(operation.purchase&&!step.hash&&!step.uncertain&&!step.confirmed){
       let workspace;try{workspace=await api('/v1/thot/workspace?scope=buyer');}catch(error){state.thot.market_paused=null;throw Error('Purchase availability is unknown. Check the chain before submitting payment.');}
@@ -735,7 +786,8 @@ ${tradeEvidenceOptions(listingMetadata)}
     }
     if(operation.confirmDisputeId){await api('/v1/thot/disputes/confirm',{method:'POST',body:{id:operation.confirmDisputeId,transaction_hash:operation.steps.at(-1).hash}});operation.current();}
     operation.current();recoveryStorage?.removeItem(storageKey(operation.key));recoveries.delete(operation.key);if(pending===operation)pending=null;
-    dialog.close();await refresh();toast(operation.purchase?'Payment confirmed. Your purchase is now in Offers; delivery status updates there.':'Transaction confirmed. The displayed contract state has been refreshed.');
+    if(operation.cartListingId){saveCart(cartIds().filter(id=>id!==operation.cartListingId));updateCart();}
+    if(!cartRunning){dialog.close();await refresh();}toast(operation.purchase?'Payment confirmed. Your purchase is now in Offers; delivery status updates there.':'Transaction confirmed. The displayed contract state has been refreshed.');
    }finally{operation.phase=null;inFlight=false;element.disabled=false;if(pending===operation)updateProgress(operation);}
    return true;
   }
@@ -957,6 +1009,6 @@ ${tradeEvidenceOptions(listingMetadata)}
   const body=op==='lock'?{action:op,amount:document.querySelector('#thot-lock').value}:op==='refer'?{action:op,referrer:document.querySelector('#thot-referrer').value}:op==='withdraw'||op==='extend'?{action:op,lot_id:Number(id)}:op==='dispute-confirm'?{action:'dispute',id,reason:document.querySelector('#thot-reason').value}:{action:op,id};
   const prepared=await api('/v1/thot/transaction',{method:'POST',body});current();review(op==='dispute-confirm'?'Review your dispute':'Review THOT action',{...prepared,...(['claim','finalize','cancelOffer','refundExpired','refundUndelivered','withdraw','staking-claim','dispute-confirm'].includes(op)?{exit:true}:{}),...(op==='dispute-confirm'?{confirmDisputeId:id}:{})});return true;
  }
- const clearPrivateReview=()=>{treasuryView='library';listingMetadata=null;listingScope=null;listingEnrollment=null;listingDirty=false;};
+ const clearPrivateReview=()=>{cartQuote=null;cartMemory.clear();treasuryView='library';listingMetadata=null;listingScope=null;listingEnrollment=null;listingDirty=false;};
  return {clearPrivateReview,walletSummaryHTML,catalogueHTML,purchasesHTML,offersHTML,earningsHTML,tokenHTML,valuationsHTML,samplingHTML,disputesHTML,onInput,action};
 }

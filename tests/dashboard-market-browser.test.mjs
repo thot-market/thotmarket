@@ -22,25 +22,29 @@ before(async()=>{
 });
 after(async()=>{await browser?.close();});
 
-async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user',listingCount=1}={}){
+async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user',listingCount=1,checkout=false}={}){
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
  const listings=Array.from({length:listingCount},(_,i)=>({...listing,id:i?'synthetic-listing-'+i:listing.id,title:i?'Synthetic research comparison '+(i+1):listing.title}));
+ page.setDefaultTimeout(15000);
  const chain=deferred(),catalog=deferred(),requests=[],errors=[];
  let revoked=false,failed=failWorkspace;
  t.after(async()=>{chain.resolve();catalog.resolve();await context.close();});
  page.on('pageerror',e=>errors.push(e.message));
  t.after(()=>assert.deepEqual(errors,[]));
- await context.addInitScript(({wallet,remembered})=>{
+ await context.addInitScript(({wallet,remembered,checkout})=>{
+   window.fixturePayments=[];
    const listeners=new Map();
    window.ethereum={isMetaMask:true,request:async p=>{
-     if(p.method==='eth_accounts')return[wallet];if(p.method==='eth_chainId')return'0x7a69';throw Error('No signing in catalogue fixture');
+     if(p.method==='eth_accounts'||p.method==='eth_requestAccounts')return[wallet];if(p.method==='eth_chainId')return'0x7a69';
+     if(checkout){if(p.method==='eth_call')return '0x';const h='0x'+'9'.repeat(64);if(p.method==='eth_sendTransaction'){window.fixturePayments.push(p.params[0]);return '0x'+String(window.fixturePayments.length).padStart(64,'0');}if(p.method==='eth_blockNumber')return '0x20';if(p.method==='eth_getBlockByNumber')return {hash:h};if(p.method==='eth_getTransactionReceipt')return {status:'0x1',transactionHash:p.params[0],blockNumber:'0x10',blockHash:h};if(p.method==='eth_getTransactionByHash')return null;}
+     throw Error('Unexpected wallet request in catalogue fixture');
    },on(event,fn){listeners.set(event,fn);},removeListener(event){listeners.delete(event);}};
    window.fixtureAccountChange=()=>listeners.get('accountsChanged')?.(['0x0000000000000000000000000000000000000003']);
    if(!sessionStorage.getItem('fixture-initialized')){
      sessionStorage.setItem('thot.workspace-view.v1',JSON.stringify({actor:'synthetic-reader',role:'user',view:remembered}));
      sessionStorage.setItem('fixture-initialized','yes');
    }
- },{wallet,remembered});
+ },{wallet,remembered,checkout});
  await context.route('**/*',async route=>{
    const u=new URL(route.request().url()),path=u.pathname;
    if(u.origin!==origin)return route.abort();
@@ -52,6 +56,7 @@ async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vaul
      if(path==='/v1/auth/session/revoke'){revoked=true;return send({});}
      if(path==='/v1/thot/catalog'){if(holdCatalog)await catalog.promise;return send({...catalogue,listings});}
      if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,listings,workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
+     if(path==='/v1/thot/offers/prepare'&&checkout){const i=listings.findIndex(l=>l.id===route.request().postDataJSON().listing_id);assert(i>=0);return send({id:'0x'+String(i+10).padStart(64,'0'),wallet,seller,buyer_total:'1000000000000000000',transactions:[{to:seller,data:'0xaaaa',value:'0x0',chainId:'0x7a69'}]});}
      if(path==='/v1/money/capabilities')return send({mode:'mock'});
      if(path==='/v1/earnings')return send({entitlements:[],settlements:[],burn_allocations:[]});
      if(path==='/v1/contributor/portfolio')return send({items:[],robinhood:{status:'not_linked'}});
@@ -229,4 +234,16 @@ test('marketplace uses compact aligned rows with expandable terms on desktop and
  const action=await ready(f.page).boundingBox();assert(action.width>=44&&action.height>=44);
  await f.snapshot('marketplace-directory-mobile');
  assert.equal(f.requests.filter(r=>r.method!=='GET').length,0);
+});
+
+
+test('cart reviews two items once and drives sequential wallet payments without returning to the catalogue',async t=>{
+ const f=await fixture(t,{listingCount:2,checkout:true});await f.open();f.release();await ready(f.page).waitFor();
+ const add=f.page.locator('[data-action="thot-cart-toggle"]');await add.nth(0).click();await add.nth(1).click();
+ await f.page.reload({waitUntil:'domcontentloaded'});await ready(f.page).waitFor();assert.equal(await add.nth(0).getAttribute('aria-pressed'),'true');
+ await f.page.getByRole('button',{name:'Cart (2)',exact:true}).click();await f.page.getByRole('button',{name:'Review checkout',exact:true}).click();
+ await f.page.getByRole('button',{name:'Pay 2 THOT',exact:true}).waitFor();assert.equal(await f.page.evaluate(()=>window.fixturePayments.length),0);await f.snapshot('cart-review');
+ await f.page.getByRole('button',{name:'Pay 2 THOT',exact:true}).click();await f.page.getByRole('heading',{name:'Checkout complete',exact:true}).waitFor().catch(async e=>{await f.snapshot('cart-error');throw new Error(await f.page.locator('#detail-dialog').innerText(),{cause:e});});
+ assert.equal(await f.page.evaluate(()=>window.fixturePayments.length),2);assert.equal(await add.nth(0).getAttribute('aria-pressed'),'false');
+ await f.snapshot('cart-complete');await f.page.getByRole('button',{name:'View purchases',exact:true}).click();await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();assert.equal(await f.page.locator('#detail-dialog').evaluate(d=>d.open),false);
 });

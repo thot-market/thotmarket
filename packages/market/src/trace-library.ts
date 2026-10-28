@@ -175,10 +175,18 @@ export class TraceLibrary {
       return {trace_id:id,status:'PENDING'};
     });
   }
-  async operator(actor:Actor,query:Document={}){
+  async operator(actor:Actor,query:Document={}):Promise<{view:string;refreshed_at:string;items:Document[];summary:Document;total_matches:number;has_more:boolean;range?:string}>{
     ensure(this.canExplore(actor),'FORBIDDEN',403);
     return this.service.db.transaction(async tx=>{
-      const now=this.service.now(),traces=(await tx.list('traces')).filter(t=>!t.deleted&&t.retention_expires_at>now),captures=await tx.list('agent_captures');
+      const now=this.service.now(),allTraces=await tx.list('traces');
+      if(query.view==='retention'){
+        ensure(actor.role==='operator_security','FORBIDDEN',403);
+        const limit=Number(query.limit??50),offset=Number(query.offset??0);ensure(Number.isSafeInteger(limit)&&limit>0&&limit<=100&&Number.isSafeInteger(offset)&&offset>=0,'INVALID_EXPLORER_PAGE');
+        // Tombstone metadata only: never decrypt expired content or expose object references.
+        const rows=allTraces.map(t=>({trace_id:t.trace_id,owner_ref:canonicalHash(t.owner_id).slice(0,16),created_at:t.created_at,retention_expires_at:t.retention_expires_at,state:t.display_status,deleted:t.deleted===true,source_objects_deleted:t.source_private_objects_deleted===true,all_objects_deleted:t.private_objects_deleted===true})).sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
+        return {view:'retention',refreshed_at:now,summary:{records:rows.length},items:rows.slice(offset,offset+limit),total_matches:rows.length,has_more:offset+limit<rows.length};
+      }
+      const traces=allTraces.filter(t=>!t.deleted&&t.retention_expires_at>now),captures=await tx.list('agent_captures');
       const inventory=new Map(traces.map(t=>[t.trace_id,t]));
       const attempts=captures.map(c=>{
         const trace=inventory.get(c.result?.trace_id),state=trace?this.captureState(trace,c):c.last_error_code?'FAILED':c.expires_at<=now?'EXPIRED':'AWAITING_CHECKPOINT';
