@@ -217,3 +217,30 @@ test('operator retention diagnostics show tombstones but never content or object
  await assert.rejects(app.library.operator(actor,{view:'retention'}),/FORBIDDEN/);
  assert.equal((await app.library.operator(operator)).summary.saved,0);
 });
+
+
+test('default private captures survive years; owner deletion still removes their source',async t=>{
+ const app=await fixture(t),saved=await save(app),start=Date.now();
+ const trace=await app.db.transaction(tx=>tx.get('traces',saved.trace_id));
+ assert.equal(trace.retention_expires_at,'9999-12-31T23:59:59.999Z');
+ app.service.config.clock=()=>new Date(start+5*365*86400000);
+ await app.service.sweepRetention();
+ assert.equal((await app.library.list(actor)).summary.saved,1);
+ await app.service.deleteTrace(actor,'delete-long-term-source',saved.trace_id);
+ await app.db.transaction(tx=>app.service.deleteTraceObjects(tx,saved.trace_id));
+ const deleted=await app.db.transaction(tx=>tx.get('traces',saved.trace_id));
+ assert.equal(deleted.deleted,true);assert.equal(deleted.source_private_objects_deleted,true);
+ await assert.rejects(app.library.item(actor,saved.trace_id),/TRACE_CONTENT_UNAVAILABLE/);
+});
+
+test('explicit short retention and older deadlines remain enforceable',async t=>{
+ const app=await fixture(t),start=Date.now();app.service.config.clock=()=>new Date(start);
+ app.service.config.privateRetentionDays=30;
+ const saved=await save(app),original=await app.db.transaction(tx=>tx.get('traces',saved.trace_id));
+ assert.equal(original.retention_expires_at,new Date(start+30*86400000).toISOString());
+ delete app.service.config.privateRetentionDays;
+ app.service.config.clock=()=>new Date(start+31*86400000);await app.service.sweepRetention();
+ const expired=await app.db.transaction(tx=>tx.get('traces',saved.trace_id));
+ assert.equal(expired.display_status,'EXPIRED');assert.equal(expired.deleted,true);
+ assert.equal(expired.retention_expires_at,original.retention_expires_at);
+});

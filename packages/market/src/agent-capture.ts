@@ -185,7 +185,7 @@ export class AgentCaptureIngestion {
         const trace={...(old??{}),trace_id:traceId,category:'general',source_bundle_hash:sourceHash,source_bundle_id:bundleId,provenance_id:receiptId,
           ...(capture.sale_policy_id?{sale_policy_id:capture.sale_policy_id,capture_device_id:capture.device_id}:{}),
           provenance_status:verified?'VERIFIED':'OPERATOR_CAPTURED',rights_status:old?.rights_status??'pending',display_status:'PRIVATE',credential_ids:old?.credential_ids??[],outcome_ids:old?.outcome_ids??[],sale_count:old?.sale_count??0,deleted:false,created_at:old?.created_at??at,updated_at:at,observed_at:bundle.started_at,observed_end:bundle.finished_at,
-          retention_expires_at:old?.retention_expires_at??this.service.future((this.service.config.privateRetentionDays??30)*86400),
+          retention_expires_at:old?.retention_expires_at??this.service.privateRetentionExpiresAt(),
           capture_preview:old?.capture_preview??{title:`${source} conversation`,source,source_date:bundle.started_at,size_bytes:requestBytesTotal+responseBytesTotal,turn_count:0,content_commitment:sourceHash,privacy_flags:[]},
           ...(capture.context_ref?{context_ref:capture.context_ref}:{}),agent_capture_id:captureId,capture_consent_hash:capture.consent_hash,capture_summary:summary,projection:{...(old?.projection??{}),status:'PENDING',source_root:bundle.root},capture_state:final?(incomplete?'INTERRUPTED':'COMPLETED'):'RECORDING',last_checkpoint_at:at};
         if(old)await tx.update('traces',traceId,trace);else await tx.insert('traces',traceId,authenticated.owner_id,trace);

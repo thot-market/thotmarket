@@ -1096,9 +1096,9 @@ test('listing review and THOT page distinguish configured tariff profiles and un
  }
 });
 
-function cartFixture(t,{failAt=0,uncertain=false,balance='10000000000000000000',checkoutDialog}={}){
+function cartFixture(t,{failAt=0,uncertain=false,balance='10000000000000000000',quoteAmount='1000000000000000000',checkoutDialog}={}){
  let sends=0,reject=true;const data=new Map(),storage={getItem:k=>data.get(k),setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
- const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===failAt&&reject){reject=false;throw Object.assign(Error(uncertain?'Connection lost':'User rejected'),uncertain?{}:{code:4001});}return hash(sends);}return {status:'0x1'};},async(path,options)=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{id:hash(options.body.listing_id==='a'?101:102),wallet:owner,seller:other,buyer_total:'1000000000000000000',transactions:[transactions[1]]},{recoveryStorage:storage,...(checkoutDialog?{dialog:checkoutDialog}:{})});
+ const f=fixture(t,async p=>{if(p.method==='eth_sendTransaction'){sends++;if(sends===failAt&&reject){reject=false;throw Object.assign(Error(uncertain?'Connection lost':'User rejected'),uncertain?{}:{code:4001});}return hash(sends);}return {status:'0x1'};},async(path,options)=>path==='/v1/thot/workspace?scope=buyer'?{market_paused:false}:{id:hash(options.body.listing_id==='a'?101:102),wallet:owner,seller:other,buyer_total:quoteAmount,transactions:[transactions[1]]},{recoveryStorage:storage,...(checkoutDialog?{dialog:checkoutDialog}:{})});
  f.state.thot.account={balance};f.state.thot.capabilities.mode='thot-anvil';f.state.thot.listings=['a','b'].map(id=>({id,title:'Synthetic '+id,seller:other,price_atoms:'1000000000000000000',license:'Synthetic licence'}));
  const act=(op,id='')=>f.ui.action('thot-'+op,{dataset:{id},disabled:false});
  return {...f,act,data,get sends(){return sends;},async select(){await act('cart-toggle','a');await act('cart-toggle','b');}};
@@ -1134,4 +1134,10 @@ test('closing the checkout stops the next item without losing a confirmed paymen
  const dialog={open:true,close(){this.open=false;}},f=cartFixture(t,{checkoutDialog:dialog});await f.select();await f.act('cart-review');
  const request=window.ethereum.request;window.ethereum.request=async p=>{const r=await request(p);if(p.method==='eth_sendTransaction')dialog.open=false;return r;};
  await assert.rejects(f.act('cart-pay'),/Checkout paused/);assert.equal(f.sends,1);assert.match(f.ui.offersHTML(),/Cart \(1\)/);
+});
+
+test('cart review never truncates fractional quoted payments',async t=>{
+ const f=cartFixture(t,{quoteAmount:'997000000000001'});await f.select();await f.act('cart-review');
+ assert.match(f.dialogs.at(-1)[2],/0\.000997000000000001 THOT/);
+ assert.match(f.dialogs.at(-1)[3],/Pay 0\.001994000000000002 THOT/);
 });

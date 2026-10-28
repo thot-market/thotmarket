@@ -64,7 +64,7 @@ export class InferencePortfolioCapture {
         provenance_id:receiptId,rights_id:assessment.rights.assessment_id,scrub_id:assessment.scrub.scrub_id,raw_ref:rawRef,scrub_ref:scrubRef,
         provenance_status:'OPERATOR_CAPTURED',rights_status:assessment.rights.status,display_status:eligible?'AVAILABLE':'REJECTED',
         credential_ids:[],outcome_ids:[],sale_count:0,deleted:false,created_at:capturedAt,observed_at:request.finished_at,observed_end:request.finished_at,
-        retention_expires_at:this.service.future((this.service.config.privateRetentionDays??30)*86400),normalized_hash:canonicalHash(assessment.content),
+        retention_expires_at:this.service.privateRetentionExpiresAt(),normalized_hash:canonicalHash(assessment.content),
         capture_preview:{title:'THOT inference conversation',source:'THOT inference',source_date:request.finished_at,size_bytes:Buffer.byteLength(JSON.stringify(trace)),turn_count:2,content_commitment:contentCommitment,privacy_flags:[]},
         inference_request_id:requestId,capture_consent_hash:consentHash});
       await enqueueTraceQc(tx,savedTrace,this.service.now());

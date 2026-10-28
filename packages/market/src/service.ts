@@ -37,6 +37,7 @@ export interface MarketConfig {
   approvedLicenseTemplates: Record<string,string>;
   approvedCostCodes: string[];
   maxDirectCostsMinor: string;
+  /** Omit to keep new private sources until the owner deletes them. Explicit durations remain supported. */
   privateRetentionDays?: number;
   traceExplorerViewers?: string[];
   clock?: () => Date;
@@ -58,6 +59,8 @@ export class ThotService {
   thotRetention?:(tx:Transaction,traceId:string)=>Promise<number>;
   now() { return (this.config.clock?.() ?? new Date()).toISOString(); }
   future(seconds: number) { return new Date(Date.parse(this.now())+seconds*1000).toISOString(); }
+  // ISO sentinel preserves expiry comparisons without assigning an automatic deletion date.
+  privateRetentionExpiresAt() { return this.config.privateRetentionDays===undefined?'9999-12-31T23:59:59.999Z':this.future(this.config.privateRetentionDays*86400); }
   async seedDevelopment() {
     ensure(this.config.development,'DEVELOPMENT_DISABLED',403);
     await this.db.transaction(async tx => {
@@ -136,7 +139,7 @@ export class ThotService {
           provenance_id:provenanceId,rights_id:assessment.rights.assessment_id,scrub_id:assessment.scrub.scrub_id,
           raw_ref:rawRef,scrub_ref:scrubRef,private_metadata_ref:privateMetadataRef,provenance_status:historyCommitment?'IMPORTED_UNVERIFIED':'VERIFIED',rights_status:assessment.rights.status,
           display_status:displayStatus,save_privately:privateHistory,credential_ids:[],outcome_ids:[],sale_count:0,
-          deleted:false,created_at:this.now(),observed_at:verified.receipt.temporal.observed_start,observed_end:verified.receipt.temporal.observed_end??verified.receipt.temporal.observed_start,retention_expires_at:this.future((this.config.privateRetentionDays??30)*86400), normalized_hash:canonicalHash(assessment.content)
+          deleted:false,created_at:this.now(),observed_at:verified.receipt.temporal.observed_start,observed_end:verified.receipt.temporal.observed_end??verified.receipt.temporal.observed_start,retention_expires_at:this.privateRetentionExpiresAt(), normalized_hash:canonicalHash(assessment.content)
         });
         await enqueueTraceQc(tx,await tx.get('traces',traceId,actor.id),this.now());
         for (const event of ['TraceReceived','ProvenanceVerified','TraceSealed','RightsAssessmentCompleted','TraceFeatured']) await tx.audit(actor.id,event,{trace_id:traceId,source_hash:sourceHash});
