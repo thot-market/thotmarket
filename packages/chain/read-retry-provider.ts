@@ -41,7 +41,11 @@ export class ReadRetryProvider extends JsonRpcProvider {
    if(BigInt(id)!==BigInt(fallback.chainId))throw Error('READ_FALLBACK_CHAIN_MISMATCH');
   }).catch(error=>{fallback.validated=undefined;throw error;});
   await fallback.validated;
-  return fallback.provider._send(payload);
+  const response=await fallback.provider._send(payload);
+  // A JSON-RPC error is an ordinary _send return value in ethers. It must not
+  // win the read race over a still-running healthy primary response.
+  if(response.some(item=>'error' in item))throw Error('READ_FALLBACK_RPC_ERROR');
+  return response;
  }
  override destroy(){this.fallback?.provider.destroy();super.destroy();}
  private async retrying(payload:JsonRpcPayload|JsonRpcPayload[]){

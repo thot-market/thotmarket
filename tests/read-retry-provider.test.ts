@@ -77,3 +77,18 @@ test('a secondary on the wrong chain is ignored and primary reads still work',as
   assert.equal(result[0]?.result,'primary');
   assert.equal(checks,1);assert.equal(reads,0);
 });
+
+test('a secondary JSON-RPC error does not override a healthy primary response',async t=>{
+  const original=JsonRpcProvider.prototype._send;
+  JsonRpcProvider.prototype._send=async payload=>{await new Promise(resolve=>setTimeout(resolve,FALLBACK_AFTER_MS+100));return (Array.isArray(payload)?payload:[payload]).map(p=>({id:p.id,result:'primary'}));};
+  t.after(()=>{JsonRpcProvider.prototype._send=original;});
+  class RpcError extends JsonRpcProvider {
+    override async send(){return '0x1237';}
+    override async _send(payload:JsonRpcPayload|JsonRpcPayload[]){return (Array.isArray(payload)?payload:[payload]).map(p=>({id:p.id,result:null,error:{code:-32000,message:'alternate unavailable'}}));}
+  }
+  const main=new ReadRetryProvider('http://127.0.0.1:9',4663,{staticNetwork:true});
+  main.setReadFallback(new RpcError('http://127.0.0.1:9',4663,{staticNetwork:true}),4663);
+  t.after(()=>main.destroy());
+  const result=await main._send({jsonrpc:'2.0',id:1,method:'eth_call',params:[]});
+  assert.equal(result[0]?.result,'primary');
+});
