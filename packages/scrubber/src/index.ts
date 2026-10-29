@@ -84,8 +84,11 @@ export function scrubTrace(input: { trace: TraceContent; traceId: string; pseudo
       const expression = new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
       text = text.replace(expression, () => { count++; return '[EXCLUDED]'; });
     }
-    return { role: turn.role, content: text };
-  }) };
+    return { role: turn.role, content: text,
+      ...(turn.tool_calls?{tool_calls:turn.tool_calls}:{}),
+      ...(turn.tool_call_id?{tool_call_id:turn.tool_call_id}:{}),
+      ...(turn.source_span?{source_span:turn.source_span}:{}) };
+  }), ...(input.trace.capture_complete===false?{capture_complete:false}:{}) };
   return { trace, receipt: { schema_version: 'trace.scrub/1', input_hash: canonicalHash(input.trace), output_hash: canonicalHash(trace), scrubber_version: input.redactSecrets?'thot-targeted-scrub/2':'thot-deterministic-scrub/1', edits_count: count, limitations: ['Regex rules and optional supplied entity spans do not guarantee complete PII removal.', 'No production NER or contextual LLM classifier is configured.'] } };
 }
 

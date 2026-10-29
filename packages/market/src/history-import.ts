@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto';
 import { canonicalHash, canonicalJson } from '../../protocol/src/index.ts';
 import { DomainError, ensure, type Document } from '../../storage/src/index.ts';
+import type { TraceContent } from '../../provenance/src/index.ts';
 
 export type CodingSessionFormat='claude-code-jsonl'|'codex-jsonl'|'codex-exec-jsonl';
 export interface HistoryImportOptions { maxBytes?:number;maxLines?:number;maxTurns?:number;maxTextBytes?:number;maxTurnChars?:number;maxToolPayloadBytes?:number;maxCanonicalTraceBytes?:number; }
 export interface CodingSessionHistoryImport {
   schema_version:'thot.coding-session-history-import/1';
   source:{kind:'user_supplied';format:CodingSessionFormat;session_id?:string;upstream?:'https://api.z.ai';source_bytes:number;source_sha256:string};
-  trace:{turns:Array<{role:'system'|'developer'|'user'|'assistant'|'tool';content:string}>};
+  trace:TraceContent;
   summary:{records:number;metadata_records_skipped:number;turns:number;tool_calls:number;started_at?:string;ended_at?:string};
   preview:{title:string;format:string;source_label:string;source_date?:string;size_bytes:number;turn_count:number;content_commitment:string;privacy_flags:string[]};
   model_history:Array<{sequence:number;claimed_model:string;evidence:'user_supplied'}>;
@@ -43,7 +44,8 @@ function toolResultText(value:unknown,limit:number,code:string):string {
   ensure(Array.isArray(value),code);return value.map(block=>{ensure(plain(block),code);if(block.type==='text')return bounded(block.text,code,limit);if(block.type==='tool_reference'){ensure(typeof block.tool_name==='string'&&block.tool_name.length>0&&block.tool_name.length<=200&&Object.keys(block).every(key=>['type','tool_name'].includes(key)),code);return `[Tool reference: ${block.tool_name}]`;}return fail(code);}).join('\n');
 }
 
-type ParsedRecord={turns:Array<{role:'system'|'developer'|'user'|'assistant'|'tool';content:string;toolCall?:boolean}>;skipped:boolean;sessionId?:string;timestamp?:string;project?:string};
+type ImportedTurn=TraceContent['turns'][number]&{toolCall?:boolean};
+type ParsedRecord={turns:ImportedTurn[];skipped:boolean;incomplete?:boolean;sessionId?:string;timestamp?:string;project?:string};
 function claudeRecord(record:Document,limits:typeof DEFAULTS):ParsedRecord {
   const sessionId=typeof record.sessionId==='string'?record.sessionId:undefined,timestamp=typeof record.timestamp==='string'?record.timestamp:undefined,project=typeof record.cwd==='string'?record.cwd.split(/[\\/]/).filter(Boolean).at(-1):undefined;
   if(CLAUDE_SKIPPED.has(String(record.type))||record.isMeta===true||(record.type==='system'&&CLAUDE_SYSTEM_SKIPPED.has(String(record.subtype))))return {turns:[],skipped:true,sessionId,timestamp,project};
@@ -51,7 +53,7 @@ function claudeRecord(record:Document,limits:typeof DEFAULTS):ParsedRecord {
   ensure(plain(message)&&message.role===record.type,'UNSUPPORTED_CLAUDE_RECORD');const role=message.role as 'user'|'assistant';
   if(typeof message.content==='string')return {turns:[{role,content:bounded(message.content,'UNSUPPORTED_CLAUDE_CONTENT',limits.maxTextBytes)}],skipped:false,sessionId,timestamp,project};
   ensure(Array.isArray(message.content),'UNSUPPORTED_CLAUDE_CONTENT');const turns:ParsedRecord['turns']=[];let text:string[]=[];const flush=()=>{if(text.length){turns.push({role,content:text.join('\n\n')});text=[];}};
-  for(const block of message.content){ensure(plain(block)&&typeof block.type==='string','UNSUPPORTED_CLAUDE_CONTENT');if(block.type==='text')text.push(bounded(block.text,'UNSUPPORTED_CLAUDE_CONTENT',limits.maxTextBytes));else if(block.type==='thinking')text.push('[Thinking]\n'+bounded(block.thinking,'UNSUPPORTED_CLAUDE_CONTENT',limits.maxTextBytes));else if(block.type==='tool_use'){flush();ensure(role==='assistant'&&typeof block.name==='string'&&block.name.length>0&&block.name.length<=200&&typeof block.id==='string','UNSUPPORTED_CLAUDE_CONTENT');let encoded:string;try{encoded=canonicalJson(block.input);}catch{return fail('UNSUPPORTED_CLAUDE_CONTENT');}ensure(Buffer.byteLength(encoded)<=limits.maxToolPayloadBytes,'IMPORT_LIMIT_EXCEEDED');turns.push({role:'assistant',content:`[Tool use: ${block.name}; id=${block.id}]\n${encoded}`,toolCall:true});}else if(block.type==='tool_result'){flush();ensure(role==='user'&&typeof block.tool_use_id==='string','UNSUPPORTED_CLAUDE_CONTENT');turns.push({role:'tool',content:`[Tool result: id=${block.tool_use_id}${block.is_error===true?'; error=true':''}]\n${toolResultText(block.content,limits.maxToolPayloadBytes,'UNSUPPORTED_CLAUDE_CONTENT')}`});}else fail('UNSUPPORTED_CLAUDE_CONTENT');}
+  for(const block of message.content){ensure(plain(block)&&typeof block.type==='string','UNSUPPORTED_CLAUDE_CONTENT');if(block.type==='text')text.push(bounded(block.text,'UNSUPPORTED_CLAUDE_CONTENT',limits.maxTextBytes));else if(block.type==='thinking')text.push('[Thinking]\n'+bounded(block.thinking,'UNSUPPORTED_CLAUDE_CONTENT',limits.maxTextBytes));else if(block.type==='tool_use'){flush();ensure(role==='assistant'&&typeof block.name==='string'&&block.name.length>0&&block.name.length<=200&&typeof block.id==='string'&&block.id.length>0&&block.id.length<=256,'UNSUPPORTED_CLAUDE_CONTENT');let encoded:string;try{encoded=canonicalJson(block.input);}catch{return fail('UNSUPPORTED_CLAUDE_CONTENT');}ensure(Buffer.byteLength(encoded)<=limits.maxToolPayloadBytes,'IMPORT_LIMIT_EXCEEDED');turns.push({role:'assistant',content:`[Tool use: ${block.name}; id=${block.id}]\n${encoded}`,tool_calls:[{id:block.id,function:{name:block.name}}],toolCall:true});}else if(block.type==='tool_result'){flush();ensure(role==='user'&&typeof block.tool_use_id==='string'&&block.tool_use_id.length>0&&block.tool_use_id.length<=256,'UNSUPPORTED_CLAUDE_CONTENT');turns.push({role:'tool',content:`[Tool result: id=${block.tool_use_id}${block.is_error===true?'; error=true':''}]\n${toolResultText(block.content,limits.maxToolPayloadBytes,'UNSUPPORTED_CLAUDE_CONTENT')}`,tool_call_id:block.tool_use_id});}else fail('UNSUPPORTED_CLAUDE_CONTENT');}
   flush();return {turns,skipped:false,sessionId,timestamp,project};
 }
 
@@ -66,8 +68,8 @@ function codexRecord(record:Document,limits:typeof DEFAULTS):ParsedRecord {
   if(payload.type==='message'){
     ensure(['system','developer','user','assistant'].includes(payload.role),'UNSUPPORTED_CODEX_CONTENT');const role=payload.role as 'system'|'developer'|'user'|'assistant';return {turns:[{role,content:codexText(payload.content,role,limits.maxTextBytes)}],skipped:false,timestamp};
   }
-  if(payload.type==='function_call'){ensure(typeof payload.name==='string'&&payload.name.length>0&&payload.name.length<=200&&typeof payload.call_id==='string','UNSUPPORTED_CODEX_CONTENT');const args=bounded(payload.arguments,'UNSUPPORTED_CODEX_CONTENT',limits.maxToolPayloadBytes);let encoded:string;try{encoded=canonicalJson(JSON.parse(args));}catch{return fail('UNSUPPORTED_CODEX_CONTENT');}return {turns:[{role:'assistant',content:`[Tool use: ${payload.name}; id=${payload.call_id}]\n${encoded}`,toolCall:true}],skipped:false,timestamp};}
-  if(payload.type==='function_call_output'){ensure(typeof payload.call_id==='string','UNSUPPORTED_CODEX_CONTENT');return {turns:[{role:'tool',content:`[Tool result: id=${payload.call_id}]\n${bounded(payload.output,'UNSUPPORTED_CODEX_CONTENT',limits.maxToolPayloadBytes)}`}],skipped:false,timestamp};}
+  if(payload.type==='function_call'){ensure(typeof payload.name==='string'&&payload.name.length>0&&payload.name.length<=200&&typeof payload.call_id==='string'&&payload.call_id.length>0&&payload.call_id.length<=256,'UNSUPPORTED_CODEX_CONTENT');const args=bounded(payload.arguments,'UNSUPPORTED_CODEX_CONTENT',limits.maxToolPayloadBytes);let encoded:string;try{encoded=canonicalJson(JSON.parse(args));}catch{return fail('UNSUPPORTED_CODEX_CONTENT');}return {turns:[{role:'assistant',content:`[Tool use: ${payload.name}; id=${payload.call_id}]\n${encoded}`,tool_calls:[{id:payload.call_id,function:{name:payload.name}}],toolCall:true}],skipped:false,timestamp};}
+  if(payload.type==='function_call_output'){ensure(typeof payload.call_id==='string'&&payload.call_id.length>0&&payload.call_id.length<=256,'UNSUPPORTED_CODEX_CONTENT');return {turns:[{role:'tool',content:`[Tool result: id=${payload.call_id}]\n${bounded(payload.output,'UNSUPPORTED_CODEX_CONTENT',limits.maxToolPayloadBytes)}`,tool_call_id:payload.call_id}],skipped:false,timestamp};}
   if(payload.type==='reasoning'&&payload.encrypted_content!=null)return {turns:[],skipped:true,timestamp};
   return fail('UNSUPPORTED_CODEX_RECORD');
 }
@@ -94,12 +96,12 @@ function codexExecItem(item:Document,limits:typeof DEFAULTS):ParsedRecord['turns
     const command=execText(item.command,limits.maxToolPayloadBytes);
     const output=item.aggregated_output==null?'':execText(item.aggregated_output,limits.maxToolPayloadBytes);
     const exit=item.exit_code==null?'':`; exit_code=${item.exit_code}`;
-    return [{role:'assistant',content:`[Tool use: command_execution; id=${item.id}]\n${command}`,toolCall:true},{role:'tool',content:`[Tool result: id=${item.id}${exit}]\n${output}`}];
+    return [{role:'assistant',content:`[Tool use: command_execution; id=${item.id}]\n${command}`,tool_calls:[{id:item.id,function:{name:'command_execution'}}],toolCall:true},{role:'tool',content:`[Tool result: id=${item.id}${exit}]\n${output}`,tool_call_id:item.id}];
   }
   if(item.type==='web_search'){
     let encoded:string;try{encoded=canonicalJson({query:item.query});}catch{return fail('UNSUPPORTED_CODEX_EXEC_ITEM');}
     ensure(Buffer.byteLength(encoded)<=limits.maxToolPayloadBytes,'IMPORT_LIMIT_EXCEEDED');
-    return [{role:'assistant',content:`[Tool use: web_search; id=${item.id}]\n${encoded}`,toolCall:true}];
+    return [{role:'assistant',content:`[Tool use: web_search; id=${item.id}]\n${encoded}`,tool_calls:[{id:item.id,function:{name:'web_search'}}],toolCall:true}];
   }
   return fail('UNSUPPORTED_CODEX_EXEC_ITEM');
 }
@@ -108,10 +110,11 @@ function codexExecRecord(record:Document,limits:typeof DEFAULTS):ParsedRecord {
   if(record.type==='thread.started'){ensure(typeof record.thread_id==='string'&&record.thread_id.length>0&&record.thread_id.length<=200,'UNSUPPORTED_CODEX_EXEC_EVENT');return {turns:[],skipped:true,sessionId:record.thread_id,timestamp};}
   // Lifecycle, usage, error and partially started items are telemetry: the
   // completed item of the same work carries the content exactly once.
-  if(record.type==='turn.started'||record.type==='turn.completed'||record.type==='turn.failed'||record.type==='item.started'||record.type==='error')return {turns:[],skipped:true,timestamp};
+  if(record.type==='turn.started'||record.type==='turn.completed'||record.type==='item.started'||record.type==='error')return {turns:[],skipped:true,timestamp};
+  if(record.type==='turn.failed')return {turns:[],skipped:true,incomplete:true,timestamp};
   ensure(record.type==='item.completed'||record.type==='item.failed','UNSUPPORTED_CODEX_EXEC_EVENT');
   ensure(plain(record.item),'UNSUPPORTED_CODEX_EXEC_EVENT');
-  if(record.type==='item.failed')return {turns:[],skipped:true,timestamp};
+  if(record.type==='item.failed')return {turns:[],skipped:true,incomplete:true,timestamp};
   return {turns:codexExecItem(record.item,limits),skipped:false,timestamp};
 }
 
@@ -119,7 +122,7 @@ function codexExecRecord(record:Document,limits:typeof DEFAULTS):ParsedRecord {
 export function parseCodingSessionJsonl(input:string|Buffer,options:HistoryImportOptions={}):CodingSessionHistoryImport {
   const limits={...DEFAULTS,...options};for(const value of Object.values(limits))ensure(Number.isSafeInteger(value)&&value>0,'INVALID_IMPORT_LIMITS');
   const bytes=Buffer.isBuffer(input)?input:Buffer.from(input,'utf8');ensure(bytes.length>0,'EMPTY_IMPORT');ensure(bytes.length<=limits.maxBytes,'IMPORT_TOO_LARGE');const text=bytes.toString('utf8');ensure(Buffer.from(text,'utf8').equals(bytes),'INVALID_UTF8');
-  const lines=text.split(/\r?\n/);ensure(lines.length<=limits.maxLines+1,'IMPORT_LIMIT_EXCEEDED');let format:CodingSessionFormat|undefined;const turns:CodingSessionHistoryImport['trace']['turns']=[];let records=0,skipped=0,toolCalls=0,totalText=0;const sessions=new Set<string>(),timestamps:string[]=[],models:CodingSessionHistoryImport['model_history']=[];let project:string|undefined;
+  const lines=text.split(/\r?\n/);ensure(lines.length<=limits.maxLines+1,'IMPORT_LIMIT_EXCEEDED');let format:CodingSessionFormat|undefined;const turns:CodingSessionHistoryImport['trace']['turns']=[];let records=0,skipped=0,contentRecords=0,toolCalls=0,totalText=0,incomplete=false;const sessions=new Set<string>(),timestamps:string[]=[],models:CodingSessionHistoryImport['model_history']=[];let project:string|undefined;
   for(let i=0;i<lines.length;i++){const line=lines[i]!;if(!line.trim())continue;records++;let record:unknown;try{rejectDuplicateJsonKeys(line);record=JSON.parse(line);}catch(error){if(error instanceof DomainError&&error.code==='DUPLICATE_JSON_KEY')throw error;fail(`MALFORMED_JSONL_LINE_${i+1}`);}ensure(plain(record),'UNSUPPORTED_HISTORY_RECORD');
       // An unknown thread/turn/item event names its own error instead of
       // UNSUPPORTED_CODEX_RECORD; a record of another known format is a mix.
@@ -127,8 +130,8 @@ export function parseCodingSessionJsonl(input:string|Buffer,options:HistoryImpor
       format??=kind??(typeof record.type==='string'&&/^(?:thread|turn|item)\./.test(record.type)?'codex-exec-jsonl':undefined);
       if(!format)fail('UNSUPPORTED_HISTORY_FORMAT');
       if(format==='codex-exec-jsonl')ensure(kind==='codex-exec-jsonl',kind===undefined?'UNSUPPORTED_CODEX_EXEC_EVENT':'MIXED_HISTORY_FORMAT');
-      else ensure(kind===undefined||kind===format,'MIXED_HISTORY_FORMAT');const claimed=record.message?.model??record.payload?.model;if(typeof claimed==='string'&&claimed.length>0&&claimed.length<=200&&!/[\u0000-\u001f\u007f]/.test(claimed)&&models.at(-1)?.claimed_model!==claimed)models.push({sequence:records,claimed_model:claimed,evidence:'user_supplied'});const parsed=format==='claude-code-jsonl'?claudeRecord(record,limits):format==='codex-jsonl'?codexRecord(record,limits):codexExecRecord(record,limits);if(parsed.sessionId)sessions.add(parsed.sessionId);if(parsed.timestamp){ensure(Number.isFinite(Date.parse(parsed.timestamp)),format==='claude-code-jsonl'?'INVALID_CLAUDE_TIMESTAMP':'INVALID_CODEX_TIMESTAMP');timestamps.push(new Date(parsed.timestamp).toISOString());}project??=parsed.project;if(parsed.skipped)skipped++;for(const turn of parsed.turns){ensure(turn.content.length<=limits.maxTurnChars,'IMPORT_LIMIT_EXCEEDED');totalText+=Buffer.byteLength(turn.content);ensure(totalText<=limits.maxTextBytes,'IMPORT_LIMIT_EXCEEDED');turns.push({role:turn.role,content:turn.content});if(turn.toolCall)toolCalls++;}ensure(turns.length<=limits.maxTurns,'IMPORT_LIMIT_EXCEEDED');}
-  ensure(records>0&&format&&turns.length>0,'EMPTY_IMPORT');ensure(sessions.size<=1,'MIXED_SESSION');timestamps.sort();const trace={turns};ensure(Buffer.byteLength(canonicalJson(trace))<=limits.maxCanonicalTraceBytes,'IMPORT_LIMIT_EXCEEDED');const glmCount=format==='claude-code-jsonl'?models.filter(m=>glmModel(m.claimed_model)).length:0;
+      else ensure(kind===undefined||kind===format,'MIXED_HISTORY_FORMAT');const claimed=record.message?.model??record.payload?.model;if(typeof claimed==='string'&&claimed.length>0&&claimed.length<=200&&!/[\u0000-\u001f\u007f]/.test(claimed)&&models.at(-1)?.claimed_model!==claimed)models.push({sequence:records,claimed_model:claimed,evidence:'user_supplied'});const parsed=format==='claude-code-jsonl'?claudeRecord(record,limits):format==='codex-jsonl'?codexRecord(record,limits):codexExecRecord(record,limits);if(parsed.sessionId)sessions.add(parsed.sessionId);if(parsed.timestamp){ensure(Number.isFinite(Date.parse(parsed.timestamp)),format==='claude-code-jsonl'?'INVALID_CLAUDE_TIMESTAMP':'INVALID_CODEX_TIMESTAMP');timestamps.push(new Date(parsed.timestamp).toISOString());}project??=parsed.project;if(parsed.skipped)skipped++;if(parsed.turns.length)contentRecords++;if(parsed.incomplete)incomplete=true;for(const [block,turn] of parsed.turns.entries()){ensure(turn.content.length<=limits.maxTurnChars,'IMPORT_LIMIT_EXCEEDED');totalText+=Buffer.byteLength(turn.content);ensure(totalText<=limits.maxTextBytes,'IMPORT_LIMIT_EXCEEDED');turns.push({role:turn.role,content:turn.content,...(turn.tool_calls?{tool_calls:turn.tool_calls}:{}),...(turn.tool_call_id?{tool_call_id:turn.tool_call_id}:{}),source_span:{record:contentRecords,block}});if(turn.toolCall)toolCalls++;}ensure(turns.length<=limits.maxTurns,'IMPORT_LIMIT_EXCEEDED');}
+  ensure(records>0&&format&&turns.length>0,'EMPTY_IMPORT');ensure(sessions.size<=1,'MIXED_SESSION');timestamps.sort();const trace:TraceContent={turns,...(incomplete?{capture_complete:false}:{})};ensure(Buffer.byteLength(canonicalJson(trace))<=limits.maxCanonicalTraceBytes,'IMPORT_LIMIT_EXCEEDED');const glmCount=format==='claude-code-jsonl'?models.filter(m=>glmModel(m.claimed_model)).length:0;
   // A session replayed against two gateways cannot carry one honest upstream label.
   if(glmCount>0&&glmCount<models.length)fail('MIXED_UPSTREAM');
   const sourceDate=timestamps[0],provider=format==='claude-code-jsonl'?glmCount>0?'Claude Code (Z.AI)':'Claude Code':'Codex';const privacyFlags=[/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(text)?'possible_email':undefined,/\b(?:sk-|gh[pousr]_)/.test(text)?'possible_secret':undefined].filter((x):x is string=>!!x);

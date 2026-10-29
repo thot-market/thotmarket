@@ -4,7 +4,7 @@ import { isAbsolute } from 'node:path';
 import { canonicalHash, canonicalJson, signCanonical, verifyCanonical } from '../../protocol/src/index.ts';
 
 export const ATTEST_PROXY_COMPATIBILITY = Object.freeze({ repository: 'https://github.com/amiller/attest-proxy', commit: '5a4b1fe34cd5256b36755da75a7aabdbc173526e' });
-export type TraceContent = { turns: Array<{ role: 'system' | 'developer' | 'user' | 'assistant' | 'tool' | 'function'; content: string }> };
+export type TraceContent = { turns: Array<{ role: 'system' | 'developer' | 'user' | 'assistant' | 'tool' | 'function'; content: string; tool_calls?: Array<{id:string;function:{name:string}}>; tool_call_id?:string; source_span?:{record:number;block?:number} }>; capture_complete?:boolean };
 export type ProvenanceTier = 'P0_OPERATOR' | 'P1_WITNESSED' | 'P2_TEE' | 'P3_UPSTREAM';
 export interface ProvenanceReceipt {
   schema_version: 'trace.provenance/1'; receipt_id: string; trace_id: string;
@@ -44,9 +44,21 @@ function merkleRoot(leaves: string[]): string {
 
 export function assertTraceContent(value: unknown): asserts value is TraceContent {
   const trace = value as TraceContent;
-  if (!trace || Object.keys(trace).some(key => key !== 'turns') || !Array.isArray(trace.turns) || trace.turns.length === 0 || trace.turns.length > 1000 ||
-      trace.turns.some(turn => !turn || Object.keys(turn).some(key => !['role', 'content'].includes(key)) || !['system', 'developer', 'user', 'assistant', 'tool', 'function'].includes(turn.role) || typeof turn.content !== 'string' || turn.content.length > 100_000) ||
-      Buffer.byteLength(canonicalJson(trace)) > 2_000_000) throw new Error('INVALID_TRACE');
+  const validTurn=(turn:TraceContent['turns'][number]):boolean=>{
+    if(!turn||Object.keys(turn).some(key=>!['role','content','tool_calls','tool_call_id','source_span'].includes(key))||
+      !['system','developer','user','assistant','tool','function'].includes(turn.role)||typeof turn.content!=='string'||turn.content.length>100_000)return false;
+    if(turn.tool_calls!==undefined&&(!Array.isArray(turn.tool_calls)||turn.role!=='assistant'||turn.tool_calls.length>128||
+      turn.tool_calls.some(call=>!call||Object.keys(call).some(key=>!['id','function'].includes(key))||typeof call.id!=='string'||!call.id||call.id.length>256||
+        !call.function||Object.keys(call.function).some(key=>key!=='name')||typeof call.function.name!=='string'||!call.function.name||call.function.name.length>256)))return false;
+    if(turn.tool_call_id!==undefined&&((turn.role!=='tool'&&turn.role!=='function')||typeof turn.tool_call_id!=='string'||!turn.tool_call_id||turn.tool_call_id.length>256))return false;
+    const span=turn.source_span;
+    if(span!==undefined&&(!span||Object.keys(span).some(key=>!['record','block'].includes(key))||!Number.isSafeInteger(span.record)||span.record<1||
+      (span.block!==undefined&&(!Number.isSafeInteger(span.block)||span.block<0))))return false;
+    return true;
+  };
+  if(!trace||Object.keys(trace).some(key=>!['turns','capture_complete'].includes(key))||
+    (trace.capture_complete!==undefined&&typeof trace.capture_complete!=='boolean')||!Array.isArray(trace.turns)||trace.turns.length===0||trace.turns.length>1000||
+    trace.turns.some(turn=>!validTurn(turn))||Buffer.byteLength(canonicalJson(trace))>2_000_000)throw new Error('INVALID_TRACE');
 }
 
 export function createDevelopmentBundle(input: { userId: string; traceId: string; trace: TraceContent; observedAt?: string }): DevelopmentBundle {

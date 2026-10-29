@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseClaudeCodeJsonl, parseCodingSessionJsonl } from '../packages/market/src/history-import.ts';
+import { assertTraceContent } from '../packages/provenance/src/index.ts';
+import { scrubTrace } from '../packages/scrubber/src/index.ts';
+import { runTraceQc } from '../packages/qc/index.ts';
 import type { Document } from '../packages/storage/src/index.ts';
 
 const line=(value:unknown)=>JSON.stringify(value);
@@ -20,6 +23,18 @@ test('Claude Code JSONL import retains text and tool context while labeling sour
   assert.match(result.trace.turns[2]!.content,/Tool use: Read/);assert.match(result.trace.turns[3]!.content,/public notes/);
   assert.equal(result.preview.title,'Claude Code: demo');assert.equal(result.preview.content_commitment.length,64);
   assert.match(result.limitations.join(' '),/does not authenticate/);
+});
+
+test('supported tool IDs and normalized source spans survive the sale scrub and QC',()=>{
+  const parsed=parseClaudeCodeJsonl(fixture);
+  assertTraceContent(parsed.trace);
+  assert.deepEqual(parsed.trace.turns[2]!.tool_calls,[{id:'tool-1',function:{name:'Read'}}]);
+  assert.equal(parsed.trace.turns[3]!.tool_call_id,'tool-1');
+  assert.deepEqual(parsed.trace.turns[2]!.source_span,{record:2,block:1});
+  const scrubbed=scrubTrace({trace:parsed.trace,traceId:'synthetic-tool-link',pseudonymKey:Buffer.alloc(32,1)}).trace;
+  assert.deepEqual(scrubbed.turns[2]!.tool_calls,parsed.trace.turns[2]!.tool_calls);
+  assert.equal(scrubbed.turns[3]!.tool_call_id,'tool-1');
+  assert.equal(runTraceQc(scrubbed,{scope:'release'}).checks.find(c=>c.id==='tool_links')?.status,'pass');
 });
 
 test('raw-byte and parsed commitments are stable and distinguish changed source bytes',()=>{
@@ -74,6 +89,8 @@ test('Codex coding-session JSONL auto-detection retains durable conversation and
   assert.equal(result.preview.title,'Codex: router');assert.equal(result.summary.metadata_records_skipped,2);
   assert.deepEqual(result.trace.turns.map(turn=>turn.role),['developer','user','assistant','tool','assistant']);
   assert.match(result.trace.turns[2]!.content,/exec_command/);assert.match(result.trace.turns[3]!.content,/tests passed/);
+  assert.deepEqual(result.trace.turns[2]!.tool_calls,[{id:'call-1',function:{name:'exec_command'}}]);
+  assert.equal(result.trace.turns[3]!.tool_call_id,'call-1');
   assert.match(result.limitations.join(' '),/does not authenticate/);
 });
 
@@ -117,6 +134,8 @@ test('codex exec event streams map onto the same durable turns as rollout files'
   assert.match(result.trace.turns[0]!.content,/\[Reasoning]\nPlan: inspect the parser/);
   assert.match(result.trace.turns[1]!.content,/\[Tool use: command_execution; id=item_1]\nnpm test/);
   assert.match(result.trace.turns[2]!.content,/\[Tool result: id=item_1; exit_code=0]\n3 passing/);
+  assert.deepEqual(result.trace.turns[1]!.tool_calls,[{id:'item_1',function:{name:'command_execution'}}]);
+  assert.equal(result.trace.turns[2]!.tool_call_id,'item_1');
   assert.match(result.trace.turns[3]!.content,/\[Tool use: web_search; id=item_2]/);assert.match(result.trace.turns[3]!.content,/node test runner json events/);
   assert.equal(result.trace.turns[4]!.content,'The exec stream imports with commands, outputs and assistant text.');
   assert.deepEqual(result.model_history,[]);assert.match(result.limitations.join(' '),/carries no model names/);
@@ -131,4 +150,15 @@ test('codex exec streams stay separate from rollout files and reject unknown eve
   assert.throws(()=>parseCodingSessionJsonl(line({type:'item.completed',item:{id:'item_1',type:'command_execution',command:'npm test',aggregated_output:'x'.repeat(200_000)}})),/IMPORT_LIMIT_EXCEEDED|UNSUPPORTED_CODEX_EXEC_CONTENT/);
   assert.throws(()=>parseClaudeCodeJsonl(codexExecFixture),/UNSUPPORTED_CLAUDE_RECORD/);
   assert.throws(()=>parseCodingSessionJsonl(line({type:'thread.started'})),/UNSUPPORTED_CODEX_EXEC_EVENT/);
+});
+
+test('failed Codex exec events mark capture incomplete without inventing a tool result',()=>{
+  const input=[
+    line({type:'item.completed',item:{id:'item_1',type:'command_execution',command:'printf ok',aggregated_output:'ok',exit_code:0}}),
+    line({type:'item.failed',item:{id:'item_2',type:'command_execution',command:'exit 1'}}),
+  ].join('\n');
+  const result=parseCodingSessionJsonl(input);
+  assert.equal(result.trace.capture_complete,false);
+  assert.equal(result.trace.turns.length,2);
+  assert.ok(runTraceQc(result.trace,{scope:'private'}).findings.some(f=>f.code==='source_declared_incomplete'));
 });
