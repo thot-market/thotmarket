@@ -399,6 +399,14 @@ ${tradeEvidenceOptions(listingMetadata)}
   cartMemory.set(key,ids);return ids;
  }
  function saveCart(ids){cartMemory.set(cartKey(),ids);try{recoveryStorage?.setItem(cartKey(),JSON.stringify(ids));}catch{}cartQuote=null;}
+ function paidListingIds(workspace){
+  const paid=new Set();
+  for(const order of workspace?.orders??[]){
+   const status=Number(order?.receipt?.status);
+   if(sameWallet(order?.buyer,workspace?.wallet)&&typeof order?.listing_id==='string'&&status>=1&&status<6)paid.add(order.listing_id);
+  }
+  return paid;
+ }
  function cartBarHTML(){const pending=savedAtomicCart();return `<div class="market-cart-bar" data-market-cart><span><strong>${cartIds().length}</strong> selected</span>${button('cart-open',pending?'Check checkout':'Cart ('+cartIds().length+')','',!pending&&!cartIds().length,false)}</div>`;}
  function updateCart(){
   const bar=globalThis.document?.querySelector('[data-market-cart]');if(bar)bar.outerHTML=cartBarHTML();
@@ -437,7 +445,7 @@ ${tradeEvidenceOptions(listingMetadata)}
  function offersHTML(){
   if(!active())return '';
   const w=state.thot,orders=w.orders??[],traces=state.traces??[],saved=savedRecovery(recoveryKey());
-  const available=(w.listings??[]).filter(l=>!sameWallet(l.seller,w.wallet)),own=(w.listings??[]).filter(l=>sameWallet(l.seller,w.wallet));
+  const paid=paidListingIds(w),available=(w.listings??[]).filter(l=>!sameWallet(l.seller,w.wallet)&&!paid.has(l.id)),own=(w.listings??[]).filter(l=>sameWallet(l.seller,w.wallet));
   const sales=orders.filter(o=>sameWallet(o.seller,w.wallet));
   const recovery=saved&&attempted(saved)?`<section class="panel"><h2>${needsNewReview(saved)?'Purchase needs review':'Payment confirmation pending'}</h2><p>Check the previous wallet action before starting another purchase.</p>${button('resume-payment','Resume wallet action')}</section>`:'';
   return heading('Marketplace','Marketplace','Compare data, review the licence, then buy.')+
@@ -675,6 +683,10 @@ ${tradeEvidenceOptions(listingMetadata)}
    if(purchased.length!==record.items.length){
     if(purchased.length){showAtomicCart(record,'Some purchases are visible, but the entire cart is not verified yet. Check again; this will not send payment twice.');return true;}
     const result=await atomicCartConfirmation(p=>provider().request(p),record,Number(capabilities().confirmations??1));current();
+    if(result.state==='not_found'){
+     saveAtomicCart(null);showCart();
+     throw Error('Your wallet has no record of this checkout, and the marketplace has no confirmed payment for it. Review the cart again; no payment was sent.');
+    }
     if(result.state==='pending'){showAtomicCart(record,'Checkout is pending. Check again shortly; this will not resubmit payment.');return true;}
     if(result.state==='failed'){saveAtomicCart(null);showCart();throw Error('The atomic checkout failed. No item was purchased; network gas may have been spent. Review fresh quotes before trying again.');}
     showAtomicCart(record,'The wallet confirmed the batch, but the market has not verified every purchase yet. Check again; payment will not be sent twice.');return true;

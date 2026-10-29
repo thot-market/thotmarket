@@ -38,7 +38,9 @@ export async function atomicCartConfirmation(request,record,confirmations){
  if(!hash(record?.id)||!address(record?.wallet)||!Number.isSafeInteger(Number(record?.chainId))||!Number.isSafeInteger(confirmations)||confirmations<1||confirmations>100)throw Error('Saved checkout is invalid.');
  const rpc=async(method,params=[])=>request({method,params});
  if(BigInt(await rpc('eth_chainId'))!==BigInt(record.chainId))throw Error('Switch to the original checkout network.');
- const status=await rpc('wallet_getCallsStatus',[record.id]);
+ let status;
+ try{status=await rpc('wallet_getCallsStatus',[record.id]);}
+ catch(error){if(/no matching bundle found/i.test(String(error?.message??'')))return {state:'not_found'};throw error;}
  if(!same(status?.id,record.id)||BigInt(status?.chainId??0)!==BigInt(record.chainId))throw Error('Wallet returned a different checkout.');
  if(status.status===100)return {state:'pending'};
  if(status.status===400||status.status===500)return {state:'failed'};

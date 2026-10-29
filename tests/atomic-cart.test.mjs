@@ -44,5 +44,6 @@ test('confirmation requires one atomic successful receipt and stable chain confi
  assert.deepEqual(await atomicCartConfirmation(async p=>p.method==='wallet_getCallsStatus'?{id:record.id,chainId:'0x7a69',status:200,atomic:true,receipts:[{transactionHash:txHash,status:'0x1'},{transactionHash:secondHash,status:'0x1'}]}:p.method==='eth_getTransactionReceipt'?{transactionHash:p.params[0],status:'0x1',blockNumber:'0x10',blockHash}:request(p),record,2),{state:'confirmed',transactionHashes:[txHash,secondHash]});
  assert.deepEqual(await atomicCartConfirmation(async p=>p.method==='wallet_getCallsStatus'?{id:record.id,chainId:'0x7a69',status:100}:request(p),record,1),{state:'pending'});
  assert.deepEqual(await atomicCartConfirmation(async p=>p.method==='wallet_getCallsStatus'?{id:record.id,chainId:'0x7a69',status:400}:request(p),record,1),{state:'failed'});
+ assert.deepEqual(await atomicCartConfirmation(async p=>{if(p.method==='wallet_getCallsStatus')throw Error('No matching bundle found');return request(p);},record,1),{state:'not_found'});
  await assert.rejects(atomicCartConfirmation(async p=>p.method==='wallet_getCallsStatus'?{id:record.id,chainId:'0x7a69',status:200,atomic:false,receipts:[]}:request(p),record,1),/uncertain/);
 });

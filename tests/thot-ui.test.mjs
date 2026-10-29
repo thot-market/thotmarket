@@ -1197,6 +1197,28 @@ test('atomic cart submits one batch, never individual transactions, and clears o
  assert.equal(f.requests.filter(r=>r.method==='wallet_sendCalls').length,1);
 });
 
+test('an unknown atomic wallet batch returns to the cart without treating unfunded quotes as purchases',async t=>{
+ const store=new Map(),storage={getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
+ const f=fixture(t,async p=>{
+  if(p.method==='wallet_getCapabilities')return {'0x7a69':{atomic:{status:'supported'}}};
+  if(p.method==='wallet_sendCalls')return {id:p.params[0].id};
+  if(p.method==='wallet_getCallsStatus')throw Error('No matching bundle found');
+  throw Error('Unexpected wallet call '+p.method);
+ },async(path,options)=>{
+  if(path.startsWith('/v1/thot/workspace?scope=buyer&ids='))return {orders:[]};
+  return {id:hash(101),wallet:owner,seller:other,buyer_total:'1',transactions:[{to:'0x0000000000000000000000000000000000000003',data:'0x095ea7b3'+'0000000000000000000000000000000000000004'.padStart(64,'0')+'1'.padStart(64,'0'),value:'0x0',chainId:'0x7a69'},{to:'0x0000000000000000000000000000000000000004',data:'0xdeadbeef',value:'0x0',chainId:'0x7a69'}]};
+ },{recoveryStorage:storage});
+ f.state.thot.account={balance:'10'};Object.assign(f.state.thot.capabilities,{token:'0x0000000000000000000000000000000000000003',market:'0x0000000000000000000000000000000000000004'});f.state.thot.listings=[{id:'a',title:'A',seller:other,license:'Test'}];
+ const act=op=>f.ui.action('thot-'+op,{dataset:{id:'a'},disabled:false});await act('cart-toggle');await act('cart-review');
+ await assert.rejects(act('cart-pay'),/marketplace has no confirmed payment/);assert.equal([...store.keys()].some(key=>key.startsWith('thot.atomic-cart.v1:')),false);assert.equal(f.dialogs.at(-1)[0],'Your cart');
+});
+
+test('funded listings do not reappear in the buyer marketplace while unfunded quotes remain available',()=>{
+ const {state,ui}=viewFixture();state.thot.listings.push({id:'funded',seller:other,title:'Funded listing',workflow:'research',turn_count:2,provenance:'IMPORTED_UNVERIFIED',price_atoms:atoms(1),license:'Test'});
+ state.thot.orders=[{id:'funded-order',listing_id:'funded',buyer:owner,seller:other,receipt:{status:1}},{id:'unfunded-order',listing_id:'listing-1',buyer:owner,seller:other,receipt:{status:0}}];
+ const html=ui.offersHTML();assert.doesNotMatch(html,/Funded listing/);assert.match(html,/Listed research/);
+});
+
 test('repeated atomic pay clicks while wallet connection is pending cannot submit twice',async t=>{
  const token='0x0000000000000000000000000000000000000003',market='0x0000000000000000000000000000000000000004';
  const pause=deferred(),started=deferred();let sends=0;
