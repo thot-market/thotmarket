@@ -166,6 +166,11 @@ export class ThotChain {
   const request=new FetchRequest(config.rpcUrl);
   if(publicChain){request.timeout=20_000;request.setThrottleParams({maxAttempts:3,slotInterval:1000});}
   this.provider=new (publicChain?ReadRetryProvider:JsonRpcProvider)(request,undefined,{cacheTimeout:-1,...(publicChain?{batchMaxCount:50}:{})});
+  if(production){
+   const alternate=new FetchRequest('https://robinhood-rpc.publicnode.com/');
+   alternate.timeout=20_000;alternate.setThrottleParams({maxAttempts:3,slotInterval:1000});
+   (this.provider as ReadRetryProvider).setReadFallback(new JsonRpcProvider(alternate,undefined,{cacheTimeout:-1,batchMaxCount:50}),config.chainId);
+  }
   if(publicChain)this.provider.pollingInterval=5000;
   this.operatorSigner=runtime.operatorSigner;
   this.market=new Contract(this.config.market,THOT_MARKET_ABI,this.provider);
