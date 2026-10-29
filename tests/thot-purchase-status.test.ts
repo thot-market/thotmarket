@@ -63,6 +63,10 @@ test('buyer workspace defers estimates and staking but retains guarded account, 
  assert.equal(first.own_listings[0].trace_id,'my-trace');assert(!JSON.stringify(first).includes('other-private-trace'));
  assert.equal(valuations,0);assert.equal(first.holder_rewards,null);assert.equal(first.staking,null);assert.deepEqual(first.valuations,[]);
  await market.workspace({id:'owner',role:'user'},{scope:'buyer'});assert.equal(snapshots,2);assert.equal(assertions,2,'each request independently verifies its snapshot');
+ const selected=await market.workspace({id:'owner',role:'user'},{scope:'buyer',offerIds:['0x'+'3'.repeat(64)]});assert.equal(selected.orders.length,1);assert.equal(selected.orders_truncated,false);
+ await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'buyer',offerIds:['0x'+'4'.repeat(64)]}),/NOT_FOUND/);
+ await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'full',offerIds:['0x'+'3'.repeat(64)]}),/INVALID_WORKSPACE_OFFERS/);
+ await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'buyer',offerIds:['bad']}),/INVALID_WORKSPACE_OFFERS/);
  chain.config={};const full=await market.workspace({id:'owner',role:'user'});assert.equal(full.workspace_scope,'full');assert.equal(valuations,1);assert.equal(full.valuations[0].trace_id,'my-trace');
  fail=true;await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'buyer'}),/THOT_CODE_PIN_MISMATCH/);
  fail=false;chain.assertSnapshot=async()=>{throw Error('THOT_SNAPSHOT_CHANGED');};await assert.rejects(market.workspace({id:'owner',role:'user'},{scope:'buyer'}),/THOT_SNAPSHOT_CHANGED/);

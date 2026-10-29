@@ -40,6 +40,7 @@
     "tests/openrouter-usage.test.mjs",
     "tests/thot-trade-evidence-ui.test.mjs",
     "tests/thot-ui.test.mjs",
+    "tests/atomic-cart.test.mjs",
     "tests/wallet-replacement.test.mjs",
     "tests/thot-purchase-status.test.ts",
     "tests/thot-retention-concurrency.test.ts",

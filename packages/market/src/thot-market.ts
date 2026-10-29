@@ -113,10 +113,12 @@ export class ThotMarketplace {
   return {capabilities:this.capabilities(),wallet:records.find(r=>r.id==='wallet:'+actor.id)?.address??null,
    listings:records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r))};
  }
- async workspace(actor:Actor,options:{scope?:'buyer'|'full'}={}){
+ async workspace(actor:Actor,options:{scope?:'buyer'|'full',offerIds?:string[]}={}){
   allowed(actor);
   let at=performance.now();const timing:Record<string,number>={},lap=(name:string)=>{const now=performance.now();timing[name]=now-at;at=now;};
   const scope=options.scope??'full';ensure(scope==='buyer'||scope==='full','INVALID_WORKSPACE_SCOPE');
+  const offerIds=options.offerIds;
+  if(offerIds!==undefined)ensure(scope==='buyer'&&Array.isArray(offerIds)&&offerIds.length>0&&offerIds.length<=20&&new Set(offerIds.map(id=>id.toLowerCase())).size===offerIds.length&&offerIds.every(id=>/^0x[0-9a-f]{64}$/i.test(id)),'INVALID_WORKSPACE_OFFERS');
   const records=await this.browsingRecords(actor,scope==='full'&&actor.role==='user');lap('db');
   const wallet=records.find(r=>r.id==='wallet:'+actor.id)?.address;
   const listings=records.filter(r=>r.kind==='listing'&&r.active).map(r=>this.publicListing(r));
@@ -129,7 +131,9 @@ export class ThotMarketplace {
   const valuationsRead=early(scope==='full'&&actor.role==='user'&&chain&&block?this.valuationRows(actor,records,wallet,block):[]);
   const stakingRead=early(scope==='full'&&chain?stakingWorkspace(chain,wallet,block!):null);
   const reserveBuyerRead=early(wallet&&chain?chain.isReserveBuyer(wallet,block!):false);
-  const visible=intents.slice(-50),view=chain?await chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id)),block!):null;lap('account');
+  const visible=offerIds?intents.filter(i=>offerIds.some(id=>id.toLowerCase()===String(i.offer_id).toLowerCase())):intents.slice(-50);
+  if(offerIds)ensure(visible.length===offerIds.length,'NOT_FOUND',404);
+  const view=chain?await chain.readWorkspace(wallet,visible.map(i=>String(i.offer_id)),block!):null;lap('account');
   const orders=[];
   if(view)for(let n=0;n<visible.length;n++){const i=visible[n]!,receipt=view.offers[n]!;if(receipt.status!==0||i.owner_id===actor.id)orders.push({...this.publicIntent(i),receipt});}
   // Browsing and purchasing require fresh wallet, receipt and pause checks, not
@@ -144,7 +148,7 @@ export class ThotMarketplace {
   // Anvil can change code at the same height without changing the block hash.
   if(chain&&!chain.publicChain())await chain.guard();
   if(chain&&block)await chain.assertSnapshot(block);lap('assert');
-  const result={workspace_scope:scope,holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:intents.length>50,valuations};
+  const result={workspace_scope:scope,holder_rewards:holderRewards,staking,capabilities:this.capabilities(),market_paused:view?.market_paused??null,reserve_buyer:reserveBuyer,wallet:wallet??null,account:view?.account??null,listings,own_listings:own,orders,orders_truncated:!offerIds&&intents.length>50,valuations};
   workspaceTimings.set(result,timing);return result;
  }
  private publicListing(r:Document){return {...(r.brokerage_claim?{brokerage_claim:r.brokerage_claim}:{}),...(r.content_kind==='research'?{content_kind:'research',file_count:r.file_count,file_types:r.file_types??null,total_bytes:r.total_bytes??null}:{}),id:r.id,public_path:this.listingPath(r.id),seller:r.wallet,owner_label:'Contributor',title:r.title,price_atoms:r.price_atoms,license:r.license,license_hash:r.license_hash,evidence_hash:r.evidence_hash,provenance:r.provenance,workflow:r.workflow,turn_count:r.turn_count,capture_model:r.capture_model??null,created_at:r.created_at,automatic_sales:!!r.signature,treasury_opt_in:r.treasury_sampling_consent===THOT_TREASURY_SAMPLING_POLICY};}

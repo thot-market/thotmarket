@@ -8,7 +8,7 @@ import {DomainError} from '../../packages/storage/src/index.ts';
 // Only packaged, public code may be compressed or retained. Never key this cache
 // by request URLs, query strings, cookies, authorization, or API response bodies.
 const routes=new Set([
-  '/operator-app.js','/operator.css','/style.css','/app.js','/money-ui.js','/thot-ui.js',
+  '/operator-app.js','/operator.css','/style.css','/app.js','/money-ui.js','/thot-ui.js','/atomic-cart.js',
   '/staking-ui.js','/staking.css','/thot-analytics-ui.js','/mandate-editor.js',
   '/inference-ui.js','/operations-ui.js','/contributor-ui.js',
   '/wallet-auth-ui.js','/privy-auth-state.js','/openrouter-ui.js',

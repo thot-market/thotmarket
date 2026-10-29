@@ -1104,7 +1104,7 @@ function cartFixture(t,{failAt=0,uncertain=false,balance='10000000000000000000',
  return {...f,act,data,get sends(){return sends;},async select(){await act('cart-toggle','a');await act('cart-toggle','b');}};
 }
 test('cart quotes exact total once and completes sequential purchases, removing only paid items',async t=>{
- const f=cartFixture(t);await f.select();await f.act('cart-review');assert.match(f.dialogs.at(-1)[3],/Pay 2 THOT/);assert.equal(f.sends,0);
+ const f=cartFixture(t);await f.select();await f.act('cart-review');assert.match(f.dialogs.at(-1)[3],/Pay items separately · 2 THOT/);assert.equal(f.sends,0);
  await f.act('cart-pay');assert.equal(f.sends,2);assert.equal(f.dialogs.at(-1)[0],'Checkout complete');assert.match(f.ui.offersHTML(),/Cart \(0\)/);
 });
 test('cart stops on rejection, retains unpaid items, and a retry never resends the completed item',async t=>{
@@ -1139,7 +1139,7 @@ test('closing the checkout stops the next item without losing a confirmed paymen
 test('cart review never truncates fractional quoted payments',async t=>{
  const f=cartFixture(t,{quoteAmount:'997000000000001'});await f.select();await f.act('cart-review');
  assert.match(f.dialogs.at(-1)[2],/0\.000997000000000001 THOT/);
- assert.match(f.dialogs.at(-1)[3],/Pay 0\.001994000000000002 THOT/);
+ assert.match(f.dialogs.at(-1)[3],/Pay items separately · 0\.001994000000000002 THOT/);
 });
 
 
@@ -1147,7 +1147,7 @@ test('full twenty-item cart prepares every quote without sending a payment',asyn
  const f=cartFixture(t,{balance:'100000000000000000000'});
  f.state.thot.listings=Array.from({length:20},(_,i)=>({id:String(i),title:'Synthetic '+i,seller:other,price_atoms:'1000000000000000000',license:'Synthetic licence'}));
  for(const l of f.state.thot.listings)await f.act('cart-toggle',l.id);
- await f.act('cart-review');assert.match(f.dialogs.at(-1)[3],/Pay 20 THOT/);
+ await f.act('cart-review');assert.match(f.dialogs.at(-1)[3],/Pay items separately · 20 THOT/);
  assert.equal(f.calls.filter(c=>c.path==='/v1/thot/offers/prepare').length,20);assert.equal(f.sends,0);
 });
 
@@ -1164,5 +1164,60 @@ test('retrying a partially failed cart reuses preparation keys for already prepa
  for(const id of ['a','b'])await f.ui.action('thot-cart-toggle',{dataset:{id},disabled:false});
  await assert.rejects(act('cart-review'),/Temporarily unavailable/);await act('cart-review');
  assert.equal(seen[0].key,seen[2].key);assert.equal(seen[1].key,seen[3].key);assert.notEqual(seen[0].key,seen[1].key);
- assert.equal(f.requests.length,0);assert.match(f.dialogs.at(-1)[3],/Pay 2 THOT/);
+ assert.equal(f.requests.filter(r=>['eth_sendTransaction','wallet_sendCalls'].includes(r.method)).length,0);assert.match(f.dialogs.at(-1)[3],/Pay items separately · 2 THOT/);
+});
+
+test('atomic cart submits one batch, never individual transactions, and clears only after all purchases are confirmed',async t=>{
+ const token='0x0000000000000000000000000000000000000003',market='0x0000000000000000000000000000000000000004';
+ const approve=amount=>'0x095ea7b3'+market.slice(2).padStart(64,'0')+BigInt(amount).toString(16).padStart(64,'0');
+ let batchId=null,confirmed=false;
+ const store=new Map(),storage={getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
+ const f=fixture(t,async p=>{
+  if(p.method==='wallet_getCapabilities')return {'0x7a69':{atomic:{status:'supported'}}};
+  if(p.method==='wallet_sendCalls'){assert.equal(batchId,null);batchId=p.params[0].id;assert.equal(p.params[0].atomicRequired,true);assert.equal(p.params[0].calls.length,4);return {id:batchId};}
+  if(p.method==='wallet_getCallsStatus'){if(confirmed)throw Error('Wallet no longer stores this batch');return {id:batchId,chainId:'0x7a69',status:100,atomic:false,receipts:[]};}
+  if(p.method==='eth_getTransactionReceipt')return {status:'0x1'};
+  throw Error('Unexpected wallet call '+p.method);
+ },async(path,options)=>{
+  if(path.startsWith('/v1/thot/workspace?scope=buyer&ids='))return {orders:confirmed?[101,102].map(i=>({id:hash(i),buyer:owner,receipt:{status:1}})):[]};
+  const id=options.body.listing_id==='a'?101:102,amount='1000000000000000000';
+  return {id:hash(id),wallet:owner,seller:other,buyer_total:amount,transactions:[{to:token,data:approve(amount),value:'0x0',chainId:'0x7a69'},{to:market,data:'0xdeadbeef'+String(id).padStart(64,'0'),value:'0x0',chainId:'0x7a69'}]};
+ },{recoveryStorage:storage});
+ f.state.thot.account={balance:'10000000000000000000'};Object.assign(f.state.thot.capabilities,{mode:'thot-anvil',token,market,confirmations:1});
+ f.state.thot.listings=['a','b'].map(id=>({id,title:'Synthetic '+id,seller:other,price_atoms:'1000000000000000000',license:'Synthetic licence'}));
+ const act=(op,id='')=>f.ui.action('thot-'+op,{dataset:{id},disabled:false});
+ await act('cart-toggle','a');await act('cart-toggle','b');await act('cart-review');
+ assert.match(f.dialogs.at(-1)[3],/Confirm entire cart · 2 THOT/);
+ await act('cart-pay');assert.equal(f.requests.filter(r=>r.method==='wallet_sendCalls').length,1);assert.equal(f.requests.filter(r=>r.method==='eth_sendTransaction').length,0);
+ assert.match(f.ui.offersHTML(),/Check checkout/);
+ const recovered=createThotUI({state:f.state,api:async path=>{assert(path.startsWith('/v1/thot/workspace?scope=buyer&ids='));return {orders:[101,102].map(i=>({id:hash(i),buyer:owner,receipt:{status:1}}))};},openDialog:(...args)=>f.dialogs.push(args),dialog:{close(){}},refresh:async()=>{},escape:String,json:JSON.stringify,toast:()=>{},recoveryStorage:storage});
+ await recovered.action('thot-cart-open',{dataset:{},disabled:false});assert.equal(f.dialogs.at(-1)[0],'Check your checkout');
+ confirmed=true;await recovered.action('thot-cart-check',{dataset:{},disabled:false});assert.match(recovered.offersHTML(),/Cart \(0\)/);assert.equal(f.dialogs.at(-1)[0],'Checkout complete');
+ assert.equal(f.requests.filter(r=>r.method==='wallet_sendCalls').length,1);
+});
+
+test('repeated atomic pay clicks while wallet connection is pending cannot submit twice',async t=>{
+ const token='0x0000000000000000000000000000000000000003',market='0x0000000000000000000000000000000000000004';
+ const pause=deferred(),started=deferred();let sends=0;
+ const store=new Map(),storage={getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v),removeItem:k=>store.delete(k)};
+ const f=fixture(t,async p=>{
+  if(p.method==='wallet_getCapabilities')return {'0x7a69':{atomic:{status:'supported'}}};
+  if(p.method==='wallet_sendCalls'){sends++;return {id:p.params[0].id};}
+  if(p.method==='wallet_getCallsStatus')return {id:p.params[0],chainId:'0x7a69',status:100};
+  throw Error('Unexpected '+p.method);
+ },async(path,options)=>({id:hash(101),buyer_total:'1',transactions:[{to:token,data:'0x095ea7b3'+market.slice(2).padStart(64,'0')+'1'.padStart(64,'0'),value:'0x0',chainId:'0x7a69'},{to:market,data:'0xdeadbeef',value:'0x0',chainId:'0x7a69'}]}),{recoveryStorage:storage});
+ f.state.thot.account={balance:'10'};Object.assign(f.state.thot.capabilities,{token,market});f.state.thot.listings=[{id:'a',title:'A',seller:other,license:'Test'}];
+ const act=op=>f.ui.action('thot-'+op,{dataset:{id:'a'},disabled:false});await act('cart-toggle');await act('cart-review');
+ const original=window.ethereum.request;let accounts=0;window.ethereum.request=async p=>{if(p.method==='eth_requestAccounts'&&++accounts===1){started.resolve();await pause.promise;}return original(p);};
+ const first=act('cart-pay');await started.promise;await act('cart-pay');pause.resolve();await first;
+ assert.equal(sends,1);
+});
+
+test('repeated cart reviews during wallet connection prepare each item only once',async t=>{
+ const f=cartFixture(t);await f.select();const pause=deferred(),started=deferred(),original=window.ethereum.request;
+ window.ethereum.request=async p=>{if(p.method==='eth_requestAccounts'){started.resolve();await pause.promise;}return original(p);};
+ const first=f.act('cart-review');await started.promise;
+ await assert.rejects(f.act('cart-review'),/Wait for the current wallet request/);
+ pause.resolve();await first;
+ assert.equal(f.calls.filter(c=>c.path==='/v1/thot/offers/prepare').length,2);
 });

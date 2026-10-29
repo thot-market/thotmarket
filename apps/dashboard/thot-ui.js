@@ -1,6 +1,7 @@
 import {researchFilesHTML,shareOnXHTML} from './library-ui.js';
 import {renderLiveStaking,parseStakingAmount} from './staking-ui.js';
 import {feePolicyCopy} from './fee-policy-ui.js';
+import {atomicCartSupported,atomicCartCalls,atomicCartRequestId,atomicCartConfirmation} from './atomic-cart.js';
 export const isClosedUnpaidPurchase=order=>order?.receipt?.status===0&&['blocked','complete'].includes(order.job_status)&&order.last_error==='AUTHORIZATION_UNAVAILABLE';
 // Reconciliation is read-only: adopting a hash never submits the next wallet action.
 export async function verifyWalletReplacement({request,expected,from,hash,originalHash,originalNonce,chainId,confirmations=1,token,current=()=>{}}){
@@ -383,20 +384,29 @@ ${tradeEvidenceOptions(listingMetadata)}
    <details><summary>Purchase receipt</summary><p class="mono">${escape(o.id)}</p></details></article>`;
  }
  function cartKey(){return 'thot.cart.v1:'+recoveryKey();}
+ const atomicKey=()=> 'thot.atomic-cart.v1:'+recoveryKey();
+ function savedAtomicCart(){
+  try{const value=JSON.parse(recoveryStorage?.getItem(atomicKey())??'null');return value?.key===recoveryKey()&&/^0x[0-9a-f]{64}$/i.test(value.id)&&Array.isArray(value.items)?value:null;}catch{return null;}
+ }
+ function saveAtomicCart(value){try{if(value)recoveryStorage?.setItem(atomicKey(),JSON.stringify(value));else recoveryStorage?.removeItem(atomicKey());}catch{}}
+ function showAtomicCart(record,note='Your wallet may already have submitted this checkout. Check the same batch; this button never sends payment again.'){
+  openDialog('Check your checkout',`${record.items.length} items · one atomic wallet request`,`<p role="status">${escape(note)}</p><p>All items succeed together or none are bought. Keep this page or return later to check the same batch.</p><details><summary>Wallet batch ID</summary><code>${escape(record.id)}</code></details>`,button('cart-check','Check confirmation','',false,true));
+ }
  function cartIds(){
   const key=cartKey();if(cartMemory.has(key))return cartMemory.get(key);
   let ids=[];try{const raw=JSON.parse(recoveryStorage?.getItem(key)??'[]');if(Array.isArray(raw))ids=[...new Set(raw.filter(x=>typeof x==='string'&&x.length>0&&x.length<=160))].slice(0,20);}catch{}
   cartMemory.set(key,ids);return ids;
  }
  function saveCart(ids){cartMemory.set(cartKey(),ids);try{recoveryStorage?.setItem(cartKey(),JSON.stringify(ids));}catch{}cartQuote=null;}
- function cartBarHTML(){return `<div class="market-cart-bar" data-market-cart><span><strong>${cartIds().length}</strong> selected</span>${button('cart-open','Cart ('+cartIds().length+')','',!cartIds().length,false)}</div>`;}
+ function cartBarHTML(){const pending=savedAtomicCart();return `<div class="market-cart-bar" data-market-cart><span><strong>${cartIds().length}</strong> selected</span>${button('cart-open',pending?'Check checkout':'Cart ('+cartIds().length+')','',!pending&&!cartIds().length,false)}</div>`;}
  function updateCart(){
   const bar=globalThis.document?.querySelector('[data-market-cart]');if(bar)bar.outerHTML=cartBarHTML();
   for(const el of globalThis.document?.querySelectorAll?.('[data-action="thot-cart-toggle"]')??[]){const selected=cartIds().includes(el.dataset.id);el.textContent=selected?'✓ Added':'Add to cart';el.setAttribute('aria-pressed',String(selected));}
  }
  function showCart(){
+  const submitted=savedAtomicCart();if(submitted){showAtomicCart(submitted);return;}
   const ids=cartIds(),listings=state.thot?.listings??[];
-  openDialog('Your cart','Pay with your wallet',`<div class="cart-items">${ids.map(id=>{const l=listings.find(l=>l.id===id);return `<div class="cart-item"><div><strong>${escape(l?.title??'Listing unavailable')}</strong><small>${l?escape(fmt(l.price_atoms)):'Remove this item to continue'}</small></div>${button('cart-remove','Remove',id)}</div>`;}).join('')||'<p>Your cart is empty.</p>'}</div><p>Review the exact total once, then confirm the wallet requests in sequence. Each item is a separate purchase; if one stops, earlier purchases remain yours.</p>`,'<p id="cart-checkout-status" role="status" aria-live="polite"></p>'+button('cart-review','Review checkout','',!ids.length,true));
+  openDialog('Your cart','Pay with your wallet',`<div class="cart-items">${ids.map(id=>{const l=listings.find(l=>l.id===id);return `<div class="cart-item"><div><strong>${escape(l?.title??'Listing unavailable')}</strong><small>${l?escape(fmt(l.price_atoms)):'Remove this item to continue'}</small></div>${button('cart-remove','Remove',id)}</div>`;}).join('')||'<p>Your cart is empty.</p>'}</div><p>Review the exact total and see the checkout options supported by your wallet.</p>`,'<p id="cart-checkout-status" role="status" aria-live="polite"></p>'+button('cart-review','Review checkout','',!ids.length,true));
  }
  function listingCard(l,{browseOnly=false,workspace=state.thot}={}){
   const w=workspace,canBuy=!browseOnly&&w.wallet&&!sameWallet(l.seller,w.wallet);
@@ -612,6 +622,7 @@ ${tradeEvidenceOptions(listingMetadata)}
   if(op==='cart-open'){showCart();return true;}
   if(op==='cart-review'){
    if(inFlight)throw Error('Wait for the current wallet request.');
+   const submitted=savedAtomicCart();if(submitted){showAtomicCart(submitted);return true;}
    const saved=savedRecovery(recoveryKey());if(saved&&attempted(saved)){review('Continue your purchase',saved);return true;}
    if(purchasesPaused())throw Error(pauseNotice());
    const ids=[...cartIds()];if(!ids.length)throw Error('Add an item first.');
@@ -619,22 +630,56 @@ ${tradeEvidenceOptions(listingMetadata)}
    const status=globalThis.document?.querySelector('#cart-checkout-status');if(status)status.setAttribute('role','status');
    const originalLabel=element.textContent;
    try{
-    for(const listingId of ids){const l=state.thot.listings.find(l=>l.id===listingId);if(!l||sameWallet(l.seller,state.thot.wallet))throw Error('A selected listing is unavailable. Refresh and remove it from the cart.');element.textContent=`Preparing ${items.length+1} of ${ids.length}…`;if(status)status.textContent=element.textContent;
-     const key=recoveryKey()+':'+listingId;let attempt=cartPrepareKeys.get(key);if(!attempt||Date.now()-attempt.at>60000){attempt={at:Date.now(),id:crypto.randomUUID()};cartPrepareKeys.set(key,attempt);}
-     const prepared=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:listingId},idempotencyKey:attempt.id});current();if(BigInt(prepared.buyer_total)<=0n)throw Error('Invalid checkout quote.');items.push({listingId,title:l.title,license:l.license,prepared});}
+    const buyer=await connected(),atomic=await atomicCartSupported(p=>provider().request(p),buyer,capabilities().chain_id);current();
+    for(let start=0;start<ids.length;start+=4){const group=ids.slice(start,start+4);element.textContent=`Preparing ${Math.min(start+4,ids.length)} of ${ids.length}…`;if(status)status.textContent=element.textContent;
+     const prepared=await Promise.allSettled(group.map(async listingId=>{const l=state.thot.listings.find(l=>l.id===listingId);if(!l||sameWallet(l.seller,state.thot.wallet))throw Error('A selected listing is unavailable. Refresh and remove it from the cart.');
+      const key=recoveryKey()+':'+listingId;let attempt=cartPrepareKeys.get(key);if(!attempt||Date.now()-attempt.at>60000){attempt={at:Date.now(),id:crypto.randomUUID()};cartPrepareKeys.set(key,attempt);}
+      const quote=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:listingId},idempotencyKey:attempt.id});current();if(BigInt(quote.buyer_total)<=0n)throw Error('Invalid checkout quote.');return {listingId,title:l.title,license:l.license,prepared:quote};}));current();
+     const failure=prepared.find(result=>result.status==='rejected');if(failure)throw failure.reason;
+     items.push(...prepared.map(result=>result.value));}
     const total=items.reduce((n,i)=>n+BigInt(i.prepared.buyer_total),0n);if(state.thot.account?.balance==null||total>BigInt(state.thot.account.balance))throw Error('Your THOT balance does not cover the cart total.');
-    cartQuote={items,current,key:recoveryKey()};cartPrepareKeys.clear();
-    openDialog('Review checkout',`${items.length} items · paid from your wallet`,items.map(i=>`<div class="cart-item"><div><strong>${escape(i.title)}</strong><details><summary>Licence</summary><p>${escape(i.license)}</p></details></div><strong>${escape(exactAmount(i.prepared.buyer_total))}</strong></div>`).join('')+`<div class="checkout-summary"><div><small>Total payment</small><strong>${escape(exactAmount(total))}</strong></div></div><p>Network gas is additional. Confirm each wallet request. Purchases run in order and stop on a rejection or error; completed items are not charged again.</p>`,button('cart-pay','Pay '+escape(exactAmount(total)),'',false,true));
+    if(atomic)atomicCartCalls(items,{token:capabilities().token,market:capabilities().market,chainId:capabilities().chain_id});
+    cartQuote={items,current,key:recoveryKey(),atomic,buyer};cartPrepareKeys.clear();
+    openDialog('Review checkout',`${items.length} items · ${atomic?'one wallet batch request':'separate wallet confirmations'}`,items.map(i=>`<div class="cart-item"><div><strong>${escape(i.title)}</strong><details><summary>Licence</summary><p>${escape(i.license)}</p></details></div><strong>${escape(exactAmount(i.prepared.buyer_total))}</strong></div>`).join('')+`<div class="checkout-summary"><div><small>Total payment</small><strong>${escape(exactAmount(total))}</strong></div></div><p>${atomic?'One atomic wallet request sets the exact THOT limit, buys every item, and clears that limit. If any item fails, none is bought. Your wallet may request an account upgrade first.':'This wallet does not support atomic checkout on this network. Paying separately asks you to confirm each item; you can cancel here and use another wallet.'} Network gas is additional.</p>`,button('cart-pay',atomic?'Confirm entire cart · '+escape(exactAmount(total)):'Pay items separately · '+escape(exactAmount(total)),'',false,true));
    }finally{inFlight=false;element.disabled=false;element.textContent=originalLabel;}return true;
   }
   if(op==='cart-pay'){
-   if(inFlight)return true;const quote=cartQuote;if(!quote)throw Error('Review the cart total again.');quote.current();if(quote.key!==recoveryKey())throw Error('Your account changed. Review checkout again.');
+   if(inFlight)return true;const submitted=savedAtomicCart();if(submitted){showAtomicCart(submitted);return true;}const quote=cartQuote;if(!quote)throw Error('Review the cart total again.');quote.current();if(quote.key!==recoveryKey())throw Error('Your account changed. Review checkout again.');
    const saved=savedRecovery(recoveryKey());if(saved&&attempted(saved)){review('Continue your purchase',saved);return true;}
+   if(quote.atomic){
+    inFlight=true;let record;
+    try{
+     const from=await connected();quote.current();if(!sameWallet(from,quote.buyer))throw Error('The checkout wallet changed. Review the cart again.');
+     if(savedAtomicCart()){showAtomicCart(savedAtomicCart());return true;}
+     const {chainId,calls}=atomicCartCalls(quote.items,{token:capabilities().token,market:capabilities().market,chainId:capabilities().chain_id});
+     record={key:quote.key,id:atomicCartRequestId(),wallet:from,chainId:capabilities().chain_id,items:quote.items.map(i=>({listingId:i.listingId,offerId:i.prepared.id}))};
+     cartQuote=null;saveAtomicCart(record);showAtomicCart(record,'Open your wallet to approve the entire cart once.');
+     const response=await provider().request({method:'wallet_sendCalls',params:[{version:'2.0.0',id:record.id,from,chainId,atomicRequired:true,calls}]});
+     if(response?.id?.toLowerCase()!==record.id.toLowerCase())throw Error('The wallet returned a different batch ID. Check wallet activity; do not submit again.');
+    }catch(error){if(record&&Number(error?.code)===4001&&quote.key===recoveryKey()){saveAtomicCart(null);showCart();throw Error('You cancelled the cart in your wallet. No purchase was sent.');}if(record&&quote.key===recoveryKey())showAtomicCart(record);throw error;}
+    finally{inFlight=false;}
+    quote.current();await action('thot-cart-check',{dataset:{},disabled:false});return true;
+   }
    cartRunning=true;cartQuote=null;let completed=0;
    try{
     for(const item of quote.items){quote.current();if(dialog.open===false)throw Error('Checkout paused. Continue from your cart.');if(!cartIds().includes(item.listingId))throw Error('Cart changed. Review checkout again.');review(`Checkout ${completed+1} of ${quote.items.length}`,{...item.prepared,purchase:true,cartListingId:item.listingId},`<h3>${escape(item.title)}</h3>`+purchaseReviewHTML(item.prepared,false));await action('thot-send',{dataset:{},disabled:false});quote.current();if(pending)throw Error('Check the current payment before continuing.');completed++;}
     await refresh();if(quote.key!==recoveryKey())throw Error('Account changed. Check purchases in the original account.');openDialog('Checkout complete',`${completed} items paid`, '<p>Your purchases are saved. Open Purchases to follow delivery and read your data.</p>','<button class="button" data-action="thot-cart-done">View purchases</button>');
    }finally{cartRunning=false;updateCart();}return true;
+  }
+  if(op==='cart-check'){
+   const record=savedAtomicCart();if(!record)throw Error('No submitted cart to check.');
+   const from=await connected();if(!sameWallet(from,record.wallet))throw Error('Connect the original checkout wallet.');
+   const workspace=await api('/v1/thot/workspace?scope=buyer&ids='+record.items.map(item=>item.offerId).join(','));current();
+   const purchased=record.items.filter(item=>workspace.orders?.some(order=>sameWallet(order.buyer,record.wallet)&&order.id?.toLowerCase()===item.offerId.toLowerCase()&&order.receipt?.status>=1));
+   if(purchased.length!==record.items.length){
+    if(purchased.length){showAtomicCart(record,'Some purchases are visible, but the entire cart is not verified yet. Check again; this will not send payment twice.');return true;}
+    const result=await atomicCartConfirmation(p=>provider().request(p),record,Number(capabilities().confirmations??1));current();
+    if(result.state==='pending'){showAtomicCart(record,'Checkout is pending. Check again shortly; this will not resubmit payment.');return true;}
+    if(result.state==='failed'){saveAtomicCart(null);showCart();throw Error('The atomic checkout failed. No item was purchased; network gas may have been spent. Review fresh quotes before trying again.');}
+    showAtomicCart(record,'The wallet confirmed the batch, but the market has not verified every purchase yet. Check again; payment will not be sent twice.');return true;
+   }
+   saveAtomicCart(null);saveCart(cartIds().filter(id=>!record.items.some(item=>item.listingId===id)));updateCart();
+   await refresh();openDialog('Checkout complete',`${record.items.length} items bought together`,'<p>All purchases are saved. Open Purchases to follow delivery and read your data.</p>','<button class="button" data-action="thot-cart-done">View purchases</button>');return true;
   }
   if(op==='treasury-view'){
    if(!['library','buy','budgets','governance'].includes(id))return true;

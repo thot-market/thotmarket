@@ -425,8 +425,9 @@ export function createHttpServer(app:Application,options:{log?:(event:Document)=
       }
       else if(route==='/v1/thot/workspace'&&req.method==='GET'){
         const scope=url.searchParams.get('scope')??'full';
-        ensure(url.searchParams.size<=(url.searchParams.has('scope')?1:0)&&(scope==='buyer'||scope==='full'),'INVALID_WORKSPACE_QUERY');
-        result=await app.thot.workspace(actor,{scope});
+        const ids=url.searchParams.get('ids');
+        ensure(url.searchParams.size<=(url.searchParams.has('scope')?1:0)+(url.searchParams.has('ids')?1:0)&&(scope==='buyer'||scope==='full')&&(!url.searchParams.has('ids')||scope==='buyer'&&typeof ids==='string'&&/^0x[0-9a-f]{64}(?:,0x[0-9a-f]{64}){0,19}$/i.test(ids)),'INVALID_WORKSPACE_QUERY');
+        result=await app.thot.workspace(actor,{scope,...(ids?{offerIds:ids.split(',')}:{} )});
         const timing=workspaceTimings.get(result as object);if(timing)res.setHeader('Server-Timing',Object.entries(timing).map(([name,ms])=>`${name};dur=${ms.toFixed(0)}`).join(', '));
       }
       else if(route==='/v1/thot/analytics'&&req.method==='GET')result=await app.thotAnalytics.workspace(actor,Object.fromEntries(url.searchParams));
