@@ -135,7 +135,7 @@ test('critical THOT reads and delivery sends fail closed after local runtime/cha
         assert(maxActive <= orderFanoutLimit * orderReadMethods.length, 'RPC fanout stays bounded by sixteen orders and their seven required fields');
         assert.equal(active, 0); assert.equal(activeAccountReads, 0); assert.equal(activeOrderReads.size, 0);
         assert.deepEqual([...observedOrderReads.keys()].sort(), [...ids].sort());
-        for (const [orderId, methods] of observedOrderReads) assert.deepEqual(methods.sort(), [...orderReadMethods].sort(), `${orderId} reads each required order field exactly once`);
+        for (const [orderId, methods] of observedOrderReads) assert.deepEqual(methods.sort(), orderId === input.id ? [...orderReadMethods].sort() : ['offers'], `${orderId} reads funded fields only when funded`);
         assert.deepEqual([...tags], ['0x' + target.toString(16)]);
         assert.equal(view.account.balance, before.toString()); assert.equal(view.block.number, target);
         assert.deepEqual(view.offers.map(o => o.id), ids);

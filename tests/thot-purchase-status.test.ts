@@ -31,6 +31,14 @@ test('workspace pause uses the same confirmed block as account and offers in eve
  }
 });
 
+test('unfunded cart reviews read only the authoritative offer struct',async()=>{
+ const id='0x'+'3'.repeat(64),zero='0x'+'0'.repeat(40),block={number:42,hash:'0x'+'4'.repeat(64),timestamp:1234};
+ let reads=0;
+ const chain={config:{percentageFees:true},disputeWindowSeconds:43200,market:{offers:async(_id:string,at:any)=>{assert.equal(at.blockTag,42);reads++;return {status:0,buyer:zero,seller:zero,licenseHash:id,evidenceHash:id,reviewHash:id,deliveryHash:id};},quoteDigest:async()=>{throw Error('UNNECESSARY_RPC');},paymentFor:async()=>{throw Error('UNNECESSARY_RPC');},disputeCases:async()=>{throw Error('UNNECESSARY_RPC');},tariffAtFunding:async()=>{throw Error('UNNECESSARY_RPC');}}};
+ const receipt=await (ThotChain.prototype as any).offerAt.call(chain,id,block);
+ assert.equal(receipt.status,0);assert.equal(receipt.block,block);assert.equal(reads,1);
+});
+
 test('buyer workspace defers estimates and staking but retains guarded account, receipts and isolation',async t=>{
  const block={number:42,hash:'0x'+'a'.repeat(64),timestamp:1234},wallet='0x'+'1'.repeat(40),other='0x'+'2'.repeat(40);
  const records=[

@@ -311,8 +311,12 @@ export class ThotChain {
  }
  private async offerAt(id:string,block:ThotSnapshot,reviewer?:string){
   const at={blockTag:block.number};
-  const [o,quoteDigest,payment,c,reviewerVote,reviewerDecisionHash,tariff]=await Promise.all([
-   this.market.offers(id,at),this.market.quoteDigest(id,at),this.market.paymentFor(id,at),this.market.disputeCases(id,at),
+  const o=await this.market.offers(id,at);
+  // Most cart reviews have never been funded. The offer struct is authoritative
+  // for that state; six more contract reads per draft only load the public RPC.
+  if(Number(o.status)===0)return {id,buyer:getAddress(o.buyer),seller:getAddress(o.seller),gross:'0',seller_gross:'0',buyer_surcharge:'0',buyer_total:'0',buyer_surcharge_bps:0,buyer_pricing_hash:'0x'+'00'.repeat(32),economics:{policy:this.config.percentageFees?'percentage/1':'quoted-cost/1',fee_bps:null,direct_cost:'0',allocated_overhead:'0',policy_hash:'0x'+'00'.repeat(32),service_fee:'0',net_contribution:'0'},seller_amount:'0',referral_amount:'0',referrer:ZeroAddress,license_hash:String(o.licenseHash),evidence_hash:String(o.evidenceHash),review_hash:String(o.reviewHash),delivery_hash:String(o.deliveryHash),issued_at:0,accepted_at:0,delivered_at:0,dispute_seconds:this.disputeWindowSeconds!,finalized_at:0,seller_bps:0,referral_bps:0,treasury:false,independent:false,status:0,quote_digest:'0x'+'00'.repeat(32),dispute:null,block};
+  const [quoteDigest,payment,c,reviewerVote,reviewerDecisionHash,tariff]=await Promise.all([
+   this.market.quoteDigest(id,at),this.market.paymentFor(id,at),this.market.disputeCases(id,at),
    reviewer?this.market.disputeVotes(id,reviewer,at):0n,reviewer?this.market.disputeDecisionHashes(id,reviewer,at):'0x'+'00'.repeat(32),this.market.tariffAtFunding(id,at),
   ]);
   const dispute=Number(c.openedAt)>0?{reason_hash:String(c.reasonHash),response_hash:String(c.responseHash),opened_at:Number(c.openedAt),vote_starts_at:Number(c.voteStartsAt),vote_ends_at:Number(c.voteEndsAt),uphold_votes:Number(c.upholdVotes),buyer_votes:Number(c.buyerVotes),outcome:Number(c.outcome),reviewer_vote:Number(reviewerVote),reviewer_decision_hash:String(reviewerDecisionHash)}:null;

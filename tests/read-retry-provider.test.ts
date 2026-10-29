@@ -17,10 +17,14 @@ test('slow read batches are hedged once; fast reads and writes are sent once', a
   t.after(() => provider.destroy());
   const read = {jsonrpc: '2.0' as const, id: 1, method: 'eth_blockNumber', params: []};
 
-  delays = [1500, 10]; let started = Date.now();
+  delays = [HEDGE_AFTER_MS+300, 10]; let started = Date.now();
   assert.deepEqual(await provider._send(read), [{id: 1, result: 'answer after 10'}]);
-  assert.ok(Date.now() - started < 1000, 'the hedged copy answers before the slow backend');
+  assert.ok(Date.now() - started < HEDGE_AFTER_MS+200, 'the hedged copy answers before the slow backend');
   assert.equal(sent.length, 2);
+
+  sent.length = 0; delays = [HEDGE_AFTER_MS+100];
+  await provider._send(Array.from({length:5},(_,id)=>({...read,id})));
+  assert.equal(sent.length,1,'large read batches are not duplicated');
 
   sent.length = 0; delays = [20]; started = Date.now();
   await provider._send(read); await new Promise(resolve => setTimeout(resolve, HEDGE_AFTER_MS + 50));
