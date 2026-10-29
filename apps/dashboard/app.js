@@ -15,7 +15,7 @@ import { createAgentCaptureUI } from './agent-capture-ui.js';
 import { createRobinhoodSetupUI } from './robinhood-setup-ui.js';
 import { createDevicePairingUI } from './device-pairing-ui.js';
 import { copySetupCommand } from './setup-ui.js';
-const state = { token: null, actor: null, role: 'user', view: 'vault', traces: [], candidates: [], earnings: { entitlements: [], settlements: [], burn_allocations: [] }, mandates: [], contributorPortfolio: {items:[],robinhood:{status:'not_linked'}}, contributorLoaded: false, loaded: false, catalogue: null, catalogueError: false, workspaceError: false, generation: 0, inferenceCapabilities: {enabled:false}, inferenceRequests: [] };
+const state = { token: null, actor: null, role: 'user', view: 'vault', traces: [], candidates: [], earnings: { entitlements: [], settlements: [], burn_allocations: [] }, mandates: [], contributorPortfolio: {items:[],robinhood:{status:'not_linked'}}, contributorLoaded: false, loaded: false, catalogue: null, catalogueError: false, workspaceError: false, fullWorkspaceLoading: false, generation: 0, inferenceCapabilities: {enabled:false}, inferenceRequests: [] };
 const main = document.querySelector('#main');
 bindStakingPreview(main);
 const dialog = document.querySelector('#detail-dialog');
@@ -73,9 +73,17 @@ function navigateView(view,{fromHistory=false}={}){
   if(dialog.open)dialog.close();
   const menu=document.querySelector('.journey-menu');if(menu)menu.open=false;
   state.view=view;purchasesAttempts=0;scrolledMarketFragment=null;
+  if(!needsFullWorkspace())state.fullWorkspaceLoading=false;
   if(!fromHistory)writeViewRoute(view);
   rememberView();
-  if(state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){state.loaded=false;loading();if(!fullRefreshCount)void safely(refresh);return true;}
+  if(state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){
+    // Keep navigation responsive while the slower, detail-only chain snapshot
+    // loads.  The previous behavior cleared the whole app, which made a tab
+    // switch indistinguishable from a broken page.
+    state.fullWorkspaceLoading=true;render();
+    if(!fullRefreshCount)void safely(async()=>{try{await refresh({full:true});}finally{if(state.view===view){state.fullWorkspaceLoading=false;render();}}});
+    return true;
+  }
   if(state.role==='user'&&(!state.contributorLoaded||view==='market'&&!state.contributorDetailsLoaded)&&(view==='vault'||(view==='market'&&marketFragment()==='#thot-contribute'))){
     if(view==='vault')renderContributorLoading();else loading();
     void safely(loadContributorRecords);return true;
@@ -389,7 +397,7 @@ async function session(role) {
   robinhoodSetupUI.authLost();
   devicePairingUI.authLost();
   contributorUI.reset();
-  resetCatalogue();resetContributorRecords();state.traces=[];state.candidates=[];state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.generation++; state.loaded = false; state.token = null; state.actor = null; state.thot=null; state.thotSampling=null; state.money=null; state.canExplore=false;state.traceExplorer=null; state.role = role;state.environmentOverview=null;
+  resetCatalogue();resetContributorRecords();state.traces=[];state.candidates=[];state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.generation++; state.loaded = false; state.fullWorkspaceLoading=false; state.token = null; state.actor = null; state.thot=null; state.thotSampling=null; state.money=null; state.canExplore=false;state.traceExplorer=null; state.role = role;state.environmentOverview=null;
   activePreview = null; if (dialog.open) dialog.close();document.querySelector('#dialog-content').innerHTML='';thotUI.clearPrivateReview?.(); loading();
   document.querySelector('#role').value = role;
   const result = await api('/v1/dev/session', { method: 'POST', body: { role } });
@@ -431,7 +439,12 @@ function renderContributorLoading(){
   if(state.libraryLoaded&&state.contributorError)main.insertAdjacentHTML('beforeend','<p role="status">Some connection details could not load. <button class="text-button" data-action="retry-library">Retry</button></p>');
   return true;
 }
-const needsFullWorkspace=()=>!['vault','market'].includes(state.view)||marketFragment()==='#thot-contribute';
+// The buyer snapshot contains the balance, recent receipts and listing
+// metadata needed by the normal workspace.  Do not turn ordinary navigation
+// into a full chain read: it makes Earnings and Purchases look broken while
+// the RPC is slow.  Only the views that expose token positions, governance or
+// seller configuration need the additional full-workspace fields.
+const needsFullWorkspace=()=>['thot','operator','explorer'].includes(state.view)||marketFragment()==='#thot-contribute';
 async function loadCatalogue(){
   if(state.loaded||!state.actor||signingOut||!['user','buyer_admin','buyer_member','operator_security'].includes(state.role))return;
   const generation=state.generation;if(catalogueRequest?.generation===generation)return catalogueRequest.promise;
@@ -677,8 +690,13 @@ function renderView() {
   for(const view of ['referrals','leaderboard']){const nav=document.querySelector(`[data-view=${view}].nav-item`);if(nav)nav.hidden=!isThotMode(state.thot?.capabilities.mode);}
   scheduleEarningsRefresh();
   const explorerNav=document.querySelector('#trace-explorer-nav');if(explorerNav){explorerNav.hidden=!(state.canExplore||state.role==='operator_security');explorerNav.classList.toggle('active',state.view==='explorer');}
-  if(state.view==='explorer'){main.innerHTML=(state.canExplore||state.role==='operator_security')?traceExplorerUI.sectionHTML():empty('Trace explorer unavailable.','This account does not have permission to view operational inventory.');return;}
   document.querySelectorAll('[data-view].nav-item').forEach(button => {const active=button.dataset.view===state.view;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
+  if(state.fullWorkspaceLoading&&state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){
+    const copy={thot:['THOT','Wallet & THOT','Loading your token positions without interrupting the rest of the workspace.'],operator:['TREASURY','Treasury','Loading treasury permissions and campaign state.'],explorer:['TRACE EXPLORER','Trace explorer','Loading the authorized inventory view.']}[state.view]??['WORKSPACE','Loading workspace','Loading the requested account details.'];
+    main.innerHTML=heading(...copy)+`<section class="panel" role="status"><span class="spinner" aria-hidden="true"></span><p>Loading this section. Marketplace, earnings and purchases remain available.</p></section>`;
+    return;
+  }
+  if(state.view==='explorer'){main.innerHTML=(state.canExplore||state.role==='operator_security')?traceExplorerUI.sectionHTML():empty('Trace explorer unavailable.','This account does not have permission to view operational inventory.');return;}
   if(['referrals','leaderboard'].includes(state.view)&&isThotMode(state.thot?.capabilities.mode)){
     main.innerHTML=state.view==='referrals'?heading('YOUR NETWORK','Referrals','Follow attributed contributors, finalized referral credits and payments.')+analyticsUI.referralsHTML():analyticsUI.leaderboardHTML();
     void safely(()=>analyticsUI.ready());return;
@@ -926,7 +944,7 @@ function invalidatePrivateState(){
   historySyncUI.authLost();
   robinhoodSetupUI.authLost();
   devicePairingUI.authLost();
-  contributorUI.reset();resetContributorRecords();state.generation++;state.token=null;state.actor=null;state.canExplore=false;state.traceExplorer=null;state.loaded=false;state.traces=[];state.candidates=[];state.mandates=[];state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.inferenceRequests=[];
+  contributorUI.reset();resetContributorRecords();state.generation++;state.token=null;state.actor=null;state.canExplore=false;state.traceExplorer=null;state.loaded=false;state.fullWorkspaceLoading=false;state.traces=[];state.candidates=[];state.mandates=[];state.contributorPortfolio={items:[],robinhood:{status:'not_linked'}};state.earnings={entitlements:[],settlements:[],burn_allocations:[]};state.inferenceRequests=[];
   if(dialog.open)dialog.close();
   document.querySelector('#dialog-content').innerHTML='';thotUI.clearPrivateReview?.();
 }
@@ -1087,7 +1105,7 @@ async function acceptSession({actor,permissions}){
   state.thot=null;state.thotSampling=null;state.thotDisputes=null;state.money=null;resetCatalogue();
   stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;earningsUpdatedAt=null;earningsRefreshError=false;
   signingOut=false;
-  contributorUI.reset();resetContributorRecords();state.generation++;state.loaded=false;state.token=null;state.actor=actor;state.role=actor.role;state.canExplore=permissions?.trace_explorer===true;
+  contributorUI.reset();resetContributorRecords();state.generation++;state.loaded=false;state.fullWorkspaceLoading=false;state.token=null;state.actor=actor;state.role=actor.role;state.canExplore=permissions?.trace_explorer===true;
   state.view=restoredView();
   const accountMenu=document.querySelector('.journey-menu');if(accountMenu)accountMenu.hidden=false;
   if(dialog.open)dialog.close();

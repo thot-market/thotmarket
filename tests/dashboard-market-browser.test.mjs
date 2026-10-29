@@ -23,13 +23,13 @@ before(async()=>{
 });
 after(async()=>{await browser?.close();});
 
-async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vault',role='user',listingCount=1,checkout=false,atomic=false,failPrepareAt=0}={}){
+async function fixture(t,{holdCatalog=false,holdFullWorkspace=false,failWorkspace=false,remembered='vault',role='user',listingCount=1,checkout=false,atomic=false,failPrepareAt=0}={}){
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage();
  const listings=Array.from({length:listingCount},(_,i)=>({...listing,id:i?'synthetic-listing-'+i:listing.id,title:i?'Synthetic research comparison '+(i+1):listing.title}));
  page.setDefaultTimeout(15000);
- const chain=deferred(),catalog=deferred(),requests=[],errors=[];
+ const chain=deferred(),fullWorkspace=deferred(),catalog=deferred(),requests=[],errors=[];
  let revoked=false,failed=failWorkspace,prepareCalls=0;
- t.after(async()=>{chain.resolve();catalog.resolve();await context.close();});
+ t.after(async()=>{chain.resolve();fullWorkspace.resolve();catalog.resolve();await context.close();});
  page.on('pageerror',e=>errors.push(e.message));
  t.after(()=>assert.deepEqual(errors,[]));
  await context.addInitScript(({wallet,remembered,checkout,atomic})=>{
@@ -60,7 +60,7 @@ async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vaul
      if(path==='/v1/auth/session')return send(revoked?{}:{actor:{id:'synthetic-reader',role},wallet_address:wallet,chain_id:31337},revoked?401:200);
      if(path==='/v1/auth/session/revoke'){revoked=true;return send({});}
      if(path==='/v1/thot/catalog'){if(holdCatalog)await catalog.promise;return send({...catalogue,capabilities:atomic?{...cap,token,market}:cap,listings});}
-     if(path==='/v1/thot/workspace'){await chain.promise;return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,capabilities:atomic?{...cap,token,market}:cap,account:{...workspace.account,balance:'100000000000000000000'},listings,orders:atomic&&u.searchParams.has('ids')?u.searchParams.get('ids').split(',').map(id=>({id,buyer:wallet,receipt:{status:1}})):[],workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
+     if(path==='/v1/thot/workspace'){await (holdFullWorkspace&&u.searchParams.get('scope')!=='buyer'?fullWorkspace.promise:chain.promise);return send(failed?{error:'THOT_UNAVAILABLE'}:{...workspace,capabilities:atomic?{...cap,token,market}:cap,account:{...workspace.account,balance:'100000000000000000000'},listings,orders:atomic&&u.searchParams.has('ids')?u.searchParams.get('ids').split(',').map(id=>({id,buyer:wallet,receipt:{status:1}})):[],workspace_scope:u.searchParams.get('scope')??'full'},failed?400:200);}
      if(path==='/v1/thot/offers/prepare'&&checkout){if(++prepareCalls===failPrepareAt)return send({error:'THOT_DAILY_PREPARATION_LIMIT'},429);const i=listings.findIndex(l=>l.id===route.request().postDataJSON().listing_id);assert(i>=0);const amount='1000000000000000000';return send({id:'0x'+String(i+10).padStart(64,'0'),wallet,seller,buyer_total:amount,transactions:atomic?[{to:token,data:'0x095ea7b3'+market.slice(2).padStart(64,'0')+BigInt(amount).toString(16).padStart(64,'0'),value:'0x0',chainId:'0x7a69'},{to:market,data:'0xdeadbeef'+String(i+10).padStart(64,'0'),value:'0x0',chainId:'0x7a69'}]:[{to:seller,data:'0xaaaa',value:'0x0',chainId:'0x7a69'}]});}
      if(path==='/v1/money/capabilities')return send({mode:'mock'});
      if(path==='/v1/earnings')return send({entitlements:[],settlements:[],burn_allocations:[]});
@@ -78,7 +78,7 @@ async function fixture(t,{holdCatalog=false,failWorkspace=false,remembered='vaul
      return route.fulfill({status:200,contentType:relative.endsWith('.js')?'text/javascript':relative.endsWith('.css')?'text/css':relative.endsWith('.png')?'image/png':relative.endsWith('.woff2')?'font/woff2':'text/html',body});
    }catch{return route.fulfill({status:404,body:''});}
  });
- return {page,requests,release:()=>chain.resolve(),releaseCatalog:()=>catalog.resolve(),recover:()=>{failed=false;},
+ return {page,requests,release:()=>{chain.resolve();fullWorkspace.resolve();},releaseBuyer:()=>chain.resolve(),releaseFullWorkspace:()=>fullWorkspace.resolve(),releaseCatalog:()=>catalog.resolve(),recover:()=>{failed=false;},
    async open(hash='#thot-available'){await page.goto(origin+'/app'+hash,{waitUntil:'domcontentloaded'});},
    async snapshot(name){if(process.env.THOT_MARKET_SCREENSHOTS){await mkdir(process.env.THOT_MARKET_SCREENSHOTS,{recursive:true});await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:process.env.THOT_MARKET_SCREENSHOTS+'/'+name+'.png'});}},
  };
@@ -213,6 +213,34 @@ test('primary navigation has one active destination and Purchases opens purchase
  await f.page.locator('.journey-nav [data-view="market"]').click();
  await f.page.locator('.thot-listing').first().waitFor();
  assert.equal(await f.page.locator('.journey-nav .active').count(),1);
+});
+
+test('Earnings and Purchases use the ready buyer snapshot instead of blocking on a second full workspace read',async t=>{
+ const f=await fixture(t);await f.open();f.release();await ready(f.page).waitFor();
+ const workspaceRequests=()=>f.requests.filter(r=>r.path==='/v1/thot/workspace');
+ assert.equal(workspaceRequests().filter(r=>r.search==='?scope=buyer').length,1);
+ assert.equal(workspaceRequests().filter(r=>r.search==='').length,0);
+ await f.page.getByRole('button',{name:'Purchases',exact:true}).click();
+ await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();
+ assert.equal(workspaceRequests().filter(r=>r.search==='').length,0,'Purchases needs only buyer receipt data');
+ await f.page.getByRole('button',{name:'Earnings',exact:true}).click();
+ await f.page.getByRole('heading',{name:'What your work has earned.',exact:true}).waitFor();
+ assert.equal(workspaceRequests().filter(r=>r.search==='').length,0,'Earnings needs only the buyer account snapshot');
+ assert.equal(await f.page.locator('.journey-nav [aria-current="page"]').count(),1);
+});
+
+test('Manage THOT keeps its destination and navigation visible while the detail-only workspace read loads',async t=>{
+ const f=await fixture(t,{holdFullWorkspace:true});await f.open();f.releaseBuyer();await ready(f.page).waitFor();
+ await f.page.locator('.journey-menu>summary').click();await f.page.getByRole('button',{name:'Manage THOT',exact:true}).click();
+ await f.page.getByRole('heading',{name:'Wallet & THOT',exact:true}).waitFor();
+ assert.match(await f.page.locator('main').innerText(),/Loading this section/);
+ assert.equal(await f.page.locator('.journey-menu').isVisible(),true);
+ await f.snapshot('manage-thot-loading');
+ await f.page.waitForTimeout(25);
+ assert.equal(f.requests.filter(r=>r.path==='/v1/thot/workspace'&&r.search==='').length,1);
+ f.releaseFullWorkspace();await f.page.getByText('A price you can check.',{exact:true}).waitFor();
+ assert.doesNotMatch(await f.page.locator('main').innerText(),/Reading your records/);
+ await f.snapshot('manage-thot-ready');
 });
 
  test('buyer purchase route survives reload before workspace capabilities arrive',async t=>{
