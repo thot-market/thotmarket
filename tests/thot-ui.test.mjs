@@ -1154,7 +1154,7 @@ test('full twenty-item cart prepares every quote without sending a payment',asyn
 test('retrying a partially failed cart reuses preparation keys for already prepared items',async t=>{
  let fail=true;const seen=[];
  const f=fixture(t,async()=>{throw Error('must not sign');},async(path,options)=>{
-  seen.push({id:options.body.listing_id,key:options.idempotencyKey});
+  seen.push({id:options.body.listing_id,key:options.idempotencyKey,timeoutMs:options.timeoutMs,timeoutMessage:options.timeoutMessage});
   if(options.body.listing_id==='b'&&fail){fail=false;throw Error('Temporarily unavailable');}
   return {buyer_total:'1000000000000000000',transactions:[transactions[1]]};
  });
@@ -1164,6 +1164,7 @@ test('retrying a partially failed cart reuses preparation keys for already prepa
  for(const id of ['a','b'])await f.ui.action('thot-cart-toggle',{dataset:{id},disabled:false});
  await assert.rejects(act('cart-review'),/Temporarily unavailable/);await act('cart-review');
  assert.equal(seen[0].key,seen[2].key);assert.equal(seen[1].key,seen[3].key);assert.notEqual(seen[0].key,seen[1].key);
+ assert.equal(seen[0].timeoutMs,60000);assert.match(seen[0].timeoutMessage,/retry the same cart/i);
  assert.equal(f.requests.filter(r=>['eth_sendTransaction','wallet_sendCalls'].includes(r.method)).length,0);assert.match(f.dialogs.at(-1)[3],/Pay items separately · 2 THOT/);
 });
 

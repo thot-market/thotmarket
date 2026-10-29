@@ -67,6 +67,7 @@ export function createThotUI({state,api,openDialog,dialog,refresh,escape,json,to
  let pending=null,listingMetadata=null,listingScope=null,listingEnrollment=null,listingDirty=false,samplingPreview=null,samplingScope=null,reserveSelection=null,inFlight=false;
  let treasuryView='library',cartQuote=null,cartRunning=false;
  const cartPrepareKeys=new Map();
+ const CART_QUOTE_TIMEOUT_MS=60000,CART_PREPARE_KEY_TTL_MS=5*60_000;
  const cartMemory=new Map();
  const recoveries=new Map();
  const fmt=value=>{const n=BigInt(value??0),base=10n**18n,frac=String(n%base).padStart(18,'0').slice(0,4).replace(/0+$/,'');return `${(n/base).toLocaleString()}${frac?'.'+frac:''} THOT`;}; // 100 THOT, 99.2 THOT: no padded zeros
@@ -633,8 +634,8 @@ ${tradeEvidenceOptions(listingMetadata)}
     const buyer=await connected(),atomic=await atomicCartSupported(p=>provider().request(p),buyer,capabilities().chain_id);current();
     for(let start=0;start<ids.length;start+=4){const group=ids.slice(start,start+4);element.textContent=`Preparing ${Math.min(start+4,ids.length)} of ${ids.length}…`;if(status)status.textContent=element.textContent;
      const prepared=await Promise.allSettled(group.map(async listingId=>{const l=state.thot.listings.find(l=>l.id===listingId);if(!l||sameWallet(l.seller,state.thot.wallet))throw Error('A selected listing is unavailable. Refresh and remove it from the cart.');
-      const key=recoveryKey()+':'+listingId;let attempt=cartPrepareKeys.get(key);if(!attempt||Date.now()-attempt.at>60000){attempt={at:Date.now(),id:crypto.randomUUID()};cartPrepareKeys.set(key,attempt);}
-      const quote=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:listingId},idempotencyKey:attempt.id});current();if(BigInt(quote.buyer_total)<=0n)throw Error('Invalid checkout quote.');return {listingId,title:l.title,license:l.license,prepared:quote};}));current();
+      const key=recoveryKey()+':'+listingId;let attempt=cartPrepareKeys.get(key);if(!attempt||Date.now()-attempt.at>CART_PREPARE_KEY_TTL_MS){attempt={at:Date.now(),id:crypto.randomUUID()};cartPrepareKeys.set(key,attempt);}
+      const quote=await api('/v1/thot/offers/prepare',{method:'POST',body:{listing_id:listingId},idempotencyKey:attempt.id,timeoutMs:CART_QUOTE_TIMEOUT_MS,timeoutMessage:'Preparing this cart is taking longer than expected. Select Review checkout to retry the same cart. No payment was sent.'});current();if(BigInt(quote.buyer_total)<=0n)throw Error('Invalid checkout quote.');return {listingId,title:l.title,license:l.license,prepared:quote};}));current();
      const failure=prepared.find(result=>result.status==='rejected');if(failure)throw failure.reason;
      items.push(...prepared.map(result=>result.value));}
     const total=items.reduce((n,i)=>n+BigInt(i.prepared.buyer_total),0n);if(state.thot.account?.balance==null||total>BigInt(state.thot.account.balance))throw Error('Your THOT balance does not cover the cart total.');

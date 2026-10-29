@@ -317,7 +317,9 @@ async function api(path, options = {}) {
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (method !== 'GET') { if (options.idempotencyKey) pendingKeys.set(operation, options.idempotencyKey); else if (!pendingKeys.has(operation)) pendingKeys.set(operation, crypto.randomUUID()); headers['Idempotency-Key'] = pendingKeys.get(operation); }
   const verification = /^\/v1\/contributor\/robinhood\/link-jobs\/[^/]+\/complete$/.test(path);
-  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), verification ? 125000 : 25000);
+  const requestedTimeout=options.timeoutMs;
+  const timeoutMs=Number.isSafeInteger(requestedTimeout)&&requestedTimeout>=1000&&requestedTimeout<=125000?requestedTimeout:(verification ? 125000 : 25000);
+  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), timeoutMs);
   let readRetried=false;
   const request=async()=>{
     let response=await fetch(path,{method,headers,body,credentials:'same-origin',redirect:'error',signal:controller.signal,cache:'no-store'});
@@ -361,7 +363,10 @@ async function api(path, options = {}) {
     pendingKeys.delete(operation); return data;
   } catch (error) {
     checkScope();
-    if (error.name === 'AbortError') throw new Error('The server took too long to respond. Refresh before retrying; the same pending request will keep its idempotency key.');
+    if (error.name === 'AbortError') {
+      const message=typeof options.timeoutMessage==='string'&&options.timeoutMessage.length<=240?options.timeoutMessage:'The server took too long to respond. Try again; the same pending request will keep its idempotency key.';
+      throw Object.assign(new Error(message),{code:'REQUEST_TIMEOUT'});
+    }
     if (error instanceof TypeError) throw new Error('Cannot reach the thot market service. Start the server and refresh this page.');
     throw error;
   } finally { clearTimeout(timeout);if(options.sensitive)pendingKeys.delete(operation); }
