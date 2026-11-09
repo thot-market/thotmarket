@@ -92,3 +92,18 @@ test('a secondary JSON-RPC error does not override a healthy primary response',a
   const result=await main._send({jsonrpc:'2.0',id:1,method:'eth_call',params:[]});
   assert.equal(result[0]?.result,'primary');
 });
+
+test('a failed socket on a read is retried once; a write is never resent',async t=>{
+  const original=JsonRpcProvider.prototype._send;let calls=0,failures=1;
+  JsonRpcProvider.prototype._send=async function(payload:JsonRpcPayload|JsonRpcPayload[]){
+    calls++;if(failures-->0)throw Object.assign(Error('server response 599 BAD_RESPONSE'),{code:'SERVER_ERROR',response:{statusCode:599}});
+    const first=Array.isArray(payload)?payload[0]!:payload;return [{id:first.id,result:'0x1'}];
+  };
+  t.after(()=>{JsonRpcProvider.prototype._send=original;});
+  const provider=new ReadRetryProvider('http://127.0.0.1:9',4663,{staticNetwork:true});t.after(()=>provider.destroy());
+  assert.deepEqual(await provider._send({jsonrpc:'2.0',id:1,method:'eth_blockNumber',params:[]}),[{id:1,result:'0x1'}]);
+  assert.equal(calls,2);
+  calls=0;failures=1;
+  await assert.rejects(provider._send({jsonrpc:'2.0',id:2,method:'eth_sendRawTransaction',params:['0x']}),/599/);
+  assert.equal(calls,1);
+});

@@ -662,3 +662,6 @@ body{background:var(--paper)}
 #detail-dialog:has(.cart-item) #dialog-content{display:flex;flex-direction:column;max-height:calc(90dvh - 2px)}
 #detail-dialog:has(.cart-item) .dialog-head,#detail-dialog:has(.cart-item) .dialog-footer{flex-shrink:0}
 #detail-dialog:has(.cart-item) .dialog-body{overflow:auto;min-height:0}
+.thot-listing[hidden]{display:none}
+.market-search{display:flex;flex-direction:column;gap:6px;margin:0 0 14px;max-width:420px}
+.market-search label{font-size:12px;color:var(--muted)}

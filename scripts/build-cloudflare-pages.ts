@@ -17,8 +17,6 @@ export const publicFiles: Readonly<Record<string, string>> = Object.freeze({
   'tutorial.html': 'tutorial.html',
   'whitepaper.html': 'whitepaper.html',
   'mechanism.html': 'mechanism.html',
-  'stats.html': 'stats.html',
-  'stats.js': 'stats.js',
   'bill.html': 'bill.html',
   'bill.js': 'bill.js',
   'affiliates.html': 'affiliates.html',

@@ -75,48 +75,4 @@ if (typeof document !== 'undefined') {
   }));
   recalculate();
 
-  function emptyProof(text) {
-    document.querySelectorAll('[data-proof-rows]').forEach(container => {
-      const p = document.createElement('p'); p.className = 'proof-empty'; p.textContent = text; container.replaceChildren(p);
-    });
-  }
-  // An environment with no published snapshot leaves the receipts panel neutral:
-  // no badge and no status line that could read as an outage, one plain sentence instead.
-  function neutralProof() {
-    document.querySelectorAll('[data-proof-environment],[data-proof-time]').forEach(node => { node.hidden = true; });
-    emptyProof('Public purchase receipts appear here when this environment publishes a verified snapshot.');
-  }
-  // Live, verifiable sales from the app's public stats; the board stays hidden until there is one.
-  async function loadProof() {
-    try {
-      const link = document.querySelector('[data-workspace-link]');
-      const api = link && /^https?:/.test(link.getAttribute('href')) ? new URL(link.href).origin : location.origin;
-      const response = await fetch(api + '/v1/public/stats', { credentials: 'omit', signal: AbortSignal.timeout(5000) });
-      if (!response.ok) throw Error('UNAVAILABLE');
-      const stats = await response.json(), sales = Array.isArray(stats.recent) ? stats.recent.slice(0, 5) : [];
-      if (!stats.independent?.purchases || !sales.length) throw Error('NO_SALES');
-      const thot = atoms => { const n = BigInt(atoms ?? 0), base = 10n ** 18n, frac = String(n % base).padStart(18, '0').slice(0, 2).replace(/0+$/, ''); return (n / base).toLocaleString('en-US') + (frac ? '.' + frac : ''); };
-      set('[data-proof-environment]', stats.chain?.name ?? 'On chain');
-      set('[data-proof-time]', `${stats.independent.purchases.toLocaleString('en-US')} purchases · ${thot(stats.independent.paid_to_sellers_atoms)} THOT paid to sellers`);
-      set('[data-proof-heading]', 'Recent sales');
-      set('[data-proof-caption]', stats.basis);
-      document.querySelectorAll('[data-proof-rows]').forEach(container => {
-        container.replaceChildren(...sales.map(item => {
-          const row = document.createElement('div'); row.className = 'proof-row';
-          const detail = document.createElement('div'), title = document.createElement('strong'), label = document.createElement('small');
-          title.textContent = item.title; label.textContent = item.treasury ? `Treasury purchase · ${item.status}` : `Purchase · ${item.status}`;
-          detail.append(title, label);
-          const amount = document.createElement('div'); amount.className = 'proof-amount';
-          const gross = document.createElement('strong'); gross.textContent = thot(item.gross_atoms) + ' THOT'; amount.append(gross);
-          row.append(detail, amount);
-          if (item.transaction_url) { const a = document.createElement('a'); a.href = item.transaction_url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = 'View transaction'; row.append(a); }
-          return row;
-        }));
-      });
-    } catch {
-      neutralProof();
-      document.querySelector('[data-market-proof]')?.setAttribute('hidden', '');
-    }
-  }
-  void loadProof();
 }

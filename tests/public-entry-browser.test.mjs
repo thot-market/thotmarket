@@ -21,7 +21,7 @@ try{
    await page.goBack();assert.equal(page.url(),origin+path);await page.locator('.site-footer [data-workspace-link]').click();await page.waitForURL('https://app.thot.market/app');
    checks.push({kind:'browser click/reload/back/footer with synthetic destination',viewport:[width,height],route:path,links:links.length,target:href,result:'pass'});
   }
-  await page.goto(origin+'/');await page.waitForFunction(()=>document.querySelector('[data-proof-environment]')?.hidden===true);assert.doesNotMatch(await page.locator('[data-market-proof]').innerText(),/unavailable/i,'proof panel must not read as an outage');
+  await page.goto(origin+'/');
   await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement?.className),'skip-link');await page.keyboard.press('Enter');await page.waitForFunction(()=>location.hash==='#main');await page.waitForTimeout(700);
   const skip=await page.evaluate(()=>({scrollY,mainTop:document.querySelector('#main').getBoundingClientRect().top}));assert(skip.scrollY>0);assert(skip.mainTop>=0&&skip.mainTop<100);
   await page.goto(origin+'/');await page.getByRole('link',{name:/See how it works/}).click();await page.waitForFunction(()=>location.hash==='#how-it-works');await page.waitForFunction(()=>{const y=document.querySelector('#how-it-works').getBoundingClientRect().top;return y>=0&&y<100;});

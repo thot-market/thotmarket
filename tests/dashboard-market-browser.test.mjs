@@ -305,3 +305,28 @@ test('twenty-item checkout exposes a preparation failure by its button and retri
  await f.page.getByRole('button',{name:'Pay items separately · 20 THOT',exact:true}).waitFor();assert.equal(await f.page.evaluate(()=>window.fixturePayments.length),0);
  await f.snapshot('cart-twenty-review');
 });
+
+const navTabs=page=>page.locator('.journey-nav .nav-item:not([hidden])').allInnerTexts();
+test('a valid session opens the workspace at once and keeps one stable set of tabs',async t=>{
+ const f=await fixture(t,{role:'operator_security'});await f.open('#receipts');
+ await f.page.waitForFunction(()=>document.querySelector('.journey-nav [data-view=operator]')?.hidden===false);
+ assert.deepEqual(await navTabs(f.page),['Marketplace','Purchases','Treasury'],'tabs this role cannot open are not offered');
+ assert.equal(await f.page.locator('.journey-nav [aria-current=page]').getAttribute('data-view'),'receipts');
+ assert.doesNotMatch(await f.page.locator('main').innerText(),/Get paid/,'a valid session never shows the signed-out page while loading');
+ f.release();await f.page.getByRole('heading',{name:'Purchases',exact:true}).waitFor();
+ assert.deepEqual(await navTabs(f.page),['Marketplace','Purchases','Treasury']);
+ await f.page.reload({waitUntil:'domcontentloaded'});await f.page.waitForFunction(()=>document.querySelector('.journey-nav [data-view=operator]')?.hidden===false);
+ assert.deepEqual(await navTabs(f.page),['Marketplace','Purchases','Treasury']);
+});
+
+test('the selected tab follows the click before its data is ready, and search narrows the listings',async t=>{
+ const f=await fixture(t,{listingCount:3});await f.open();await card(f.page).waitFor();
+ await f.page.locator('.journey-nav [data-view=earnings]').click();
+ assert.equal(await f.page.locator('.journey-nav [aria-current=page]').getAttribute('data-view'),'earnings');
+ await f.page.locator('.journey-nav [data-view=market]').click();await card(f.page).waitFor();
+ await f.page.locator('#market-search').fill('comparison 3');
+ assert.equal(await f.page.locator('.thot-listing:visible').count(),1);
+ f.release();await ready(f.page).waitFor({state:'attached'});
+ assert.equal(await f.page.locator('.thot-listing:visible').count(),1,'the search survives the account data arriving');
+ assert.equal(await f.page.locator('#market-search').inputValue(),'comparison 3');
+});

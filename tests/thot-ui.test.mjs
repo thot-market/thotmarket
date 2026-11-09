@@ -564,13 +564,18 @@ test('governance distinguishes approvals, execution and queued application witho
  assert.match(html,/disabled aria-disabled="true"[^>]*data-action="thot-gov-execute"[^>]*data-id="0x0+82"/);
 });
 
+test('auto-generated and unattested listing titles read as names without losing the disclosure',()=>{
+ const {state,ui}=viewFixture();state.thot.listings[0].title='zai · glm-5.3';state.thot.listings[0].workflow='coding';
+ assert.match(ui.offersHTML(),/<h3>Coding session with glm-5\.3<\/h3>/);
+ state.thot.listings[0].title='UNATTESTED research: Visa margin gap';
+ const html=ui.offersHTML();assert.match(html,/<h3>Visa margin gap<\/h3>/);assert.match(html,/Unattested source/);
+});
+
 test('buyer navigation counts records while listing layout preserves escaping and paused-market actions',()=>{
  const {ui,state}=viewFixture();state.role='buyer_admin';
  state.thot.listings[0].title='<script>private listing</script>';
  state.thot.market_paused=true;
  const html=ui.offersHTML();
- assert.match(html,/href="#thot-available">Browse data <span>1<\/span>/);
- assert.match(html,/href="#thot-purchases">Your purchases <span>0<\/span>/);
  assert.match(html,/&lt;script&gt;private listing&lt;\/script&gt;/);
  assert.match(html,/data-action="thot-assay"/);assert.doesNotMatch(html,/data-action="thot-buy"|<script>|href="#thot-history"/);
  state.thot.market_paused=false;
@@ -730,10 +735,10 @@ test('refunded purchase cards show frozen discounted buyer payment and never adv
  const {state,ui}=viewFixture();state.role='buyer_member';state.thot.account.claimable='0';
  const order={id:hash(81),title:'Discounted purchase',seller:other,buyer:owner,gross:atoms(100),buyer_total:'99800000000000000000',receipt:{status:6,buyer_total:'99700000000000000000',seller_amount:'99200000000000000000',referral_amount:atoms(1),economics:{service_fee:atoms(1)}}};
  state.thot.orders=[order];
- let html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 99\.7 THOT/);assert.match(html,/Payout is not yet confirmed here/);assert.doesNotMatch(html,/Seller receives|99\.2000|99\.8000|full seller price|Refund paid to buyer wallet/);
- order.refund_transaction=hash(82);html=ui.offersHTML();assert.match(html,/Refund paid to buyer wallet/);assert.match(html,/Refund paid to the buyer wallet: 99\.7 THOT/);assert.doesNotMatch(html,/claimable|Payout is not yet confirmed|Seller receives|99\.2000/);
- order.receipt.dispute={outcome:2};html=ui.offersHTML();assert.match(html,/Refund paid to the buyer wallet: 49\.85 THOT/);assert.match(html,/remaining 49\.85 THOT was sent to the canonical dead sink/);assert.doesNotMatch(html,/Seller receives|claimable/);
- delete order.refund_transaction;html=ui.offersHTML();assert.match(html,/Refund allocated to the buyer: 49\.85 THOT/);assert.match(html,/Payout is not yet confirmed here/);
+ let html=ui.purchasesHTML();assert.match(html,/Refund allocated to the buyer: 99\.7 THOT/);assert.match(html,/Payout is not yet confirmed here/);assert.doesNotMatch(html,/Seller receives|99\.2000|99\.8000|full seller price|Refund paid to buyer wallet/);
+ order.refund_transaction=hash(82);html=ui.purchasesHTML();assert.match(html,/Refund paid to buyer wallet/);assert.match(html,/Refund paid to the buyer wallet: 99\.7 THOT/);assert.doesNotMatch(html,/claimable|Payout is not yet confirmed|Seller receives|99\.2000/);
+ order.receipt.dispute={outcome:2};html=ui.purchasesHTML();assert.match(html,/Refund paid to the buyer wallet: 49\.85 THOT/);assert.match(html,/remaining 49\.85 THOT was sent to the canonical dead sink/);assert.doesNotMatch(html,/Seller receives|claimable/);
+ delete order.refund_transaction;html=ui.purchasesHTML();assert.match(html,/Refund allocated to the buyer: 49\.85 THOT/);assert.match(html,/Payout is not yet confirmed here/);
 });
 
 test('replacement adoption persists across reload and never submits during verification',async t=>{
@@ -902,7 +907,7 @@ test('confirmation sends explicit empty params through a strict hosted-style wal
 test('wallet contributors see other sellers in the buying catalogue and their own listings separately',()=>{
  const {state,ui}=viewFixture();state.thot.listings.push({...state.thot.listings[0],id:'my-listing',seller:owner,title:'My listing'});
  const html=ui.offersHTML(),catalogue=html.slice(html.indexOf('aria-label="For sale"'),html.indexOf('id="thot-contribute"'));
- assert.match(html,/Browse data <span>1<\/span>/);assert.match(html,/Your purchases <span>0<\/span>/);assert.match(catalogue,/Listed research/);assert.doesNotMatch(catalogue,/My listing/);
+ assert.doesNotMatch(html,/thot-section-nav/);assert.match(catalogue,/Listed research/);assert.doesNotMatch(catalogue,/My listing/);
  assert(html.indexOf('aria-label="For sale"')<html.indexOf('data-action="thot-list-configure"'));assert.match(html,/My listing/);assert.match(html,/thot-unlist/);
 });
 test('purchased reader offers a fresh authorized JSON download including licence and receipt',async t=>{
@@ -928,7 +933,6 @@ test('only confirmed unavailable unfunded attempts are archived without zero set
  state.thot.orders.push({...base,id:'unknown',title:'Unknown payment',job_status:'awaiting_reconciliation',last_error:'AUTHORIZATION_UNAVAILABLE',receipt:{status:0}},{...base,id:'funded',title:'Funded purchase',job_status:'blocked',last_error:'AUTHORIZATION_UNAVAILABLE',receipt:{status:2}});
  const mixed=ui.purchasesHTML(),open=mixed.slice(0,mixed.indexOf('data-unpaid-attempts'));
  assert.match(open,/Unknown payment/);assert.match(open,/Funded purchase/);assert.match(open,/purchases-freshness/);assert.doesNotMatch(open,/Expired &lt;attempt&gt;|Closed attempt/);
- assert.match(ui.offersHTML(),/Your purchases <span>2<\/span>/);
 });
 
 for(const operation of ['buy','reserve-buy'])test(`${operation} review identifies the prepared seller with a full address before signing`,async t=>{

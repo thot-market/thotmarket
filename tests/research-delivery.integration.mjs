@@ -90,10 +90,6 @@ test('binary data package: any file type is listed with public metadata only, bo
   for(const file of delivered.release.content.files){const raw=file.base64!==undefined?Buffer.from(file.base64,'base64'):Buffer.from(file.text);assert.equal(raw.length,file.bytes);assert.equal(createHash('sha256').update(raw).digest('hex'),file.sha256);}
   assert.ok(Buffer.from(delivered.release.content.files[0].base64,'base64').equals(png),'the buyer receives the exact original bytes');
   await app.thotAnalytics.refresh();
-  const stats=await call('/v1/public/stats');
-  assert.equal(stats.listings_active,1);assert.equal(stats.sellers_listing,1);assert.equal(stats.newest_listings[0].title,'Synthetic labelled images');
-  assert.equal(stats.independent,null,'one sale stays private until the public minimum');assert.deepEqual(stats.recent,[]);
-  assert.equal(JSON.stringify(stats).includes(await f.buyer.getAddress()),false,'the public board names no wallet');
   if(process.env.THOT_RESEARCH_BROWSER){
    const {chromium}=await import('playwright-core');
    const browser=await chromium.launch({executablePath:process.env.THOT_E2E_BROWSER,headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});

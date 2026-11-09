@@ -10,6 +10,12 @@ const resetCodes=new Set(['ECONNRESET','EPIPE','ECONNREFUSED','EHOSTUNREACH','EA
 // doubles provider load and can turn a busy account page into an RPC timeout.
 export const HEDGE_AFTER_MS=1200;
 export const FALLBACK_AFTER_MS=800;
+const RETRY_WITHIN_MS=3000;
+// ethers reports a failed socket as a synthetic HTTP 599 SERVER_ERROR, without the socket's code.
+function transportFailure(error:unknown){
+ const e=error as {code?:string;response?:{statusCode?:number}};
+ return !!e?.code&&(resetCodes.has(e.code)||e.code==='SERVER_ERROR'&&e.response?.statusCode===599);
+}
 
 /** Hedge slow read batches and retry one promptly failed read transport; never a transaction or an RPC error response. */
 export class ReadRetryProvider extends JsonRpcProvider {
@@ -49,11 +55,10 @@ export class ReadRetryProvider extends JsonRpcProvider {
  }
  override destroy(){this.fallback?.provider.destroy();super.destroy();}
  private async retrying(payload:JsonRpcPayload|JsonRpcPayload[]){
-  const started=Date.now();
+  const started=Date.now(),readOnly=(Array.isArray(payload)?payload:[payload]).every(p=>reads.has(p.method));
   try{return await super._send(payload);}
   catch(error){
-   const code=error instanceof Error?(error as Error&{code?:string}).code:undefined;
-   if(!code||!resetCodes.has(code)||Date.now()-started>1000||this.destroyed)throw error;
+   if(!readOnly||!transportFailure(error)||Date.now()-started>RETRY_WITHIN_MS||this.destroyed)throw error;
    await new Promise(resolve=>setTimeout(resolve,200));
    if(this.destroyed)throw error;
    return super._send(payload);

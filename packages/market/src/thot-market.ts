@@ -937,8 +937,9 @@ export class ThotMarketplace {
   ensure(account.dispute_reviewer,'GOVERNANCE_REVIEWER_REQUIRED',403);
   const records=await this.service.db.transaction(tx=>tx.list('thot_records'));
   const intents=records.filter(r=>r.kind==='intent'&&(!input.after_id||r.id>input.after_id)).sort((a,b)=>a.id.localeCompare(b.id)),page=intents.slice(0,25),items=[];
-  for(const intent of page){
-   const receipt=await chain.offer(intent.offer_id,wallet);
+  const receipts=await chain.offers(page.map(intent=>intent.offer_id),wallet);
+  for(const [index,intent] of page.entries()){
+   const receipt=receipts[index]!;
    const explanations=records.filter(r=>r.kind==='dispute_explanation'&&r.offer_id===intent.offer_id);
    const responses=records.filter(r=>r.kind==='dispute_response'&&r.offer_id===intent.offer_id);
    const decisions=records.filter(r=>r.kind==='dispute_decision'&&r.offer_id===intent.offer_id);

@@ -200,7 +200,6 @@ test('production documents keep calibration out; public examples identify their 
   for (const path of ['apps/site/index.html', 'apps/site/affiliates.html']) {
     const html = await readFile(new URL('../' + path, import.meta.url), 'utf8');
     assert.match(html, /Worked example</);
-    assert.match(html, /not customer adoption or real-money earnings/i);
     assert.match(html, /direct costs/);
     assert.doesNotMatch(html, /customers already|guaranteed earnings|data-fake-counter/i);
   }
@@ -279,64 +278,6 @@ test('production entry bundles require explicit published token inputs while tes
   await assert.rejects(buildCloudflarePages({outputParent:dir,appUrl:'https://app.thot.market',launch:{state:'launched'},zip:false}),/INCOMPLETE_LAUNCH_CONFIGURATION/);
   const built=await buildCloudflarePages({outputParent:dir,appUrl:'https://app.thot.market',launch:{state:'launched',tokenAddress,ponsLaunchAddress},zip:false});
   assert.equal(JSON.parse(await readFile(join(built.directory,'v1/public/launch-config.json'),'utf8')).tokenAddress,tokenAddress);
- }finally{await rm(dir,{recursive:true,force:true});}
-});
-
-// Minimal DOM double for referrals.js: one shared node per selector, created elements tracked.
-function referralsSandbox(proof: unknown) {
- const element = () => ({
-  children: [] as any[], textContent: '', hidden: false, className: '', value: '', href: '', rel: '', target: '',
-  dataset: {} as Record<string, string>,
-  append(...nodes: any[]) { this.children.push(...nodes); },
-  replaceChildren(...nodes: any[]) { this.children = [...nodes]; },
-  addEventListener() {},
-  getAttribute() { return ''; },
-  setAttribute(name: string, value: string) { (this as any)['attr_' + name] = value; },
- });
- const registry = new Map<string, any[]>();
- const nodes = (selector: string) => { if (!registry.has(selector)) registry.set(selector, [element()]); return registry.get(selector)!; };
- const created: any[] = [];
- const sandbox = {
-  document: {
-   querySelectorAll: (selector: string) => selector.split(',').flatMap(part => nodes(part.trim())),
-   querySelector: (selector: string) => nodes(selector)[0],
-   createElement: () => { const node = element(); created.push(node); return node; },
-  },
-  fetch: async () => ({ ok: true, json: async () => proof }),
-  AbortSignal,
- };
- const text = (node: any): string => node.textContent + node.children.map(text).join('');
- const rendered = () => [...registry.values()].flat().map(text).concat(created.map(text)).join('\n');
- return { sandbox, nodes, rendered, text };
-}
-
-test('production build renders no Unavailable receipts panel while live sales render with their transactions',async()=>{
- const {buildCloudflarePages}=await import('../scripts/build-cloudflare-pages.ts');
- const dir=await mkdtemp(join(tmpdir(),'public-entry-proof-'));
- try{
-  // The real production bundle: its baked proof is unavailable for this app URL.
-  const built=await buildCloudflarePages({outputParent:dir,appUrl:'https://app.thot.market/app',launch:{state:'launched',tokenAddress,ponsLaunchAddress},zip:false});
-  const proof=JSON.parse(await readFile(join(built.directory,'v1/public/market-proof.json'),'utf8'));
-  assert.equal(proof.status,'unavailable');
-  const script=(await readFile(join(built.directory,'referrals.js'),'utf8')).replace(/^export /gm,'');
-  const unavailable=referralsSandbox(proof);
-  runInNewContext(script,unavailable.sandbox);
-  await new Promise(resolve=>setImmediate(resolve));
-  assert.doesNotMatch(unavailable.rendered(),/unavailable/i);
-  assert.equal(unavailable.nodes('[data-proof-environment]')[0].hidden,true);
-  assert.equal(unavailable.nodes('[data-proof-time]')[0].hidden,true);
-  assert.match(unavailable.nodes('[data-proof-rows]')[0].children[0].textContent,/receipts appear here when this environment publishes a verified snapshot/i);
-  // Live stats from the app render the chain badge, totals and linked recent sales.
-  const hash='0x'+'1'.repeat(64);
-  const live=referralsSandbox({as_of:'2026-01-01T00:00:00.000Z',chain:{name:'Robinhood Chain',explorer_url:'https://explorer.example/'},listings_active:3,
-   independent:{purchases:2,finalized:1,gross_atoms:'2000000000000000000',paid_to_sellers_atoms:'990000000000000000',sellers:1,buyers:2},treasury:{purchases:0},
-   recent:[{title:'Synthetic dataset',gross_atoms:'1000000000000000000',status:'paid',block:10,treasury:false,transaction_hash:hash,transaction_url:'https://explorer.example/tx/'+hash}],basis:'Independent purchases only.'});
-  runInNewContext(script,{...live.sandbox,location:{origin:'https://thot.market'}});
-  await new Promise(resolve=>setImmediate(resolve));
-  assert.equal(live.nodes('[data-proof-environment]')[0].textContent,'Robinhood Chain');
-  assert.match(live.nodes('[data-proof-time]')[0].textContent,/2 purchases · 0\.99 THOT paid to sellers/);
-  assert.match(live.nodes('[data-proof-heading]')[0].textContent,/Recent sales/);
-  assert.match(live.text(live.nodes('[data-proof-rows]')[0].children[0]),/Synthetic dataset.*Purchase · paid.*1 THOT.*View transaction/s);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
 

@@ -356,8 +356,7 @@ try {
   assert.equal(Number((await fixture.market.offers(refundOffer.id)).status), 6);
   assert.equal(await fixture.token.balanceOf(buyer.address), refundBalance);
   evidence.refund_offer_id = refundOffer.id; evidence.checks.push('Funded order undelivered during worker outage refunds original buyer in full after local-only 48-hour advance.');
-  await buyer.open('market');
-  await buyer.page.getByText(/Completed & refunded purchases/).click();
+  await buyer.open('receipts'); // Closed purchases live on Purchases, where this section starts open.
   await buyer.page.getByText('Refund paid to buyer wallet', {exact: true}).waitFor();
   const unpaidAttempts=buyer.page.locator('[data-unpaid-attempts]');
   assert.equal(await unpaidAttempts.count(),1,'Expired unfunded review is retained separately');

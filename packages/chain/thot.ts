@@ -314,6 +314,12 @@ export class ThotChain {
   if(reviewer!==undefined)address(reviewer);
   const block=await this.snapshot(),offer=await this.offerAt(id,block,reviewer);await this.assertSnapshot(block);return offer;
  }
+ /** One confirmed height for a page of offers, so a list costs one batched read rather than one round trip each. */
+ async offers(ids:string[],reviewer?:string){
+  for(const id of ids)ensure(/^0x[\da-f]{64}$/i.test(id),'INVALID_OFFER_ID');
+  if(reviewer!==undefined)address(reviewer);
+  const block=await this.snapshot(),offers=await Promise.all(ids.map(id=>this.offerAt(id,block,reviewer)));await this.assertSnapshot(block);return offers;
+ }
  private async offerAt(id:string,block:ThotSnapshot,reviewer?:string){
   const at={blockTag:block.number};
   const o=await this.market.offers(id,at);

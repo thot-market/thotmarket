@@ -44,10 +44,27 @@ const isThotMode=mode=>['thot-anvil','thot-testnet','thot-production'].includes(
 
 // Remember navigation only. Credentials and licensed content never enter browser storage.
 const rememberedViewKey='thot.workspace-view.v1';
+// The tab bar must not reshape as account data arrives. Until the first workspace
+// answers, the last known answer for this browser decides; the server still
+// enforces every permission.
+const navProfileKey='thot.nav-profile.v1';
+function readNavProfile(){try{const p=JSON.parse(window.localStorage?.getItem(navProfileKey)??'null');return p&&typeof p.role==='string'?p:null;}catch{return null;}}
+function writeNavProfile(profile){try{if(profile)window.localStorage?.setItem(navProfileKey,JSON.stringify(profile));else window.localStorage?.removeItem(navProfileKey);}catch{}}
+const treasuryAccess=()=>state.thot?Boolean(state.thot.reserve_buyer||state.thot.account?.dispute_reviewer):readNavProfile()?.actor===state.actor?.id&&readNavProfile()?.treasury===true;
+function navShows(view,role,treasury){
+  if(view==='operator')return role==='operator_security'||treasury;
+  if(view==='vault'||view==='earnings')return !role||role==='user';
+  return true;
+}
+function paintNav(view,role,treasury){
+  document.querySelectorAll('.journey-nav [data-view].nav-item').forEach(button=>{button.hidden=!navShows(button.dataset.view,role,treasury);});
+  document.querySelectorAll('[data-view].nav-item').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
+}
+const paintWorkspaceNav=()=>paintNav(state.view,state.role,treasuryAccess());
 function allowedView(view){
   return ['market','thot','referrals','leaderboard'].includes(view)||(view==='receipts'&&['user','buyer_admin','buyer_member','operator_security'].includes(state.role))||
     (state.role==='user'&&['vault','earnings','receipts'].includes(view))||
-    (view==='operator'&&(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer))||
+    (view==='operator'&&(state.role==='operator_security'||treasuryAccess()))||
     (state.canExplore&&view==='explorer');
 }
 function rememberView(){
@@ -75,7 +92,7 @@ function navigateView(view,{fromHistory=false}={}){
   state.view=view;purchasesAttempts=0;scrolledMarketFragment=null;
   if(!needsFullWorkspace())state.fullWorkspaceLoading=false;
   if(!fromHistory)writeViewRoute(view);
-  rememberView();
+  rememberView();paintWorkspaceNav();
   if(state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){
     // Keep navigation responsive while the slower, detail-only chain snapshot
     // loads.  The previous behavior cleared the whole app, which made a tab
@@ -118,7 +135,7 @@ function renderSignedOutView(view){
   signedOutViewState=allowedView(view)&&['market','referrals'].includes(view)?view:'vault';
   const buyer=signedOutViewState==='market';
   document.title=({market:'Marketplace',referrals:'Referrals',vault:'My data'})[signedOutViewState]+' · thot market';
-  document.querySelectorAll('[data-view].nav-item').forEach(button=>{const active=button.dataset.view===(buyer?'market':'vault');button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
+  paintNav(buyer?'market':'vault',null,false);
 }
 
 function restoredView(){
@@ -478,6 +495,14 @@ function renderCatalogue(){
   document.title='Marketplace · thot market';document.querySelectorAll('[data-view].nav-item').forEach(button=>button.classList.toggle('active',button.dataset.view==='market'));
   rememberView();scrollMarketFragment();return true;
 }
+// A slow dispute inbox only affects its own section of Treasury.
+async function loadDisputeInbox(generation){
+  const inbox=await api('/v1/thot/disputes');
+  if(generation!==state.generation)return;
+  state.thotDisputes=inbox;
+  const section=document.querySelector('[data-dispute-inbox]');
+  if(section)section.outerHTML=thotUI.disputesHTML();
+}
 async function refresh(options={}) {
   fullRefreshCount++;stopEarningsRefresh();stopPurchasesRefresh();purchasesAttempts=0;
   try { return await refreshWorkspace(options); }
@@ -497,7 +522,7 @@ async function refreshWorkspace({full=false}={}) {
   if(thotWorkspace?.workspace_scope==='buyer'&&needsFullWorkspace())thotWorkspace=await api('/v1/thot/workspace');
   let sampling=null,disputes=null;
   if((full||needsFullWorkspace())&&(role==='operator_security'||thotWorkspace?.reserve_buyer||thotWorkspace?.account?.dispute_reviewer)){const c=await api('/v1/thot/capabilities');if(isThotMode(c.mode))sampling=await api('/v1/thot/sampling');}
-  if((full||needsFullWorkspace())&&thotWorkspace?.account?.dispute_reviewer)disputes=await api('/v1/thot/disputes');
+  const loadDisputes=(full||needsFullWorkspace())&&thotWorkspace?.account?.dispute_reviewer;
   if(generation!==state.generation)return;
   state.money=moneyCapabilities;state.thot=thotWorkspace;state.thotSampling=sampling;state.thotDisputes=disputes;
   if (!state.loaded&&!renderCatalogue()&&!renderContributorLoading()) loading();
@@ -527,7 +552,7 @@ async function refreshWorkspace({full=false}={}) {
   // A view change can also happen during a later role-specific read, after the
   // first scope check. Resolve the requested full view before marking it ready.
   if(thotWorkspace?.workspace_scope==='buyer'&&needsFullWorkspace())return refreshWorkspace({full:true});
-  state.loaded = true;state.workspaceError=false; document.querySelector('#notice').hidden = true; render(); libraryUI.ready(); agentCaptureUI.authReady(); robinhoodSetupUI.authReady(); historySyncUI.authReady(); devicePairingUI.authReady();
+  state.loaded = true;state.workspaceError=false; document.querySelector('#notice').hidden = true; render(); if(loadDisputes)void safely(()=>loadDisputeInbox(generation)); libraryUI.ready(); agentCaptureUI.authReady(); robinhoodSetupUI.authReady(); historySyncUI.authReady(); devicePairingUI.authReady();
   }catch(error){if(generation===state.generation){state.workspaceError=true;renderCatalogue();}throw error;}
 }
 function heading(eyebrow, title, description, action = '') { return `<section class="page-heading"><div><p class="eyebrow">${escape(eyebrow)}</p><h1>${escape(title)}</h1><p>${escape(description)}</p></div>${action}</section>`; }
@@ -685,12 +710,12 @@ function renderView() {
   rememberView();schedulePurchasesRefresh();
   main.classList.toggle('thot-workspace',(isThotMode(state.thot?.capabilities.mode)&&['thot','market','earnings','vault','receipts'].includes(state.view))||(isThotMode(state.thotSampling?.capabilities.mode)&&state.view==='operator'));
   const operationsLink=document.querySelector('#operations-console-link');if(operationsLink)operationsLink.hidden=state.role!=='operator_security';
-  const treasuryNav=document.querySelector('[data-view=operator].nav-item');if(treasuryNav)treasuryNav.hidden=!(state.role==='operator_security'||state.thot?.reserve_buyer||state.thot?.account?.dispute_reviewer);
+  writeNavProfile({actor:state.actor.id,role:state.role,treasury:treasuryAccess()});
   document.title=({vault:'My data',market:'Marketplace',earnings:'Earnings',thot:'THOT',operator:'Treasury',receipts:'Purchases',explorer:'Trace explorer',referrals:'Referrals',leaderboard:'Market activity'}[state.view]??'Your workspace')+' · thot market';
   for(const view of ['referrals','leaderboard']){const nav=document.querySelector(`[data-view=${view}].nav-item`);if(nav)nav.hidden=!isThotMode(state.thot?.capabilities.mode);}
   scheduleEarningsRefresh();
   const explorerNav=document.querySelector('#trace-explorer-nav');if(explorerNav){explorerNav.hidden=!(state.canExplore||state.role==='operator_security');explorerNav.classList.toggle('active',state.view==='explorer');}
-  document.querySelectorAll('[data-view].nav-item').forEach(button => {const active=button.dataset.view===state.view;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute?.('aria-current');});
+  paintWorkspaceNav();
   if(state.fullWorkspaceLoading&&state.thot?.workspace_scope==='buyer'&&needsFullWorkspace()){
     const copy={thot:['THOT','Wallet & THOT','Loading your token positions without interrupting the rest of the workspace.'],operator:['TREASURY','Treasury','Loading treasury permissions and campaign state.'],explorer:['TRACE EXPLORER','Trace explorer','Loading the authorized inventory view.']}[state.view]??['WORKSPACE','Loading workspace','Loading the requested account details.'];
     main.innerHTML=heading(...copy)+`<section class="panel" role="status"><span class="spinner" aria-hidden="true"></span><p>Loading this section. Marketplace, earnings and purchases remain available.</p></section>`;
@@ -792,7 +817,7 @@ async function runAction(action, button) {
   if(await contributorUI.handle(action,button))return;
   if(await operationsUI.handle(action,button))return;
   if(action==='identity-sign-out'){
-    walletLoginAttempt++;signingOut=true;stopEarningsRefresh();stopPurchasesRefresh();forgetView();
+    walletLoginAttempt++;signingOut=true;stopEarningsRefresh();stopPurchasesRefresh();forgetView();writeNavProfile(null);
     try { await api('/v1/auth/session/revoke',{method:'POST',body:{}}); }
     finally {
       try { if(authMode==='wallet_siwe'){if(privyAuth)await privyAuth.signOut();else await walletAuth?.signOut();} }
@@ -1062,7 +1087,6 @@ function showIdentityLogin(message='Use a short-lived access token from your con
   signingOut=false;
   const operationsLink=document.querySelector('#operations-console-link');if(operationsLink)operationsLink.hidden=true;
   const explorerNav=document.querySelector('#trace-explorer-nav');if(explorerNav)explorerNav.hidden=true;
-  const treasuryNav=document.querySelector('[data-view=operator].nav-item');if(treasuryNav)treasuryNav.hidden=true;
   invalidatePrivateState();document.querySelector('#role').disabled=true;
   const menu=document.querySelector('.journey-menu');if(menu){menu.open=false;menu.hidden=true;}
   document.querySelector('.local-tools').hidden=true;
@@ -1112,6 +1136,8 @@ async function acceptSession({actor,permissions}){
   document.querySelector('#role').innerHTML=`<option>${escape(state.role.replaceAll('_',' '))}</option>`;
   document.querySelector('#role').disabled=true;document.querySelector('.local-tools').hidden=true;
   if(!document.querySelector('[data-action="identity-sign-out"]'))document.querySelector('#role').insertAdjacentHTML('afterend','<button class="button secondary small" data-action="identity-sign-out">Sign out</button>');
+  // A valid session never leaves the signed-out page on screen while data loads.
+  paintWorkspaceNav();loading();
   await safely(refresh);
 }
 async function startAuthentication(){
@@ -1128,7 +1154,7 @@ async function startAuthentication(){
   if(authMode==='development')return session('user');
   if(authMode==='wallet_siwe'){
     privyConfig=capability.privy??null;
-    walletAuth=createWalletAuth({window,fetch,chainId:capability.wallet.chain_id,rpcUrl:capability.wallet.rpc_url,onSession:async session=>{privyLoginPhase='';await acceptSession(session);},onIdentityChanging:({restoring}={})=>{if(restoring)showIdentityLogin('Checking your saved wallet session…');else if(privyConfig)showIdentityLogin('Continue in your wallet to open your workspace.');else{invalidatePrivateState();loading();}},onProgress:message=>setPrivyLoginPhase(message),onSignedOut:()=>{privyLoginPhase='';showIdentityLogin('Connect your wallet to continue.');},onError:error=>{privyLoginPhase='';privyLoginRetry=true;showIdentityLogin(error.message);},additionalProviders:async address=>privyConfig?(await loadPrivyAuth()).providers(address):[]});
+    walletAuth=createWalletAuth({window,fetch,chainId:capability.wallet.chain_id,rpcUrl:capability.wallet.rpc_url,onSession:async session=>{privyLoginPhase='';await acceptSession(session);},onIdentityChanging:({restoring}={})=>{const known=restoring?readNavProfile():null;if(known){paintNav(routeView()??initialView(known.role),known.role,known.treasury===true);loading();}else if(restoring)showIdentityLogin('Checking your saved wallet session…');else if(privyConfig)showIdentityLogin('Continue in your wallet to open your workspace.');else{invalidatePrivateState();loading();}},onProgress:message=>setPrivyLoginPhase(message),onSignedOut:()=>{privyLoginPhase='';writeNavProfile(null);showIdentityLogin('Connect your wallet to continue.');},onError:error=>{privyLoginPhase='';privyLoginRetry=true;showIdentityLogin(error.message);},additionalProviders:async address=>privyConfig?(await loadPrivyAuth()).providers(address):[]});
     showIdentityLogin('Connect your EVM wallet to continue.');
     await walletAuth.restore();return;
   }

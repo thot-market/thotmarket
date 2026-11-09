@@ -12,7 +12,7 @@ test('public pages retain the same navigation and header layout', {timeout:120_0
     for(const width of [1440,1024,768,390]) {
       const page=await browser.newPage({viewport:{width,height:900}});
       let baseline;
-      for(const route of ['/','/read','/stats','/bill','/affiliates','/mechanism','/tutorial','/whitepaper']) {
+      for(const route of ['/','/read','/bill','/affiliates','/mechanism','/tutorial','/whitepaper']) {
         await page.goto(origin+route);
         await page.evaluate(()=>document.fonts.ready);
         const state=await page.locator('.site-header').evaluate(header=>({
@@ -27,7 +27,7 @@ test('public pages retain the same navigation and header layout', {timeout:120_0
         if(!baseline)baseline=state;
         assert.deepEqual(state.links,baseline.links,`${width} ${route}: links and positions`);
         assert.equal(state.height,baseline.height,`${width} ${route}: height`);
-        assert.equal(state.current,['/read','/stats','/bill','/affiliates','/mechanism'].includes(route)?route:null);
+        assert.equal(state.current,['/read','/bill','/affiliates','/mechanism'].includes(route)?route:null);
         if(process.env.THOT_NAV_SCREENSHOTS&&['/','/read','/affiliates'].includes(route))await page.screenshot({path:`${process.env.THOT_NAV_SCREENSHOTS}/${width}-${route.slice(1)||'home'}.png`});
       }
       await page.close();
